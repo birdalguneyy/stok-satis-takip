@@ -333,8 +333,82 @@
   <div id="toast">✅ Bildirim</div>
 
   <main>
-    <!-- TAB 1: AI PACKAGING SCANNER & PRODUCT CREATION -->
-    <div id="tab-ai" class="tab-content active">
+    <!-- TAB 1: MOBILE POS SALES SCANNER (DEFAULT STARTUP TAB) -->
+    <div id="tab-pos" class="tab-content active">
+      <div class="card">
+        <h2>📱 Mobil Satış (POS)</h2>
+
+        <!-- HTML5 Live Camera Video Preview -->
+        <div id="pos-video-box" class="video-scanner-box">
+          <video id="pos-video" playsinline muted></video>
+          <div class="scan-line"></div>
+          <button class="btn btn-danger" style="margin-top: 8px; padding: 8px;" onclick="stopMobileBarcodeScanner()">Kamerayı Kapat</button>
+        </div>
+
+        <div style="display: flex; gap: 8px; margin-bottom: 14px;">
+          <button id="btn-open-camera" class="btn" style="flex: 1;" onclick="startMobileBarcodeScanner()">
+            📷 Canlı Kamerayı Aç
+          </button>
+          <button class="btn btn-secondary" style="flex: 1;" onclick="document.getElementById('pos-photo-file').click()">
+            📸 Fotoğraf Çek & Oku
+          </button>
+          <input type="file" id="pos-photo-file" accept="image/*" capture="environment" style="display:none" onchange="handlePOSPhotoUpload(this)">
+        </div>
+
+        <div class="form-group">
+          <label>Manuel Barkod / Ürün Adı Ara</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="pos-barcode-input" placeholder="Barkod veya isim yazıp Enter'a basın..." onkeypress="if(event.key==='Enter') handlePOSScan()">
+            <button class="btn" style="width: 80px;" onclick="handlePOSScan()">Ekle</button>
+          </div>
+        </div>
+
+        <!-- KATEGORİLİ ÜRÜN SEÇİCİ (BARKODSUZ SEÇİM) -->
+        <div class="form-group" style="margin-top: 10px;">
+          <label style="color:var(--accent); font-weight:700;">📦 Veya Barkodsuz Ürün Seçin (Kategoriye Göre)</label>
+          <select id="pos-product-picker" onchange="handleProductPickerSelect(this)" style="width:100%; padding:12px; background:#0F172A; border:1px solid var(--accent); color:var(--text); border-radius:12px; font-weight:600; cursor:pointer;">
+            <option value="">-- Ürün Listesinden Seçin --</option>
+          </select>
+        </div>
+
+        <div id="pos-cart-list" style="margin-top: 14px;">
+          <!-- Cart items render here -->
+        </div>
+
+        <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <div style="font-size: 0.8rem; color: var(--text-muted);">Toplam Tutar</div>
+            <div id="pos-total-amount" style="font-size: 1.4rem; font-weight: 800; color: var(--accent);">0.00 ₺</div>
+          </div>
+          <button class="btn" style="width: auto; padding: 12px 24px;" onclick="completePOSSale()">Satışı Tamamla</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: STOK KATALOĞU -->
+    <div id="tab-stock" class="tab-content">
+      <div class="card">
+        <h2>📦 Ürün & Stok Kataloğu</h2>
+        <input type="text" id="stock-search" placeholder="Ürün veya barkod ara..." oninput="loadProducts(this.value)" style="margin-bottom: 12px;">
+        <div id="product-list-container" class="product-list">
+          <!-- Products render here -->
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: GÜNLÜK SATIŞ RAPORLARI -->
+    <div id="tab-reports" class="tab-content">
+      <div class="card">
+        <h2>📊 Günlük Satış Geçmişi & Raporlar</h2>
+        <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:14px;">Yapılan tüm satış hareketleri tarih, saat ve satılan ürün kalemleri bazında listelenir.</p>
+        <div id="sales-history-container">
+          <!-- Sales history renders here -->
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 4: AI PACKAGING SCANNER & PRODUCT CREATION -->
+    <div id="tab-ai" class="tab-content">
       <div class="card">
         <h2>🤖 Yapay Zeka (AI) Ambalaj Okuyucu</h2>
         <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 14px;">
@@ -405,74 +479,24 @@
       </div>
     </div>
 
-    <!-- TAB 2: MOBILE POS SALES SCANNER -->
-    <div id="tab-pos" class="tab-content">
-      <div class="card">
-        <h2>📱 Mobil Satış (POS)</h2>
-
-        <!-- HTML5 Live Camera Video Preview -->
-        <div id="pos-video-box" class="video-scanner-box">
-          <video id="pos-video" playsinline muted></video>
-          <div class="scan-line"></div>
-          <button class="btn btn-danger" style="margin-top: 8px; padding: 8px;" onclick="stopMobileBarcodeScanner()">Kamerayı Kapat</button>
-        </div>
-
-        <div style="display: flex; gap: 8px; margin-bottom: 14px;">
-          <button id="btn-open-camera" class="btn" style="flex: 1;" onclick="startMobileBarcodeScanner()">
-            📷 Canlı Kamerayı Aç
-          </button>
-          <button class="btn btn-secondary" style="flex: 1;" onclick="document.getElementById('pos-photo-file').click()">
-            📸 Fotoğraf Çek & Oku
-          </button>
-          <input type="file" id="pos-photo-file" accept="image/*" capture="environment" style="display:none" onchange="handlePOSPhotoUpload(this)">
-        </div>
-
-        <div class="form-group">
-          <label>Veya Manuel Barkod Yaz</label>
-          <div style="display: flex; gap: 8px;">
-            <input type="text" id="pos-barcode-input" placeholder="Barkod yazıp Enter'a basın..." onkeypress="if(event.key==='Enter') handlePOSScan()">
-            <button class="btn" style="width: 80px;" onclick="handlePOSScan()">Ekle</button>
-          </div>
-        </div>
-
-        <div id="pos-cart-list" style="margin-top: 14px;">
-          <!-- Cart items render here -->
-        </div>
-
-        <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
-          <div>
-            <div style="font-size: 0.8rem; color: var(--text-muted);">Toplam Tutar</div>
-            <div id="pos-total-amount" style="font-size: 1.4rem; font-weight: 800; color: var(--accent);">0.00 ₺</div>
-          </div>
-          <button class="btn" style="width: auto; padding: 12px 24px;" onclick="completePOSSale()">Satışı Tamamla</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- TAB 3: STOK KATALOĞU -->
-    <div id="tab-stock" class="tab-content">
-      <div class="card">
-        <h2>📦 Ürün & Stok Kataloğu</h2>
-        <input type="text" id="stock-search" placeholder="Ürün veya barkod ara..." oninput="loadProducts(this.value)" style="margin-bottom: 12px;">
-        <div id="product-list-container" class="product-list">
-          <!-- Products render here -->
-        </div>
-      </div>
-    </div>
   </main>
 
   <nav class="bottom-nav">
-    <button class="nav-item active" onclick="switchTab('ai', this)">
-      <span class="icon">🤖</span>
-      <span>AI Ambalaj Kayıt</span>
-    </button>
-    <button class="nav-item" onclick="switchTab('pos', this)">
+    <button class="nav-item active" onclick="switchTab('pos', this)">
       <span class="icon">📱</span>
       <span>Hızlı Satış</span>
     </button>
     <button class="nav-item" onclick="switchTab('stock', this)">
       <span class="icon">📦</span>
       <span>Stok Kataloğu</span>
+    </button>
+    <button class="nav-item" onclick="switchTab('reports', this)">
+      <span class="icon">📊</span>
+      <span>Satış Raporları</span>
+    </button>
+    <button class="nav-item" onclick="switchTab('ai', this)">
+      <span class="icon">🤖</span>
+      <span>AI Ambalaj Kayıt</span>
     </button>
   </nav>
 
@@ -521,7 +545,9 @@
       document.getElementById('tab-' + tabId).classList.add('active');
       if (btnEl) btnEl.classList.add('active');
 
+      if (tabId === 'pos') loadPOSProductPicker();
       if (tabId === 'stock') loadProducts();
+      if (tabId === 'reports') loadSalesHistory();
     }
 
     function showToast(msg) {
@@ -931,6 +957,107 @@
       `).join('');
     }
 
+    let allProductsCache = [];
+
+    async function loadPOSProductPicker() {
+      try {
+        const res = await fetchWithAuth('/api/products');
+        allProductsCache = await res.json();
+        const select = document.getElementById('pos-product-picker');
+        if (!select) return;
+
+        select.innerHTML = '<option value="">-- Ürün Listesinden Seçin --</option>';
+
+        // Group products by category
+        const grouped = {};
+        allProductsCache.forEach(p => {
+          const cat = p.category_name || 'Genel';
+          if (!grouped[cat]) grouped[cat] = [];
+          grouped[cat].push(p);
+        });
+
+        for (const [catName, prods] of Object.entries(grouped)) {
+          const groupEl = document.createElement('optgroup');
+          groupEl.label = '📁 ' + catName;
+          prods.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p.id;
+            opt.textContent = `${p.name} - ${p.sale_price.toFixed(2)} ₺ (Kod: ${p.barcode})`;
+            groupEl.appendChild(opt);
+          });
+          select.appendChild(groupEl);
+        }
+      } catch (e) {}
+    }
+
+    function handleProductPickerSelect(selectEl) {
+      const pid = parseInt(selectEl.value);
+      if (!pid) return;
+
+      const prod = allProductsCache.find(p => p.id === pid);
+      if (prod) {
+        const existing = posCart.find(i => i.product_id === prod.id);
+        if (existing) {
+          existing.quantity += 1;
+          existing.subtotal = existing.quantity * existing.unit_price;
+        } else {
+          posCart.push({
+            product_id: prod.id,
+            product_name: prod.name,
+            barcode: prod.barcode,
+            unit_price: prod.sale_price,
+            quantity: 1,
+            subtotal: prod.sale_price
+          });
+        }
+        playBeep();
+        renderPOSCart();
+        showToast("✅ " + prod.name + " sepete eklendi");
+      }
+      selectEl.value = '';
+    }
+
+    async function loadSalesHistory() {
+      const container = document.getElementById('sales-history-container');
+      if (!container) return;
+      container.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:20px;">⏳ Satış geçmişi yükleniyor...</div>';
+
+      try {
+        const res = await fetchWithAuth('/api/sales/history');
+        const json = await res.json();
+        const sales = json.sales || [];
+
+        if (!sales.length) {
+          container.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:20px;">Henüz kaydedilmiş satış hareketi yok</div>';
+          return;
+        }
+
+        container.innerHTML = sales.map(s => {
+          const itemDetails = (s.items || []).map(i => `
+            <div style="font-size:0.8rem; color:var(--text-muted); display:flex; justify-content:space-between; margin-top:2px;">
+              <span>• ${i.product_name} (${i.quantity} adet x ${i.unit_price.toFixed(2)} ₺)</span>
+              <span style="font-weight:600; color:var(--text);">${i.subtotal.toFixed(2)} ₺</span>
+            </div>
+          `).join('');
+
+          return `
+            <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:10px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); padding-bottom:6px; margin-bottom:6px;">
+                <div>
+                  <div style="font-weight:700; font-size:0.9rem; color:var(--text);">📅 ${s.sold_at}</div>
+                  <div style="font-size:0.75rem; color:var(--text-muted);">${s.item_count} adet ürün | ${s.note || 'POS Satış'}</div>
+                </div>
+                <div style="font-size:1.1rem; font-weight:800; color:var(--accent);">${s.total_amount.toFixed(2)} ₺</div>
+              </div>
+              ${itemDetails}
+            </div>
+          `;
+        }).join('');
+      } catch (err) {
+        container.innerHTML = '<div style="text-align:center; color:var(--danger); padding:20px;">Satış geçmişi yüklenemedi!</div>';
+      }
+    }
+
     // ════════════════════════════════════════════════════════════════════
     // KURUMSAL ÜYELİK VE BENE HATIRLA OTURUM YÖNETİMİ
     // ════════════════════════════════════════════════════════════════════
@@ -1029,6 +1156,7 @@
         nameSpan.innerText = user.company_name || user.full_name;
         badge.style.display = 'block';
       }
+      loadPOSProductPicker();
     }
 
     function handleLogout() {

@@ -121,15 +121,23 @@ class AIPackageService:
             pil_img = Image.open(io.BytesIO(image_bytes))
             pil_img = ImageOps.exif_transpose(pil_img).convert("RGB")
 
-            # Kayıt için küçültülmüş fotoğraf (Disk tasarrufu ve hızlı web yükleme)
+            # 1. Kayıt için ultra-küçük Base64 JPEG (Render konteynırı sıfırlansa bile görseller ASLA kaybolmaz, ~5KB)
             save_img = pil_img.copy()
-            save_img.thumbnail((500, 500), Image.LANCZOS)
-            save_img.save(saved_filepath, "JPEG", quality=75, optimize=True)
-            image_path_str = f"/uploads/products/{saved_filename}"
+            save_img.thumbnail((250, 250), Image.LANCZOS)
+            buffered = io.BytesIO()
+            save_img.save(buffered, format="JPEG", quality=60, optimize=True)
+            b64_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+            image_path_str = f"data:image/jpeg;base64,{b64_str}"
 
-            # AI analiz için hızlı küçültülmüş görsel (Max 600px)
+            # Ek olarak yerel diske de kaydet (opsiyonel)
+            try:
+                save_img.save(saved_filepath, "JPEG", quality=60, optimize=True)
+            except Exception:
+                pass
+
+            # AI analiz için ultra-hızlı küçültülmüş görsel (Max 350px - Sub-second yanıt için)
             ai_img = pil_img.copy()
-            ai_img.thumbnail((600, 600), Image.LANCZOS)
+            ai_img.thumbnail((350, 350), Image.LANCZOS)
         except Exception as exc:
             image_path_str = ""
             logger.warning(f"Resim işleme / kaydetme hatası: {exc}")

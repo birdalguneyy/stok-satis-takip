@@ -221,6 +221,13 @@ def record_sale():
     return jsonify({"ok": ok, "message": msg})
 
 
+@app.route("/api/sales/history", methods=["GET"])
+def get_sales_history():
+    user_id = get_current_user_id()
+    history = cloud_db.get_sales_history(user_id=user_id)
+    return jsonify({"ok": True, "sales": history})
+
+
 @app.route("/api/barcode/decode", methods=["POST"])
 def api_decode_barcode():
     """Yüklenen yüksek çözünürlüklü fotoğraftan pyzbar + zxingcpp ile 7 aşamalı barkod çözer."""

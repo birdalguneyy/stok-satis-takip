@@ -324,9 +324,37 @@ class CloudDatabase:
 
             return True, f"Satış başarıyla tamamlandı. Toplam: {total_amount:.2f} ₺"
 
+    def get_sales_history(self, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Yapılan tüm satış hareketlerini tarih sırasına göre kalemleriyle getirir."""
+        query = "SELECT * FROM sales"
+        params: list = []
+        if user_id is not None:
+            query += " WHERE user_id = ?"
+            params.append(user_id)
+        query += " ORDER BY id DESC LIMIT 100"
+
+        sales = []
+        with self.db.get_connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            for r in rows:
+                s_dict = dict(r)
+                items_rows = conn.execute(
+                    "SELECT * FROM sale_items WHERE sale_id = ?", (s_dict["id"],)
+                ).fetchall()
+                s_dict["items"] = [dict(i) for i in items_rows]
+                sales.append(s_dict)
+        return sales
+
     # ════════════════════════════════════════════════════════════════════
     # KULLANICI ÜYELİK VE GİRİŞ İŞLEMLERİ (AUTH)
     # ════════════════════════════════════════════════════════════════════
+    def _clean_phone(self, phone: str) -> str:
+        """Telefon numarasından boşluk, tire ve baştaki 0'ı temizler (Örn: 0532 123 4567 -> 5321234567)."""
+        cleaned = "".join(c for c in phone if c.isdigit())
+        if cleaned.startswith("0"):
+            cleaned = cleaned[1:]
+        return cleaned
+
     def _hash_password(self, password: str) -> str:
         import hashlib
         return hashlib.sha256(f"stok_salt_{password}".encode("utf-8")).hexdigest()
@@ -345,9 +373,10 @@ class CloudDatabase:
     ) -> tuple[bool, str, Optional[Dict[str, Any]]]:
         c_name = company_name.strip()
         f_name = full_name.strip()
-        p_clean = phone.strip()
+        p_raw = phone.strip()
+        p_clean = self._clean_phone(p_raw)
         e_clean = email.strip().lower()
-        if not c_name or not f_name or not p_clean or not e_clean or not password:
+        if not c_name or not f_name or not p_raw or not e_clean or not password:
             return False, "Lütfen tüm zorunlu alanları doldurun!", None
 
         pass_hash = self._hash_password(password)
@@ -356,7 +385,7 @@ class CloudDatabase:
 
         with self.db.get_connection() as conn:
             # Check duplicate phone or email
-            existing_p = conn.execute("SELECT id FROM users WHERE phone = ?", (p_clean,)).fetchone()
+            existing_p = conn.execute("SELECT id FROM users WHERE phone = ? OR phone = ?", (p_raw, p_clean)).fetchone()
             if existing_p:
                 return False, "Bu telefon numarası ile kayıtlı bir hesap zaten var!", None
 
@@ -392,14 +421,15 @@ class CloudDatabase:
 
     def login_user(self, phone_or_email: str, password: str, remember_me: bool = True) -> tuple[bool, str, Optional[Dict[str, Any]]]:
         query_val = phone_or_email.strip()
+        p_clean = self._clean_phone(query_val)
         if not query_val or not password:
             return False, "Telefon / E-posta ve şifre giriniz!", None
 
         pass_hash = self._hash_password(password)
         with self.db.get_connection() as conn:
             row = conn.execute(
-                "SELECT * FROM users WHERE (phone = ? OR LOWER(email) = LOWER(?)) AND password_hash = ?",
-                (query_val, query_val, pass_hash),
+                "SELECT * FROM users WHERE (phone = ? OR phone = ? OR LOWER(email) = LOWER(?)) AND password_hash = ?",
+                (query_val, p_clean, query_val, pass_hash),
             ).fetchone()
 
             if not row:

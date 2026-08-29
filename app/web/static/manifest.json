@@ -1,0 +1,24 @@
+{
+  "name": "Stok & Satış Takip — Mobil & AI",
+  "short_name": "StokSatış",
+  "description": "7/24 Mobil Yapay Zeka Destekli Stok ve Satış Takip Uygulaması",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0F172A",
+  "theme_color": "#0F172A",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/static/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

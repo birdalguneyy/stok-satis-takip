@@ -1,0 +1,1062 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Stok & Satış Takip — Mobil & AI</title>
+  
+  <!-- PWA Manifest & App Icons -->
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#0F172A">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="StokSatış">
+  <link rel="apple-touch-icon" href="/static/icon-192.png">
+
+  <!-- ZXing HTML5 Live Camera Barcode Reader Library -->
+  <script src="https://unpkg.com/@zxing/library@latest"></script>
+  <style>
+    :root {
+      --bg: #0F172A;
+      --card: #1E293B;
+      --card-hover: #334155;
+      --accent: #10B981;
+      --accent-hover: #059669;
+      --text: #F8FAFC;
+      --text-muted: #94A3B8;
+      --danger: #EF4444;
+      --warning: #F59E0B;
+      --border: #334155;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding-bottom: 70px;
+    }
+
+    header {
+      background-color: rgba(30, 41, 59, 0.8);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      border-bottom: 1px solid var(--border);
+      padding: 14px 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    header h1 { font-size: 1.1rem; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; }
+    header .status-badge { font-size: 0.75rem; background: rgba(16, 185, 129, 0.15); color: var(--accent); padding: 4px 10px; border-radius: 20px; border: 1px solid rgba(16, 185, 129, 0.3); cursor: pointer; }
+
+    main { padding: 16px; flex: 1; max-width: 600px; margin: 0 auto; width: 100%; }
+
+    /* Nav Tabs Fixed at Bottom */
+    nav.bottom-nav {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: rgba(30, 41, 59, 0.95);
+      backdrop-filter: blur(16px);
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-around;
+      padding: 8px 0 12px 0;
+      z-index: 100;
+    }
+
+    .nav-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      text-decoration: none;
+      background: none;
+      border: none;
+      cursor: pointer;
+      width: 33%;
+    }
+
+    .nav-item.active { color: var(--accent); font-weight: 600; }
+    .nav-item span.icon { font-size: 1.3rem; }
+
+    /* Card styling */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 18px;
+      margin-bottom: 16px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+    }
+
+    .card h2 { font-size: 1.05rem; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+
+    /* AI Packaging Camera Upload Area */
+    .ai-upload-area {
+      border: 2px dashed var(--accent);
+      background: rgba(16, 185, 129, 0.05);
+      border-radius: 14px;
+      padding: 20px 16px;
+      text-align: center;
+      cursor: pointer;
+      margin-bottom: 16px;
+      transition: all 0.2s ease;
+    }
+
+    .ai-upload-area:active { transform: scale(0.98); background: rgba(16, 185, 129, 0.1); }
+    .ai-upload-area .camera-icon { font-size: 2.5rem; margin-bottom: 6px; }
+
+    /* Form Fields */
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 6px; }
+    
+    input, select {
+      width: 100%;
+      background: #0F172A;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      color: var(--text);
+      font-size: 0.95rem;
+      outline: none;
+    }
+
+    input:focus, select:focus { border-color: var(--accent); }
+
+    .btn {
+      width: 100%;
+      background: var(--accent);
+      color: #000;
+      font-weight: 700;
+      border: none;
+      border-radius: 10px;
+      padding: 14px;
+      font-size: 1rem;
+      cursor: pointer;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 8px;
+      transition: opacity 0.2s;
+    }
+
+    .btn:active { opacity: 0.85; }
+    .btn-secondary { background: var(--card-hover); color: var(--text); }
+    .btn-danger { background: var(--danger); color: white; }
+
+    /* Live Video Camera Preview */
+    .video-scanner-box {
+      position: relative;
+      width: 100%;
+      background: #000;
+      border-radius: 14px;
+      overflow: hidden;
+      margin-bottom: 14px;
+      display: none;
+    }
+
+    .video-scanner-box video {
+      width: 100%;
+      height: 280px;
+      object-fit: cover;
+      display: block;
+    }
+
+    .video-scanner-box .scan-line {
+      position: absolute;
+      top: 50%;
+      left: 8%;
+      right: 8%;
+      height: 2px;
+      background: #00FF00;
+      box-shadow: 0 0 10px #00FF00;
+      animation: scanAnim 2s infinite ease-in-out;
+    }
+
+    @keyframes scanAnim {
+      0% { top: 20%; }
+      50% { top: 80%; }
+      100% { top: 20%; }
+    }
+
+    /* Product Image Preview */
+    .image-preview {
+      width: 100%;
+      max-height: 200px;
+      object-fit: cover;
+      border-radius: 12px;
+      margin-bottom: 12px;
+      display: none;
+    }
+
+    /* Product Catalog List */
+    .product-list { display: flex; flex-direction: column; gap: 10px; }
+    .product-item {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .product-item img { width: 50px; height: 50px; border-radius: 8px; object-fit: cover; background: #000; }
+    .product-info { flex: 1; }
+    .product-info h3 { font-size: 0.95rem; font-weight: 600; }
+    .product-info p { font-size: 0.8rem; color: var(--text-muted); }
+    .product-price { font-size: 1.05rem; font-weight: 700; color: var(--accent); }
+
+    /* Toast Notification */
+    #toast {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-100px);
+      background: var(--card);
+      border: 1px solid var(--accent);
+      color: var(--text);
+      padding: 12px 20px;
+      border-radius: 30px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+      z-index: 200;
+      transition: transform 0.3s ease;
+    }
+    #toast.show { transform: translateX(-50%) translateY(0); }
+
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+  </style>
+</head>
+<body>
+
+  <!-- ════════════════════════════════════════════════════════════════════ -->
+  <!-- KURUMSAL ÜYELİK VE GİRİŞ YAPMA MODAL OVERLAY -->
+  <!-- ════════════════════════════════════════════════════════════════════ -->
+  <div id="auth-modal-overlay" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(15,23,42,0.95); backdrop-filter:blur(20px); z-index:999; display:flex; justify-content:center; align-items:center; padding:16px;">
+    <div class="card" style="width:100%; max-width:440px; border-color:var(--accent); box-shadow:0 15px 40px rgba(0,0,0,0.6);">
+      
+      <div style="text-align:center; margin-bottom:18px;">
+        <img src="/static/logo.png" alt="Stok & Satış Takip" style="width:76px; height:76px; border-radius:18px; box-shadow:0 0 20px rgba(16,185,129,0.3); margin-bottom:10px;">
+        <h2 style="font-size:1.3rem; font-weight:800; color:var(--text); justify-content:center;">Stok & Satış Takip</h2>
+        <div style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">Kurumsal Üyelik & Güvenli Giriş Portalı</div>
+      </div>
+
+      <!-- AUTH TAB SWITCHER -->
+      <div style="display:flex; background:#0F172A; padding:4px; border-radius:12px; margin-bottom:16px; border:1px solid var(--border);">
+        <button id="auth-tab-btn-login" class="btn" style="flex:1; padding:8px; font-size:0.85rem; background:var(--accent); color:#000;" onclick="switchAuthTab('login')">Giriş Yap</button>
+        <button id="auth-tab-btn-register" class="btn btn-secondary" style="flex:1; padding:8px; font-size:0.85rem; background:transparent;" onclick="switchAuthTab('register')">Yeni Üyelik</button>
+      </div>
+
+      <div id="auth-error" style="background:rgba(239,68,68,0.15); border:1px solid var(--danger); color:var(--danger); font-size:0.8rem; padding:10px; border-radius:10px; margin-bottom:14px; display:none;"></div>
+
+      <!-- FORM 1: GİRİŞ YAP -->
+      <form id="auth-login-form" onsubmit="handleLoginSubmit(event)">
+        <div class="form-group">
+          <label>Telefon Numarası veya E-posta Adresi</label>
+          <input type="text" id="login-identifier" placeholder="Örn: 05321234567 veya ahmet@firma.com" required>
+        </div>
+
+        <div class="form-group">
+          <label>Şifre</label>
+          <input type="password" id="login-password" placeholder="••••••••" required>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:16px;">
+          <input type="checkbox" id="login-remember" checked style="width:18px; height:18px; accent-color:var(--accent); cursor:pointer;">
+          <label for="login-remember" style="font-size:0.85rem; color:var(--text); cursor:pointer;">Beni Hatırla (Tekrar şifre sorma)</label>
+        </div>
+
+        <button type="submit" class="btn" style="padding:14px; font-size:1rem;">🔑 Giriş Yap</button>
+      </form>
+
+      <!-- FORM 2: YENİ ÜYELİK (KAYIT OL) -->
+      <form id="auth-register-form" onsubmit="handleRegisterSubmit(event)" style="display:none;">
+        <div class="form-group">
+          <label>Firma / İşletme Adı *</label>
+          <input type="text" id="reg-company" placeholder="Örn: Yılmaz Market & Şarküteri" required>
+        </div>
+
+        <div class="form-group">
+          <label>Ad Soyad *</label>
+          <input type="text" id="reg-fullname" placeholder="Örn: Ahmet Yılmaz" required>
+        </div>
+
+        <div class="form-group" style="display:flex; gap:10px;">
+          <div style="flex:1;">
+            <label>Telefon Numarası *</label>
+            <input type="tel" id="reg-phone" placeholder="05321234567" required>
+          </div>
+          <div style="flex:1;">
+            <label>E-posta Adresi *</label>
+            <input type="email" id="reg-email" placeholder="ahmet@firma.com" required>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Şifre Oluştur *</label>
+          <input type="password" id="reg-password" placeholder="En az 4 karakter" required>
+        </div>
+
+        <button type="submit" class="btn" style="padding:14px; font-size:1rem;">✨ Kurumsal Hesap Oluştur ve Başla</button>
+      </form>
+
+    </div>
+  </div>
+
+  <header>
+    <h1 style="display:flex; align-items:center; gap:10px;">
+      <img src="/static/logo.png" alt="Logo" style="width:34px; height:34px; border-radius:8px; object-fit:cover; border:1px solid var(--accent);">
+      <span>Stok & Satış</span>
+    </h1>
+    <div style="display:flex; gap:6px; align-items:center;">
+      <div id="user-profile-badge" class="status-badge" style="background:rgba(16,185,129,0.15); color:var(--accent); display:none;" onclick="handleLogout()">🏢 <span id="user-profile-name">Firma</span> (Çıkış)</div>
+      <div id="pwa-install-badge" class="status-badge" style="display:none; background:rgba(16, 185, 129, 0.25); color:var(--accent); font-weight:bold;" onclick="installPWA()">📲 Uygulamayı Yükle</div>
+      <div class="status-badge" onclick="toggleKeyModal()">🔑 AI Ayarı</div>
+    </div>
+  </header>
+
+  <div id="toast">✅ Bildirim</div>
+
+  <main>
+    <!-- TAB 1: AI PACKAGING SCANNER & PRODUCT CREATION -->
+    <div id="tab-ai" class="tab-content active">
+      <div class="card">
+        <h2>🤖 Yapay Zeka (AI) Ambalaj Okuyucu</h2>
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 14px;">
+          Ürünün ambalaj fotoğrafını çekin. Yapay zeka ürün markasını, adını, gramajını, kategorisini ve fiyatını otomatik tespit eder!
+        </p>
+
+        <!-- API Key Box Banner (Shown if Key Needed) -->
+        <div id="ai-key-banner" style="background: rgba(245, 158, 11, 0.1); border: 1px solid var(--warning); border-radius: 12px; padding: 12px; margin-bottom: 14px; display: none;">
+          <div style="font-weight: 700; color: var(--warning); font-size: 0.85rem; margin-bottom: 4px;">🔑 Yapay Zeka (Gemini API Key) Ekleyin</div>
+          <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 8px;">%100 Doğru Ambalaj ve Ürün Adı Okuması İçin Ücretsiz Gemini Key Giriniz:</div>
+          <div style="display: flex; gap: 6px;">
+            <input type="text" id="gemini-key-input" placeholder="AIzaSy..." style="padding: 8px; font-size: 0.8rem;">
+            <button class="btn" style="width: 80px; padding: 8px; font-size: 0.8rem;" onclick="saveGeminiKey()">Kaydet</button>
+          </div>
+        </div>
+
+        <div class="ai-upload-area" onclick="document.getElementById('ai-camera-file').click()">
+          <div class="camera-icon">📸</div>
+          <div style="font-weight: 700;">Ambalaj Fotoğrafı Çek / Yükle</div>
+          <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">Kamera ile ambalaj taranır ve kaydedilir</div>
+        </div>
+
+        <input type="file" id="ai-camera-file" accept="image/*" capture="environment" style="display:none" onchange="handleAIPackageUpload(this)">
+
+        <img id="img-preview" class="image-preview" alt="Ürün Ambalajı">
+
+        <form id="ai-product-form" onsubmit="saveProductFromForm(event)">
+          <input type="hidden" id="form-image-path">
+
+          <div class="form-group">
+            <label>Ürün Adı (AI Otomatik Doldurur)</label>
+            <input type="text" id="form-name" placeholder="Örn: Nutella Kakaolu Fındık Kreması 400g" required>
+          </div>
+
+          <div class="form-group">
+            <label>Barkod (Fotoğraf Çek veya Yaz)</label>
+            <div style="display: flex; gap: 8px;">
+              <input type="text" id="form-barcode" placeholder="Barkod numarası" required>
+              <button type="button" class="btn btn-secondary" style="width: 110px;" onclick="document.getElementById('form-camera-file').click()">📸 Çek</button>
+              <input type="file" id="form-camera-file" accept="image/*" capture="environment" style="display:none" onchange="handleFormCameraUpload(this)">
+            </div>
+          </div>
+
+          <div class="form-group" style="display: flex; gap: 10px;">
+            <div style="flex: 1;">
+              <label>Kategori</label>
+              <input type="text" id="form-category" value="Genel">
+            </div>
+            <div style="flex: 1;">
+              <label>Stok Adedi</label>
+              <input type="number" id="form-stock" value="10" min="0">
+            </div>
+          </div>
+
+          <div class="form-group" style="display: flex; gap: 10px;">
+            <div style="flex: 1;">
+              <label>Alış Fiyatı (₺)</label>
+              <input type="number" step="0.5" id="form-purchase" value="0">
+            </div>
+            <div style="flex: 1;">
+              <label>Satış Fiyatı (₺)</label>
+              <input type="number" step="0.5" id="form-sale" value="0" required>
+            </div>
+          </div>
+
+          <button type="submit" class="btn">💾 Ürünü Veritabanına Kaydet</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- TAB 2: MOBILE POS SALES SCANNER -->
+    <div id="tab-pos" class="tab-content">
+      <div class="card">
+        <h2>📱 Mobil Satış (POS)</h2>
+
+        <!-- HTML5 Live Camera Video Preview -->
+        <div id="pos-video-box" class="video-scanner-box">
+          <video id="pos-video" playsinline muted></video>
+          <div class="scan-line"></div>
+          <button class="btn btn-danger" style="margin-top: 8px; padding: 8px;" onclick="stopMobileBarcodeScanner()">Kamerayı Kapat</button>
+        </div>
+
+        <div style="display: flex; gap: 8px; margin-bottom: 14px;">
+          <button id="btn-open-camera" class="btn" style="flex: 1;" onclick="startMobileBarcodeScanner()">
+            📷 Canlı Kamerayı Aç
+          </button>
+          <button class="btn btn-secondary" style="flex: 1;" onclick="document.getElementById('pos-photo-file').click()">
+            📸 Fotoğraf Çek & Oku
+          </button>
+          <input type="file" id="pos-photo-file" accept="image/*" capture="environment" style="display:none" onchange="handlePOSPhotoUpload(this)">
+        </div>
+
+        <div class="form-group">
+          <label>Veya Manuel Barkod Yaz</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="pos-barcode-input" placeholder="Barkod yazıp Enter'a basın..." onkeypress="if(event.key==='Enter') handlePOSScan()">
+            <button class="btn" style="width: 80px;" onclick="handlePOSScan()">Ekle</button>
+          </div>
+        </div>
+
+        <div id="pos-cart-list" style="margin-top: 14px;">
+          <!-- Cart items render here -->
+        </div>
+
+        <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <div style="font-size: 0.8rem; color: var(--text-muted);">Toplam Tutar</div>
+            <div id="pos-total-amount" style="font-size: 1.4rem; font-weight: 800; color: var(--accent);">0.00 ₺</div>
+          </div>
+          <button class="btn" style="width: auto; padding: 12px 24px;" onclick="completePOSSale()">Satışı Tamamla</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: STOK KATALOĞU -->
+    <div id="tab-stock" class="tab-content">
+      <div class="card">
+        <h2>📦 Ürün & Stok Kataloğu</h2>
+        <input type="text" id="stock-search" placeholder="Ürün veya barkod ara..." oninput="loadProducts(this.value)" style="margin-bottom: 12px;">
+        <div id="product-list-container" class="product-list">
+          <!-- Products render here -->
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <nav class="bottom-nav">
+    <button class="nav-item active" onclick="switchTab('ai', this)">
+      <span class="icon">🤖</span>
+      <span>AI Ambalaj Kayıt</span>
+    </button>
+    <button class="nav-item" onclick="switchTab('pos', this)">
+      <span class="icon">📱</span>
+      <span>Hızlı Satış</span>
+    </button>
+    <button class="nav-item" onclick="switchTab('stock', this)">
+      <span class="icon">📦</span>
+      <span>Stok Kataloğu</span>
+    </button>
+  </nav>
+
+  <script>
+    let posCart = [];
+    let codeReader = null;
+    let isScanning = false;
+    let lastScannedCode = '';
+    let lastScanTime = 0;
+
+    let audioCtx = null;
+
+    function initAudio() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    }
+
+    function playBeep() {
+      try {
+        initAudio();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.15);
+      } catch (e) {}
+    }
+
+    document.addEventListener('click', initAudio, { once: true });
+    document.addEventListener('touchstart', initAudio, { once: true });
+
+    function switchTab(tabId, btnEl) {
+      stopMobileBarcodeScanner();
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+      
+      document.getElementById('tab-' + tabId).classList.add('active');
+      if (btnEl) btnEl.classList.add('active');
+
+      if (tabId === 'stock') loadProducts();
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.innerText = msg;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 3500);
+    }
+
+    function toggleKeyModal() {
+      const b = document.getElementById('ai-key-banner');
+      b.style.display = b.style.display === 'none' ? 'block' : 'none';
+    }
+
+    async function checkAIStatus() {
+      try {
+        const res = await fetch('/api/info');
+        const json = await res.json();
+        if (!json.has_ai) {
+          document.getElementById('ai-key-banner').style.display = 'block';
+        }
+      } catch(e) {}
+    }
+
+    async function saveGeminiKey() {
+      const key = document.getElementById('gemini-key-input').value.trim();
+      if (!key) return;
+      const res = await fetch('/api/settings/gemini-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: key })
+      });
+      const json = await res.json();
+      showToast(json.message);
+      if (json.ok) {
+        document.getElementById('ai-key-banner').style.display = 'none';
+      }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // PWA UYGULAMA YÜKLEME (ANA EKRANA EKLE)
+    // ════════════════════════════════════════════════════════════════════
+    let deferredPrompt = null;
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      const btn = document.getElementById('pwa-install-badge');
+      if (btn) btn.style.display = 'block';
+    });
+
+    async function installPWA() {
+      if (deferredPrompt) {
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        if (outcome === 'accepted') {
+          showToast("🎉 Uygulama telefonunuza yüklendi!");
+        }
+        deferredPrompt = null;
+        const btn = document.getElementById('pwa-install-badge');
+        if (btn) btn.style.display = 'none';
+      } else {
+        showToast("📱 iOS Safari: Paylaş butonundan 'Ana Ekrana Ekle' yapın.\nAndroid: Menüden 'Uygulamayı Yükle'yi seçin.");
+      }
+    }
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(err => {});
+      });
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // CANLI KESİNTİSİZ VİDEO KAMERA İLE BARKOD TARAMA (FOTOĞRAFSIZ)
+    // ════════════════════════════════════════════════════════════════════
+    async function startMobileBarcodeScanner(targetInputId = null) {
+      playBeep();
+
+      const videoBox = document.getElementById('pos-video-box');
+      videoBox.style.display = 'block';
+
+      if (!window.ZXing) {
+        showToast("⚠️ Kamera kütüphanesi yükleniyor, lütfen bekleyin...");
+        return;
+      }
+
+      try {
+        if (!codeReader) {
+          codeReader = new ZXing.BrowserMultiFormatReader();
+        }
+
+        isScanning = true;
+        showToast("📷 Canlı video kamerası açılıyor, barkodu kameraya tutun...");
+
+        let selectedDeviceId = undefined;
+        try {
+          const devices = await codeReader.listVideoInputDevices();
+          if (devices && devices.length > 0) {
+            const rear = devices.find(d => /back|rear|environment|arka/i.test(d.label));
+            selectedDeviceId = rear ? rear.deviceId : devices[devices.length - 1].deviceId;
+          }
+        } catch (e) {}
+
+        codeReader.decodeFromVideoDevice(selectedDeviceId, 'pos-video', (result, err) => {
+          if (result && isScanning) {
+            const code = result.getText();
+            const now = Date.now();
+            if (code !== lastScannedCode || (now - lastScanTime) > 1500) {
+              lastScannedCode = code;
+              lastScanTime = now;
+              playBeep();
+
+              if (targetInputId) {
+                document.getElementById(targetInputId).value = code;
+                showToast("✅ Barkod okundu: " + code);
+                stopMobileBarcodeScanner();
+              } else {
+                document.getElementById('pos-barcode-input').value = code;
+                handlePOSScan();
+              }
+            }
+          }
+        });
+      } catch (err) {
+        console.error('Canlı kamera hatası:', err);
+        showToast("⚠️ Canlı video başlatılamadı! 'Fotoğraf Çek & Oku' butonunu kullanabilirsiniz.");
+      }
+    }
+
+    function stopMobileBarcodeScanner() {
+      isScanning = false;
+      if (codeReader) {
+        try { codeReader.reset(); } catch (e) {}
+      }
+      const videoBox = document.getElementById('pos-video-box');
+      if (videoBox) videoBox.style.display = 'none';
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // FOTOĞRAF ÇEKİP SUNUCUDA 7 AŞAMALI PYZBAR ÇÖZME
+    // ════════════════════════════════════════════════════════════════════
+    async function handlePOSPhotoUpload(input) {
+      if (!input.files || !input.files[0]) return;
+      const file = input.files[0];
+      showToast("⏳ Fotoğraftan barkod taranıyor...");
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        const res = await fetch('/api/barcode/decode', { method: 'POST', body: formData });
+        const json = await res.json();
+        if (json.ok && json.barcode) {
+          playBeep();
+          document.getElementById('pos-barcode-input').value = json.barcode;
+          handlePOSScan();
+        } else {
+          showToast("❌ " + json.message);
+        }
+      } catch (e) {
+        showToast("⚠️ Bağlantı hatası!");
+      }
+      input.value = '';
+    }
+
+    async function handleFormCameraUpload(input) {
+      if (!input.files || !input.files[0]) return;
+      const file = input.files[0];
+      showToast("⏳ Fotoğraftan barkod taranıyor...");
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        const res = await fetch('/api/barcode/decode', { method: 'POST', body: formData });
+        const json = await res.json();
+        if (json.ok && json.barcode) {
+          playBeep();
+          document.getElementById('form-barcode').value = json.barcode;
+          showToast("✅ Barkod okundu: " + json.barcode);
+        } else {
+          showToast("❌ Barkod okunamadı, elle yazabilirsiniz.");
+        }
+      } catch (e) {
+        showToast("⚠️ Bağlantı hatası!");
+      }
+      input.value = '';
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // AI AMBALAJ YÜKLEME & FORMLAR
+    // ════════════════════════════════════════════════════════════════════
+    async function handleAIPackageUpload(input) {
+      if (!input.files || !input.files[0]) return;
+      const file = input.files[0];
+
+      const imgPreview = document.getElementById('img-preview');
+      imgPreview.src = URL.createObjectURL(file);
+      imgPreview.style.display = 'block';
+
+      showToast("⏳ Yapay zeka ambalajı ve ürün adını okuyor...");
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        const res = await fetch('/api/ai/scan-package', { method: 'POST', body: formData });
+        const json = await res.json();
+        
+        if (json.ok && json.data) {
+          const d = json.data;
+          if (d.name) document.getElementById('form-name').value = d.name;
+          if (d.category) document.getElementById('form-category').value = d.category;
+          if (d.sale_price) document.getElementById('form-sale').value = d.sale_price;
+          if (d.purchase_price) document.getElementById('form-purchase').value = d.purchase_price;
+          if (d.image_path) document.getElementById('form-image-path').value = d.image_path;
+
+          const currentBarcode = document.getElementById('form-barcode').value.trim();
+          if (d.barcode && (!currentBarcode || currentBarcode === '')) {
+            document.getElementById('form-barcode').value = d.barcode;
+          }
+
+          playBeep();
+          if (d.ai_success) {
+            showToast("✨ Yapay zeka '" + d.name + "' ürününü teşhis etti!");
+          } else {
+            showToast("📸 Ambalaj resmi kaydedildi! Formu tamamlayıp kaydedebilirsiniz.");
+          }
+        }
+      } catch (err) {
+        showToast("⚠️ Resim kaydedildi, bilgileri doldurun.");
+      }
+    }
+
+    async function fetchWithAuth(url, options = {}) {
+      const token = localStorage.getItem('stok_auth_token') || sessionStorage.getItem('stok_auth_token');
+      options.headers = options.headers || {};
+      if (token) {
+        options.headers['Authorization'] = 'Bearer ' + token;
+      }
+      return fetch(url, options);
+    }
+
+    async function saveProductFromForm(e) {
+      e.preventDefault();
+      const payload = {
+        name: document.getElementById('form-name').value,
+        barcode: document.getElementById('form-barcode').value,
+        category: document.getElementById('form-category').value,
+        stock_quantity: parseInt(document.getElementById('form-stock').value) || 0,
+        purchase_price: parseFloat(document.getElementById('form-purchase').value) || 0,
+        sale_price: parseFloat(document.getElementById('form-sale').value) || 0,
+        image_path: document.getElementById('form-image-path').value
+      };
+
+      const res = await fetchWithAuth('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const json = await res.json();
+      showToast(json.message);
+      if (json.ok) {
+        document.getElementById('ai-product-form').reset();
+        document.getElementById('img-preview').style.display = 'none';
+        loadProducts();
+      }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // POS SATIŞ & SEPET ADET YÖNETİMİ
+    // ════════════════════════════════════════════════════════════════════
+    async function handlePOSScan() {
+      const input = document.getElementById('pos-barcode-input');
+      const code = input.value.trim();
+      if (!code) return;
+
+      const res = await fetchWithAuth('/api/products/barcode/' + encodeURIComponent(code));
+      if (res.ok) {
+        const data = await res.json();
+        const prod = data.product;
+        const existing = posCart.find(i => i.product_id === prod.id);
+        if (existing) {
+          existing.quantity += 1;
+          existing.subtotal = existing.quantity * existing.unit_price;
+        } else {
+          posCart.push({
+            product_id: prod.id,
+            product_name: prod.name,
+            barcode: prod.barcode,
+            unit_price: prod.sale_price,
+            quantity: 1,
+            subtotal: prod.sale_price
+          });
+        }
+        input.value = '';
+        playBeep();
+        renderPOSCart();
+        showToast("✅ " + prod.name + " sepete eklendi");
+      } else {
+        showToast("❌ " + code + " kodlu veya isimli ürün bulunamadı!");
+      }
+    }
+
+    function renderPOSCart() {
+      const container = document.getElementById('pos-cart-list');
+      if (posCart.length === 0) {
+        container.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:20px;">Sepetiniz boş</div>';
+        document.getElementById('pos-total-amount').innerText = '0.00 ₺';
+        return;
+      }
+
+      let total = 0;
+      container.innerHTML = posCart.map((item, index) => {
+        total += item.subtotal;
+        return `
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--border);">
+            <div style="flex:1;">
+              <div style="font-weight:600; font-size:0.95rem;">${item.product_name}</div>
+              <div style="font-size:0.75rem; color:var(--text-muted);">${item.unit_price.toFixed(2)} ₺ / adet (Kod: ${item.barcode})</div>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <div style="display:flex; align-items:center; background:#0F172A; border:1px solid var(--border); border-radius:8px; overflow:hidden;">
+                <button style="padding:6px 12px; background:var(--card-hover); border:none; color:var(--text); font-weight:bold; cursor:pointer;" onclick="updatePOSCartQty(${index}, -1)">-</button>
+                <input type="number" value="${item.quantity}" min="1" style="width:40px; text-align:center; padding:4px; border:none; background:none; color:var(--accent); font-weight:bold; outline:none;" onchange="setPOSCartQty(${index}, this.value)">
+                <button style="padding:6px 12px; background:var(--card-hover); border:none; color:var(--text); font-weight:bold; cursor:pointer;" onclick="updatePOSCartQty(${index}, 1)">+</button>
+              </div>
+              <div style="font-weight:700; color:var(--accent); width:65px; text-align:right;">${item.subtotal.toFixed(2)} ₺</div>
+              <button style="background:none; border:none; color:var(--danger); cursor:pointer; font-size:1.1rem; padding:4px;" onclick="removeFromPOSCart(${index})">🗑️</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      document.getElementById('pos-total-amount').innerText = total.toFixed(2) + ' ₺';
+    }
+
+    function updatePOSCartQty(index, delta) {
+      if (posCart[index]) {
+        posCart[index].quantity += delta;
+        if (posCart[index].quantity <= 0) {
+          posCart.splice(index, 1);
+        } else {
+          posCart[index].subtotal = posCart[index].quantity * posCart[index].unit_price;
+        }
+        playBeep();
+        renderPOSCart();
+      }
+    }
+
+    function setPOSCartQty(index, val) {
+      const q = parseInt(val) || 1;
+      if (posCart[index]) {
+        if (q <= 0) {
+          posCart.splice(index, 1);
+        } else {
+          posCart[index].quantity = q;
+          posCart[index].subtotal = posCart[index].quantity * posCart[index].unit_price;
+        }
+        playBeep();
+        renderPOSCart();
+      }
+    }
+
+    function removeFromPOSCart(index) {
+      if (posCart[index]) {
+        posCart.splice(index, 1);
+        renderPOSCart();
+      }
+    }
+
+    async function completePOSSale() {
+      if (posCart.length === 0) return;
+      const res = await fetchWithAuth('/api/sales', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: posCart, note: 'Mobil POS Satış' })
+      });
+      const json = await res.json();
+      showToast(json.message);
+      if (json.ok) {
+        posCart = [];
+        renderPOSCart();
+        loadProducts();
+      }
+    }
+
+    async function loadProducts(search = '') {
+      const res = await fetchWithAuth('/api/products?search=' + encodeURIComponent(search));
+      const products = await res.json();
+      const container = document.getElementById('product-list-container');
+      
+      if (!products.length) {
+        container.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:20px;">Ürün bulunamadı</div>';
+        return;
+      }
+
+      container.innerHTML = products.map(p => `
+        <div class="product-item">
+          <img src="${p.image_path || '/static/placeholder.png'}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2250%22 height=%2250%22><rect width=%2250%22 height=%2250%22 fill=%22%23334155%22/><text x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 fill=%22%2394A3B8%22 font-size=%2220%22>📦</text></svg>'">
+          <div class="product-info">
+            <h3>${p.name}</h3>
+            <p>Barkod: ${p.barcode} | Stok: ${p.stock_quantity} adet</p>
+          </div>
+          <div class="product-price">${p.sale_price.toFixed(2)} ₺</div>
+        </div>
+      `).join('');
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // KURUMSAL ÜYELİK VE BENE HATIRLA OTURUM YÖNETİMİ
+    // ════════════════════════════════════════════════════════════════════
+    function switchAuthTab(tab) {
+      const loginForm = document.getElementById('auth-login-form');
+      const regForm = document.getElementById('auth-register-form');
+      const loginBtn = document.getElementById('auth-tab-btn-login');
+      const regBtn = document.getElementById('auth-tab-btn-register');
+      const errDiv = document.getElementById('auth-error');
+      errDiv.style.display = 'none';
+
+      if (tab === 'login') {
+        loginForm.style.display = 'block';
+        regForm.style.display = 'none';
+        loginBtn.style.background = 'var(--accent)';
+        loginBtn.style.color = '#000';
+        regBtn.style.background = 'transparent';
+        regBtn.style.color = 'var(--text)';
+      } else {
+        loginForm.style.display = 'none';
+        regForm.style.display = 'block';
+        regBtn.style.background = 'var(--accent)';
+        regBtn.style.color = '#000';
+        loginBtn.style.background = 'transparent';
+        loginBtn.style.color = 'var(--text)';
+      }
+    }
+
+    function showAuthError(msg) {
+      const errDiv = document.getElementById('auth-error');
+      errDiv.innerText = "⚠️ " + msg;
+      errDiv.style.display = 'block';
+    }
+
+    async function handleLoginSubmit(e) {
+      e.preventDefault();
+      const identifier = document.getElementById('login-identifier').value.trim();
+      const password = document.getElementById('login-password').value.trim();
+      const remember = document.getElementById('login-remember').checked;
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone_or_email: identifier, password: password, remember_me: remember })
+        });
+        const json = await res.json();
+        if (json.ok && json.user) {
+          if (remember && json.user.auth_token) {
+            localStorage.setItem('stok_auth_token', json.user.auth_token);
+          } else {
+            sessionStorage.setItem('stok_auth_token', json.user.auth_token);
+          }
+          setLoggedInUser(json.user);
+          showToast(json.message);
+        } else {
+          showAuthError(json.message || "Giriş başarısız!");
+        }
+      } catch (err) {
+        showAuthError("Sunucu bağlantı hatası!");
+      }
+    }
+
+    async function handleRegisterSubmit(e) {
+      e.preventDefault();
+      const company_name = document.getElementById('reg-company').value.trim();
+      const full_name = document.getElementById('reg-fullname').value.trim();
+      const phone = document.getElementById('reg-phone').value.trim();
+      const email = document.getElementById('reg-email').value.trim();
+      const password = document.getElementById('reg-password').value.trim();
+
+      try {
+        const res = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ company_name, full_name, phone, email, password })
+        });
+        const json = await res.json();
+        if (json.ok && json.user) {
+          localStorage.setItem('stok_auth_token', json.user.auth_token);
+          setLoggedInUser(json.user);
+          showToast(json.message);
+        } else {
+          showAuthError(json.message || "Kayıt hatası!");
+        }
+      } catch (err) {
+        showAuthError("Sunucu bağlantı hatası!");
+      }
+    }
+
+    function setLoggedInUser(user) {
+      document.getElementById('auth-modal-overlay').style.display = 'none';
+      const badge = document.getElementById('user-profile-badge');
+      const nameSpan = document.getElementById('user-profile-name');
+      if (badge && nameSpan) {
+        nameSpan.innerText = user.company_name || user.full_name;
+        badge.style.display = 'block';
+      }
+    }
+
+    function handleLogout() {
+      localStorage.removeItem('stok_auth_token');
+      sessionStorage.removeItem('stok_auth_token');
+      document.getElementById('user-profile-badge').style.display = 'none';
+      document.getElementById('auth-modal-overlay').style.display = 'flex';
+      showToast("Oturum kapatıldı.");
+    }
+
+    async function checkSavedAuthSession() {
+      const token = localStorage.getItem('stok_auth_token') || sessionStorage.getItem('stok_auth_token');
+      if (token) {
+        try {
+          const res = await fetch('/api/auth/me?token=' + encodeURIComponent(token));
+          const json = await res.json();
+          if (json.authenticated && json.user) {
+            setLoggedInUser(json.user);
+            return;
+          }
+        } catch (e) {}
+      }
+      document.getElementById('auth-modal-overlay').style.display = 'flex';
+    }
+
+    // Init AI status check and Auth session check on load
+    checkAIStatus();
+    checkSavedAuthSession();
+  </script>
+</body>
+</html>

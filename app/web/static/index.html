@@ -396,11 +396,63 @@
       </div>
     </div>
 
-    <!-- TAB 3: GÜNLÜK SATIŞ RAPORLARI -->
+    <!-- TAB 3: PROFESYONEL SATIŞ RAPORLARI, AI ÖNERİLER VE ÇALIŞMA SAATLERİ -->
     <div id="tab-reports" class="tab-content">
       <div class="card">
-        <h2>📊 Günlük Satış Geçmişi & Raporlar</h2>
-        <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:14px;">Yapılan tüm satış hareketleri tarih, saat ve satılan ürün kalemleri bazında listelenir.</p>
+        <h2>📊 Profesyonel İstatistikler & Raporlar</h2>
+        
+        <!-- Stat Cards Row -->
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px;">
+          <div style="background:#0F172A; border:1px solid var(--accent); border-radius:12px; padding:12px;">
+            <div style="font-size:0.75rem; color:var(--text-muted);">Toplam Ciro</div>
+            <div id="stat-total-revenue" style="font-size:1.3rem; font-weight:800; color:var(--accent);">0.00 ₺</div>
+          </div>
+          <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px;">
+            <div style="font-size:0.75rem; color:var(--text-muted);">Satılan Ürün</div>
+            <div id="stat-total-items" style="font-size:1.3rem; font-weight:800; color:var(--text);">0 adet</div>
+          </div>
+          <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px;">
+            <div style="font-size:0.75rem; color:var(--text-muted);">Ortalama Sepet</div>
+            <div id="stat-avg-cart" style="font-size:1.3rem; font-weight:800; color:#38BDF8;">0.00 ₺</div>
+          </div>
+          <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px;">
+            <div style="font-size:0.75rem; color:var(--text-muted);">Satış Adedi</div>
+            <div id="stat-total-tx" style="font-size:1.3rem; font-weight:800; color:var(--text);">0 işlem</div>
+          </div>
+        </div>
+
+        <!-- AI Business Growth Recommendation Section -->
+        <div style="background:rgba(16,185,129,0.08); border:1px solid var(--accent); border-radius:12px; padding:14px; margin-bottom:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <h3 style="margin:0; font-size:0.95rem; color:var(--accent); display:flex; align-items:center; gap:6px;">
+              <span>🤖 Yapay Zeka İşletme Geliştirme Önerileri</span>
+            </h3>
+            <button class="btn" style="width:auto; padding:6px 12px; font-size:0.8rem;" onclick="fetchAIBusinessRecommendations()">💡 Öneri Al</button>
+          </div>
+          <div id="ai-recommendation-box" style="font-size:0.85rem; color:var(--text); line-height:1.5; white-space:pre-line;">
+            Yapay zekadan stok takibi, kampanya ve ciro artırma önerileri almak için <b>"💡 Öneri Al"</b> butonuna basınız.
+          </div>
+        </div>
+
+        <!-- Store Working Hours Form Card -->
+        <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:16px;">
+          <h3 style="margin-top:0; margin-bottom:8px; font-size:0.95rem; color:var(--text);">⏰ İşletme Çalışma Saatleri</h3>
+          <form onsubmit="saveStoreHours(event)" style="display:flex; flex-direction:column; gap:8px;">
+            <div style="display:flex; gap:8px;">
+              <div style="flex:1;">
+                <label style="font-size:0.75rem; color:var(--text-muted);">Hafta İçi</label>
+                <input type="text" id="hours-weekday" placeholder="08:00 - 22:00" style="padding:8px; font-size:0.85rem;">
+              </div>
+              <div style="flex:1;">
+                <label style="font-size:0.75rem; color:var(--text-muted);">Hafta Sonu</label>
+                <input type="text" id="hours-weekend" placeholder="09:00 - 23:00" style="padding:8px; font-size:0.85rem;">
+              </div>
+            </div>
+            <button type="submit" class="btn btn-secondary" style="padding:8px; font-size:0.8rem;">💾 Çalışma Saatlerini Kaydet</button>
+          </form>
+        </div>
+
+        <h3 style="font-size:1rem; margin-bottom:8px;">📅 Günlük Satış Hareketleri</h3>
         <div id="sales-history-container">
           <!-- Sales history renders here -->
         </div>
@@ -852,6 +904,76 @@
       }
     }
 
+    async function handleFormCameraUpload(input) {
+      if (!input.files || !input.files[0]) return;
+      const file = input.files[0];
+      showToast("⚡ Barkod taranıyor...");
+
+      try {
+        const codeReader = new ZXing.BrowserMultiFormatReader();
+        const imgUrl = URL.createObjectURL(file);
+        const result = await codeReader.decodeFromImageUrl(imgUrl);
+        if (result && result.text) {
+          document.getElementById('form-barcode').value = result.text;
+          playBeep();
+          showToast("✅ Barkod okundu: " + result.text);
+          return;
+        }
+      } catch(e) {}
+
+      // Fallback to server side
+      const formData = new FormData();
+      formData.append('file', file);
+      try {
+        const res = await fetchWithAuth('/api/barcode/decode', { method: 'POST', body: formData });
+        const json = await res.json();
+        if (json.ok && json.barcode) {
+          document.getElementById('form-barcode').value = json.barcode;
+          playBeep();
+          showToast("✅ Barkod okundu: " + json.barcode);
+        } else {
+          showToast("⚠️ Barkod okunamadı, manuel yazabilirsiniz.");
+        }
+      } catch (err) {
+        showToast("⚠️ Barkod okunamadı.");
+      }
+    }
+
+    async function handlePOSPhotoUpload(input) {
+      if (!input.files || !input.files[0]) return;
+      const file = input.files[0];
+      showToast("⚡ Fotoğraf barkodu taranıyor...");
+
+      let scannedCode = null;
+      try {
+        const codeReader = new ZXing.BrowserMultiFormatReader();
+        const imgUrl = URL.createObjectURL(file);
+        const result = await codeReader.decodeFromImageUrl(imgUrl);
+        if (result && result.text) {
+          scannedCode = result.text;
+        }
+      } catch(e) {}
+
+      if (!scannedCode) {
+        const formData = new FormData();
+        formData.append('file', file);
+        try {
+          const res = await fetchWithAuth('/api/barcode/decode', { method: 'POST', body: formData });
+          const json = await res.json();
+          if (json.ok && json.barcode) {
+            scannedCode = json.barcode;
+          }
+        } catch (err) {}
+      }
+
+      if (scannedCode) {
+        document.getElementById('pos-barcode-input').value = scannedCode;
+        handlePOSScan();
+      } else {
+        showToast("❌ Fotoğrafta okunabilir barkod bulunamadı.");
+      }
+    }
+
     // ════════════════════════════════════════════════════════════════════
     // POS SATIŞ & SEPET ADET YÖNETİMİ
     // ════════════════════════════════════════════════════════════════════
@@ -1090,6 +1212,65 @@
         }).join('');
       } catch (err) {
         container.innerHTML = '<div style="text-align:center; color:var(--danger); padding:20px;">Satış geçmişi yüklenemedi!</div>';
+      }
+
+      loadSalesAnalytics();
+    }
+
+    async function loadSalesAnalytics() {
+      try {
+        const res = await fetchWithAuth('/api/sales/analytics');
+        const json = await res.json();
+        if (json.ok && json.analytics) {
+          const a = json.analytics;
+          document.getElementById('stat-total-revenue').innerText = (a.total_revenue || 0).toFixed(2) + ' ₺';
+          document.getElementById('stat-total-items').innerText = (a.total_items_sold || 0) + ' adet';
+          document.getElementById('stat-avg-cart').innerText = (a.average_cart || 0).toFixed(2) + ' ₺';
+          document.getElementById('stat-total-tx').innerText = (a.total_transactions || 0) + ' işlem';
+        }
+        if (json.ok && json.store_hours) {
+          const h = json.store_hours;
+          document.getElementById('hours-weekday').value = h.weekday || '';
+          document.getElementById('hours-weekend').value = h.weekend || '';
+        }
+      } catch (e) {}
+    }
+
+    async function fetchAIBusinessRecommendations() {
+      const box = document.getElementById('ai-recommendation-box');
+      box.innerHTML = '⏳ <i>Yapay zeka satışlarınızı, stoklarınızı ve çalışma saatlerinizi analiz ediyor...</i>';
+
+      try {
+        const res = await fetchWithAuth('/api/ai/analyze-sales', { method: 'POST' });
+        const json = await res.json();
+        
+        if (json.ok && json.analysis) {
+          box.innerHTML = json.analysis;
+          playBeep();
+          showToast("✨ Yapay zeka ticari önerileri hazırlandı!");
+        } else {
+          box.innerHTML = '❌ ' + (json.message || "Yapay zeka analizi alınamadı! Lütfen Gemini Key ayarınızı kontrol edin.");
+        }
+      } catch (e) {
+        box.innerHTML = '⚠️ Sunucu bağlantı hatası!';
+      }
+    }
+
+    async function saveStoreHours(e) {
+      e.preventDefault();
+      const weekday = document.getElementById('hours-weekday').value.trim();
+      const weekend = document.getElementById('hours-weekend').value.trim();
+
+      try {
+        const res = await fetchWithAuth('/api/settings/store-hours', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ weekday, weekend })
+        });
+        const json = await res.json();
+        showToast(json.message || "Çalışma saatleri kaydedildi.");
+      } catch (e) {
+        showToast("⚠️ Çalışma saatleri kaydedilemedi.");
       }
     }
 

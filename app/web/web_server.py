@@ -228,6 +228,37 @@ def get_sales_history():
     return jsonify({"ok": True, "sales": history})
 
 
+@app.route("/api/sales/analytics", methods=["GET"])
+def get_sales_analytics():
+    user_id = get_current_user_id()
+    analytics = cloud_db.get_sales_analytics(user_id=user_id)
+    hours = cloud_db.get_store_hours(user_id=user_id)
+    return jsonify({"ok": True, "analytics": analytics, "store_hours": hours})
+
+
+@app.route("/api/ai/analyze-sales", methods=["POST"])
+def api_analyze_sales():
+    user_id = get_current_user_id()
+    analytics = cloud_db.get_sales_analytics(user_id=user_id)
+    hours = cloud_db.get_store_hours(user_id=user_id)
+    res = ai_service.analyze_sales_and_business(analytics, hours)
+    return jsonify(res)
+
+
+@app.route("/api/settings/store-hours", methods=["GET", "POST"])
+def handle_store_hours():
+    user_id = get_current_user_id()
+    if request.method == "POST":
+        data = request.json or {}
+        weekday = data.get("weekday", "08:00 - 22:00")
+        weekend = data.get("weekend", "09:00 - 23:00")
+        cloud_db.save_store_hours(weekday, weekend, user_id=user_id)
+        return jsonify({"ok": True, "message": "İşletme çalışma saatleri başarıyla kaydedildi."})
+
+    hours = cloud_db.get_store_hours(user_id=user_id)
+    return jsonify({"ok": True, "store_hours": hours})
+
+
 @app.route("/api/barcode/decode", methods=["POST"])
 def api_decode_barcode():
     """Yüklenen yüksek çözünürlüklü fotoğraftan pyzbar + zxingcpp ile 7 aşamalı barkod çözer."""

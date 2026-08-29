@@ -239,3 +239,58 @@ class AIPackageService:
             msg = "Ambalaj resmi kaydedildi."
 
         return True, msg, result_data
+
+    def analyze_sales_and_business(self, analytics: Dict[str, Any], store_hours: Dict[str, str]) -> Dict[str, Any]:
+        """Gemini Yapay Zekasından işletme geliştirme ve büyüme tavsiyeleri alır."""
+        if not self.client:
+            self._init_client()
+
+        if not self.client:
+            return {
+                "ok": False,
+                "message": "Yapay Zeka API Key tanımlı değil! Lütfen üst bardaki '🔑 AI Ayarı' butonundan Gemini Key ekleyin."
+            }
+
+        prompt = f"""
+        Sen Türkiye'de süpermarket, şarküteri ve perakende mağaza danışmanı profesyonel bir Yapay Zeka Uzmanısın.
+        Aşağıda işletmenin güncel satış verileri, stok durumu ve çalışma saatleri verilmiştir:
+
+        - Toplam Ciro: {analytics.get('total_revenue', 0)} TL
+        - Toplam Satılan Ürün Adedi: {analytics.get('total_items_sold', 0)} adet
+        - Toplam Satış İşlem Sayısı: {analytics.get('total_transactions', 0)}
+        - Ortalama Sepet Tutarı: {analytics.get('average_cart', 0)} TL
+        - Hafta İçi Çalışma Saatleri: {store_hours.get('weekday', '08:00 - 22:00')}
+        - Hafta Sonu Çalışma Saatleri: {store_hours.get('weekend', '09:00 - 23:00')}
+        - En Çok Satan Ürünler (Top 5): {analytics.get('top_products', [])}
+        - Kritik Stoktaki Ürünler (Tedarik Gereken): {analytics.get('low_stock_items', [])}
+
+        Lütfen bu verilere dayanarak işletme sahibine yönelik 4 ana başlıkta somut, net ve harekete geçirici Türkçe Büyüme & Geliştirme Önerileri sun:
+
+        1. 🛒 **Stok & Tedarik Sipariş Tavsiyeleri** (Kritik stoklar ve sipariş adetleri)
+        2. 🎯 **Kampanya ve Paket Satış Önerileri** (Sepet tutarını artıracak ikili paket/promosyon tavsiyeleri)
+        3. 📈 **Ciro Artırma & Müşteri Sadakati Stratejileri** (Çalışma saatleri ve yoğunluğa göre ciroyu yükseltme tüyoları)
+        4. 💡 **Kategori & Ürün Çeşitlendirme Fikirleri** (Mağazada eksik olan ve satışı artıracak ürün önerileri)
+
+        Lütfen çıktıyı profesyonel Markdown formatında ver.
+        """
+
+        candidate_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.5-flash-lite"]
+
+        for model_name in candidate_models:
+            try:
+                if not self.legacy_active:
+                    res = self.client.models.generate_content(
+                        model=model_name,
+                        contents=prompt
+                    )
+                    if res and res.text:
+                        return {"ok": True, "analysis": res.text}
+                else:
+                    m = self.client.GenerativeModel(model_name)
+                    res = m.generate_content(prompt)
+                    if res and res.text:
+                        return {"ok": True, "analysis": res.text}
+            except Exception as exc:
+                logger.warning(f"AI Business Analysis ({model_name}) error: {exc}")
+
+        return {"ok": False, "message": "Yapay zeka tavsiyeleri üretilirken sunucu hatası oluştu."}

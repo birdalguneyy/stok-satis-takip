@@ -345,6 +345,97 @@ class CloudDatabase:
                 sales.append(s_dict)
         return sales
 
+    def get_sales_analytics(self, user_id: Optional[int] = None) -> Dict[str, Any]:
+        """Profesyonel satış istatistikleri, Top 5 ürün ve kritik stok analizi sunar."""
+        with self.db.get_connection() as conn:
+            sales_query = "SELECT COUNT(*) as total_transactions, SUM(total_amount) as total_revenue, SUM(item_count) as total_items FROM sales"
+            s_params: list = []
+            if user_id is not None:
+                sales_query += " WHERE user_id = ?"
+                s_params.append(user_id)
+
+            s_row = conn.execute(sales_query, s_params).fetchone()
+            total_tx = s_row["total_transactions"] if s_row else 0
+            total_rev = s_row["total_revenue"] or 0.0
+            total_items = s_row["total_items"] or 0
+            avg_cart = (total_rev / total_tx) if total_tx > 0 else 0.0
+
+            # Top 5 Best Selling Products
+            top_query = """
+                SELECT si.product_name, SUM(si.quantity) as total_qty, SUM(si.subtotal) as total_sales_amount
+                FROM sale_items si
+                JOIN sales s ON si.sale_id = s.id
+            """
+            top_params: list = []
+            if user_id is not None:
+                top_query += " WHERE s.user_id = ?"
+                top_params.append(user_id)
+            top_query += " GROUP BY si.product_name ORDER BY total_qty DESC LIMIT 5"
+            top_rows = conn.execute(top_query, top_params).fetchall()
+            top_products = [dict(r) for r in top_rows]
+
+            # Low Stock Items
+            low_query = "SELECT id, name, barcode, stock_quantity, critical_stock_level FROM products WHERE is_active = 1 AND stock_quantity <= critical_stock_level"
+            low_params: list = []
+            if user_id is not None:
+                low_query += " AND user_id = ?"
+                low_params.append(user_id)
+            low_rows = conn.execute(low_query, low_params).fetchall()
+            low_stock_items = [dict(r) for r in low_rows]
+
+            return {
+                "total_revenue": round(total_rev, 2),
+                "total_items_sold": total_items,
+                "total_transactions": total_tx,
+                "average_cart": round(avg_cart, 2),
+                "top_products": top_products,
+                "low_stock_items": low_stock_items,
+            }
+
+    def get_store_hours(self, user_id: Optional[int] = None) -> Dict[str, str]:
+        """İşletme çalışma saatlerini getirir."""
+        with self.db.get_connection() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS store_settings (
+                    user_id INTEGER PRIMARY KEY,
+                    weekday_hours TEXT,
+                    weekend_hours TEXT
+                )
+                """
+            )
+            uid = user_id or 1
+            row = conn.execute("SELECT weekday_hours, weekend_hours FROM store_settings WHERE user_id = ?", (uid,)).fetchone()
+            if row:
+                return {
+                    "weekday": row["weekday_hours"] or "08:00 - 22:00",
+                    "weekend": row["weekend_hours"] or "09:00 - 23:00",
+                }
+            return {"weekday": "08:00 - 22:00", "weekend": "09:00 - 23:00"}
+
+    def save_store_hours(self, weekday: str, weekend: str, user_id: Optional[int] = None) -> bool:
+        """İşletme çalışma saatlerini kaydeder."""
+        with self.db.get_connection() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS store_settings (
+                    user_id INTEGER PRIMARY KEY,
+                    weekday_hours TEXT,
+                    weekend_hours TEXT
+                )
+                """
+            )
+            uid = user_id or 1
+            conn.execute(
+                """
+                INSERT INTO store_settings (user_id, weekday_hours, weekend_hours)
+                VALUES (?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET weekday_hours = excluded.weekday_hours, weekend_hours = excluded.weekend_hours
+                """,
+                (uid, weekday.strip(), weekend.strip()),
+            )
+            return True
+
     # ════════════════════════════════════════════════════════════════════
     # KULLANICI ÜYELİK VE GİRİŞ İŞLEMLERİ (AUTH)
     # ════════════════════════════════════════════════════════════════════

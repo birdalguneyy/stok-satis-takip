@@ -59,11 +59,12 @@ class CloudDatabase:
             if env_json and env_json.strip():
                 raw_json = env_json.strip()
                 try:
-                    # Check if base64 encoded
                     if not raw_json.startswith("{"):
                         raw_json = base64.b64decode(raw_json).decode("utf-8")
-                    cred_dict = json.loads(raw_json)
-                    cred = credentials.Certificate(cred_dict)
+                    c_dict = json.loads(raw_json)
+                    if isinstance(c_dict, dict) and "private_key" in c_dict:
+                        c_dict["private_key"] = c_dict["private_key"].replace("\\n", "\n").replace("\\\\n", "\n")
+                    cred = credentials.Certificate(c_dict)
                     logger.info("Firebase kimlik bilgileri ortam değişkeninden (JSON) yüklendi.")
                 except Exception as e:
                     logger.warning(f"Ortam değişkeninden Firebase JSON ayrıştırma hatası: {e}")
@@ -73,8 +74,15 @@ class CloudDatabase:
                 logger.info(f"Firebase kimlik bilgileri ortam yolundan ({env_path}) yüklendi.")
 
             if not cred and file_path.exists():
-                cred = credentials.Certificate(str(file_path))
-                logger.info("Firebase kimlik bilgileri yeral dosyadan (firebase_credentials.json) yüklendi.")
+                try:
+                    c_dict = json.loads(file_path.read_text(encoding="utf-8"))
+                    if isinstance(c_dict, dict) and "private_key" in c_dict:
+                        c_dict["private_key"] = c_dict["private_key"].replace("\\n", "\n").replace("\\\\n", "\n")
+                    cred = credentials.Certificate(c_dict)
+                    logger.info("Firebase kimlik bilgileri yerel dosyadan (firebase_credentials.json) yüklendi.")
+                except Exception as e:
+                    logger.warning(f"Yerel Firebase JSON ayrıştırma uyarısı: {e}")
+                    cred = credentials.Certificate(str(file_path))
 
             if cred:
                 firebase_admin.initialize_app(cred)
@@ -324,14 +332,25 @@ class CloudDatabase:
 
             return True, f"Satış başarıyla tamamlandı. Toplam: {total_amount:.2f} ₺"
 
-    def get_sales_history(self, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Yapılan tüm satış hareketlerini tarih sırasına göre kalemleriyle getirir."""
-        query = "SELECT * FROM sales"
+    def get_sales_history(
+        self,
+        user_id: Optional[int] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Yapılan tüm satış hareketlerini tarih aralığına göre kalemleriyle getirir."""
+        query = "SELECT * FROM sales WHERE 1=1"
         params: list = []
         if user_id is not None:
-            query += " WHERE user_id = ?"
+            query += " AND user_id = ?"
             params.append(user_id)
-        query += " ORDER BY id DESC LIMIT 100"
+        if start_date:
+            query += " AND sold_at >= ?"
+            params.append(start_date + " 00:00:00")
+        if end_date:
+            query += " AND sold_at <= ?"
+            params.append(end_date + " 23:59:59")
+        query += " ORDER BY id DESC LIMIT 200"
 
         sales = []
         with self.db.get_connection() as conn:
@@ -345,14 +364,25 @@ class CloudDatabase:
                 sales.append(s_dict)
         return sales
 
-    def get_sales_analytics(self, user_id: Optional[int] = None) -> Dict[str, Any]:
-        """Profesyonel satış istatistikleri, Top 5 ürün ve kritik stok analizi sunar."""
+    def get_sales_analytics(
+        self,
+        user_id: Optional[int] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Profesyonel satış istatistikleri, giderler, net kar ve kritik stok analizi sunar."""
         with self.db.get_connection() as conn:
-            sales_query = "SELECT COUNT(*) as total_transactions, SUM(total_amount) as total_revenue, SUM(item_count) as total_items FROM sales"
+            sales_query = "SELECT COUNT(*) as total_transactions, SUM(total_amount) as total_revenue, SUM(item_count) as total_items FROM sales WHERE 1=1"
             s_params: list = []
             if user_id is not None:
-                sales_query += " WHERE user_id = ?"
+                sales_query += " AND user_id = ?"
                 s_params.append(user_id)
+            if start_date:
+                sales_query += " AND sold_at >= ?"
+                s_params.append(start_date + " 00:00:00")
+            if end_date:
+                sales_query += " AND sold_at <= ?"
+                s_params.append(end_date + " 23:59:59")
 
             s_row = conn.execute(sales_query, s_params).fetchone()
             total_tx = s_row["total_transactions"] if s_row else 0
@@ -360,16 +390,23 @@ class CloudDatabase:
             total_items = s_row["total_items"] or 0
             avg_cart = (total_rev / total_tx) if total_tx > 0 else 0.0
 
-            # Top 5 Best Selling Products
+            # Top 5 Best Selling Products in date range
             top_query = """
                 SELECT si.product_name, SUM(si.quantity) as total_qty, SUM(si.subtotal) as total_sales_amount
                 FROM sale_items si
                 JOIN sales s ON si.sale_id = s.id
+                WHERE 1=1
             """
             top_params: list = []
             if user_id is not None:
-                top_query += " WHERE s.user_id = ?"
+                top_query += " AND s.user_id = ?"
                 top_params.append(user_id)
+            if start_date:
+                top_query += " AND s.sold_at >= ?"
+                top_params.append(start_date + " 00:00:00")
+            if end_date:
+                top_query += " AND s.sold_at <= ?"
+                top_params.append(end_date + " 23:59:59")
             top_query += " GROUP BY si.product_name ORDER BY total_qty DESC LIMIT 5"
             top_rows = conn.execute(top_query, top_params).fetchall()
             top_products = [dict(r) for r in top_rows]
@@ -383,14 +420,130 @@ class CloudDatabase:
             low_rows = conn.execute(low_query, low_params).fetchall()
             low_stock_items = [dict(r) for r in low_rows]
 
+            # Total Expenses in date range
+            exp_query = "SELECT SUM(amount) as total_exp FROM expenses WHERE 1=1"
+            exp_params: list = []
+            if user_id is not None:
+                exp_query += " AND user_id = ?"
+                exp_params.append(user_id)
+            if start_date:
+                exp_query += " AND expense_date >= ?"
+                exp_params.append(start_date)
+            if end_date:
+                exp_query += " AND expense_date <= ?"
+                exp_params.append(end_date)
+            
+            exp_row = conn.execute(exp_query, exp_params).fetchone()
+            total_exp = exp_row["total_exp"] or 0.0 if exp_row else 0.0
+            net_profit = total_rev - total_exp
+
             return {
                 "total_revenue": round(total_rev, 2),
                 "total_items_sold": total_items,
                 "total_transactions": total_tx,
                 "average_cart": round(avg_cart, 2),
+                "total_expenses": round(total_exp, 2),
+                "net_profit": round(net_profit, 2),
                 "top_products": top_products,
                 "low_stock_items": low_stock_items,
             }
+
+    # ════════════════════════════════════════════════════════════════════
+    # FATURA VE GİDER TAKİBİ (ELEKTRİK, SU, İNTERNET, KİRA)
+    # ════════════════════════════════════════════════════════════════════
+    def add_expense(
+        self,
+        title: str,
+        amount: float,
+        category: str = "Fatura",
+        expense_date: Optional[str] = None,
+        note: str = "",
+        user_id: Optional[int] = None,
+    ) -> tuple[bool, str, Optional[Dict[str, Any]]]:
+        t_clean = title.strip()
+        if not t_clean or amount <= 0:
+            return False, "Lütfen geçerli bir gider adı ve tutar giriniz!", None
+
+        exp_date = expense_date or datetime.now().strftime("%Y-%m-%d")
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        with self.db.get_connection() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS expenses (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    title TEXT NOT NULL,
+                    amount REAL NOT NULL,
+                    category TEXT DEFAULT 'Fatura',
+                    expense_date TEXT NOT NULL,
+                    note TEXT,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            cursor = conn.execute(
+                """
+                INSERT INTO expenses (user_id, title, amount, category, expense_date, note, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (user_id, t_clean, amount, category.strip(), exp_date, note.strip(), now),
+            )
+            eid = cursor.lastrowid
+            exp_data = {
+                "id": eid,
+                "user_id": user_id,
+                "title": t_clean,
+                "amount": amount,
+                "category": category,
+                "expense_date": exp_date,
+                "note": note,
+            }
+
+            if self.firestore_db:
+                try:
+                    self.firestore_db.collection("expenses").document(str(eid)).set(exp_data)
+                except Exception:
+                    pass
+
+            return True, f"'{t_clean}' ({amount:.2f} ₺) gideri başarıyla eklendi.", exp_data
+
+    def get_expenses(
+        self,
+        user_id: Optional[int] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        with self.db.get_connection() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS expenses (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    title TEXT NOT NULL,
+                    amount REAL NOT NULL,
+                    category TEXT DEFAULT 'Fatura',
+                    expense_date TEXT NOT NULL,
+                    note TEXT,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            query = "SELECT * FROM expenses WHERE 1=1"
+            params: list = []
+            if user_id is not None:
+                query += " AND user_id = ?"
+                params.append(user_id)
+            if start_date:
+                query += " AND expense_date >= ?"
+                params.append(start_date)
+            if end_date:
+                query += " AND expense_date <= ?"
+                params.append(end_date)
+            query += " ORDER BY expense_date DESC, id DESC LIMIT 100"
+
+            rows = conn.execute(query, params).fetchall()
+            return [dict(r) for r in rows]
 
     def get_store_hours(self, user_id: Optional[int] = None) -> Dict[str, str]:
         """İşletme çalışma saatlerini getirir."""

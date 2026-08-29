@@ -318,6 +318,27 @@
     </div>
   </div>
 
+  <!-- AI KEY MODAL POPUP OVERLAY -->
+  <div id="ai-key-modal-overlay" class="modal-overlay" style="display:none;">
+    <div class="modal-card" style="max-width:440px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:14px;">
+        <h3 style="margin:0; font-size:1.1rem; color:var(--accent);">🔑 Gemini AI Ayarları</h3>
+        <button style="background:none; border:none; color:var(--text-muted); font-size:1.4rem; cursor:pointer;" onclick="closeAIKeyModal()">&times;</button>
+      </div>
+      <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:14px;">
+        Yapay zeka ambalaj okuyucusu ve ticari büyüme önerileri için ücretsiz Google Gemini API Key tanımlayın.
+      </p>
+      <div class="form-group">
+        <label>Gemini API Key</label>
+        <input type="text" id="modal-gemini-key-input" placeholder="AIzaSy..." style="padding:12px; font-size:0.9rem;">
+      </div>
+      <div style="display:flex; gap:10px; margin-top:16px;">
+        <button class="btn" style="flex:1;" onclick="saveGeminiKeyFromModal()">💾 Kaydet</button>
+        <button class="btn btn-secondary" style="flex:1;" onclick="closeAIKeyModal()">Kapat</button>
+      </div>
+    </div>
+  </div>
+
   <header>
     <h1 style="display:flex; align-items:center; gap:10px;">
       <img src="/static/logo.png" alt="Logo" style="width:34px; height:34px; border-radius:8px; object-fit:cover; border:1px solid var(--accent);">
@@ -401,6 +422,23 @@
       <div class="card">
         <h2>📊 Profesyonel İstatistikler & Raporlar</h2>
         
+        <!-- Date Filter Buttons & Inputs -->
+        <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:14px;">
+          <div style="font-weight:700; font-size:0.85rem; color:var(--text); margin-bottom:8px;">📅 Tarih / Ay Filtresi</div>
+          <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;">
+            <button class="btn btn-secondary" style="padding:6px 12px; font-size:0.75rem; flex:1;" onclick="setDateFilter('today')">Bugün</button>
+            <button class="btn btn-secondary" style="padding:6px 12px; font-size:0.75rem; flex:1;" onclick="setDateFilter('yesterday')">Dün</button>
+            <button class="btn btn-secondary" style="padding:6px 12px; font-size:0.75rem; flex:1;" onclick="setDateFilter('week')">Bu Hafta</button>
+            <button class="btn btn-secondary" style="padding:6px 12px; font-size:0.75rem; flex:1;" onclick="setDateFilter('month')">Bu Ay</button>
+            <button class="btn btn-secondary" style="padding:6px 12px; font-size:0.75rem; flex:1;" onclick="setDateFilter('all')">Tümü</button>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <input type="date" id="filter-start-date" style="flex:1; padding:6px; font-size:0.8rem;" onchange="applyCustomDateFilter()">
+            <span style="font-size:0.8rem; color:var(--text-muted);">-</span>
+            <input type="date" id="filter-end-date" style="flex:1; padding:6px; font-size:0.8rem;" onchange="applyCustomDateFilter()">
+          </div>
+        </div>
+
         <!-- Stat Cards Row -->
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px;">
           <div style="background:#0F172A; border:1px solid var(--accent); border-radius:12px; padding:12px;">
@@ -408,16 +446,16 @@
             <div id="stat-total-revenue" style="font-size:1.3rem; font-weight:800; color:var(--accent);">0.00 ₺</div>
           </div>
           <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px;">
+            <div style="font-size:0.75rem; color:var(--text-muted);">Toplam Giderler</div>
+            <div id="stat-total-expenses" style="font-size:1.3rem; font-weight:800; color:var(--danger);">0.00 ₺</div>
+          </div>
+          <div style="background:#0F172A; border:1px solid #38BDF8; border-radius:12px; padding:12px;">
+            <div style="font-size:0.75rem; color:var(--text-muted);">Net Kar</div>
+            <div id="stat-net-profit" style="font-size:1.3rem; font-weight:800; color:#38BDF8;">0.00 ₺</div>
+          </div>
+          <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px;">
             <div style="font-size:0.75rem; color:var(--text-muted);">Satılan Ürün</div>
             <div id="stat-total-items" style="font-size:1.3rem; font-weight:800; color:var(--text);">0 adet</div>
-          </div>
-          <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px;">
-            <div style="font-size:0.75rem; color:var(--text-muted);">Ortalama Sepet</div>
-            <div id="stat-avg-cart" style="font-size:1.3rem; font-weight:800; color:#38BDF8;">0.00 ₺</div>
-          </div>
-          <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px;">
-            <div style="font-size:0.75rem; color:var(--text-muted);">Satış Adedi</div>
-            <div id="stat-total-tx" style="font-size:1.3rem; font-weight:800; color:var(--text);">0 işlem</div>
           </div>
         </div>
 
@@ -431,6 +469,31 @@
           </div>
           <div id="ai-recommendation-box" style="font-size:0.85rem; color:var(--text); line-height:1.5; white-space:pre-line;">
             Yapay zekadan stok takibi, kampanya ve ciro artırma önerileri almak için <b>"💡 Öneri Al"</b> butonuna basınız.
+          </div>
+        </div>
+
+        <!-- Expenses & Bills Tracker Card -->
+        <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:16px;">
+          <h3 style="margin-top:0; margin-bottom:8px; font-size:0.95rem; color:var(--text);">💸 Fatura & İşletme Giderleri Ekle (Elektrik, Su, İnternet, Kira)</h3>
+          <form onsubmit="handleAddExpenseSubmit(event)" style="display:flex; flex-direction:column; gap:8px;">
+            <div style="display:flex; gap:8px;">
+              <input type="text" id="exp-title" placeholder="Gider Adı (Örn: Elektrik Faturası)" required style="flex:2; padding:8px; font-size:0.85rem;">
+              <input type="number" step="0.5" id="exp-amount" placeholder="Tutar (₺)" required style="flex:1; padding:8px; font-size:0.85rem;">
+            </div>
+            <div style="display:flex; gap:8px;">
+              <select id="exp-category" style="flex:1; padding:8px; background:var(--card); border:1px solid var(--border); color:var(--text); border-radius:8px; font-size:0.85rem;">
+                <option value="Fatura">⚡ Fatura (Elektrik/Su/İnternet)</option>
+                <option value="Kira">🏢 Dükkan Kirası</option>
+                <option value="Maaş">👥 Personel Maaşı</option>
+                <option value="Diğer">📦 Diğer Giderler</option>
+              </select>
+              <input type="date" id="exp-date" style="flex:1; padding:8px; font-size:0.85rem;">
+            </div>
+            <button type="submit" class="btn btn-secondary" style="padding:8px; font-size:0.8rem;">➕ Gider Kaydet</button>
+          </form>
+
+          <div id="expense-list-container" style="margin-top:10px;">
+            <!-- Expense list renders here -->
           </div>
         </div>
 
@@ -452,7 +515,7 @@
           </form>
         </div>
 
-        <h3 style="font-size:1rem; margin-bottom:8px;">📅 Günlük Satış Hareketleri</h3>
+        <h3 style="font-size:1rem; margin-bottom:8px;">📅 Seçilen Dönemdeki Satış Hareketleri</h3>
         <div id="sales-history-container">
           <!-- Sales history renders here -->
         </div>
@@ -1174,18 +1237,152 @@
       selectEl.value = '';
     }
 
+    let currentStartDate = '';
+    let currentEndDate = '';
+
+    function openAIKeyModal() {
+      const modal = document.getElementById('ai-key-modal-overlay');
+      if (modal) modal.style.display = 'flex';
+    }
+
+    function closeAIKeyModal() {
+      const modal = document.getElementById('ai-key-modal-overlay');
+      if (modal) modal.style.display = 'none';
+    }
+
+    async function saveGeminiKeyFromModal() {
+      const key = document.getElementById('modal-gemini-key-input').value.trim();
+      if (!key) {
+        showToast("⚠️ Lütfen bir API key girin.");
+        return;
+      }
+      const res = await fetchWithAuth('/api/settings/gemini-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: key })
+      });
+      const json = await res.json();
+      showToast(json.message || "Key kaydedildi.");
+      if (json.ok) {
+        closeAIKeyModal();
+      }
+    }
+
+    function setDateFilter(preset) {
+      const now = new Date();
+      const formatYMD = (d) => d.toISOString().split('T')[0];
+
+      if (preset === 'today') {
+        currentStartDate = formatYMD(now);
+        currentEndDate = formatYMD(now);
+      } else if (preset === 'yesterday') {
+        const y = new Date(now);
+        y.setDate(now.getDate() - 1);
+        currentStartDate = formatYMD(y);
+        currentEndDate = formatYMD(y);
+      } else if (preset === 'week') {
+        const w = new Date(now);
+        w.setDate(now.getDate() - 7);
+        currentStartDate = formatYMD(w);
+        currentEndDate = formatYMD(now);
+      } else if (preset === 'month') {
+        const m = new Date(now.getFullYear(), now.getMonth(), 1);
+        currentStartDate = formatYMD(m);
+        currentEndDate = formatYMD(now);
+      } else if (preset === 'all') {
+        currentStartDate = '';
+        currentEndDate = '';
+      }
+
+      document.getElementById('filter-start-date').value = currentStartDate;
+      document.getElementById('filter-end-date').value = currentEndDate;
+
+      loadSalesHistory();
+      loadExpenses();
+    }
+
+    function applyCustomDateFilter() {
+      currentStartDate = document.getElementById('filter-start-date').value;
+      currentEndDate = document.getElementById('filter-end-date').value;
+      loadSalesHistory();
+      loadExpenses();
+    }
+
+    async function handleAddExpenseSubmit(e) {
+      e.preventDefault();
+      const title = document.getElementById('exp-title').value.trim();
+      const amount = parseFloat(document.getElementById('exp-amount').value);
+      const category = document.getElementById('exp-category').value;
+      const expense_date = document.getElementById('exp-date').value || (new Date().toISOString().split('T')[0]);
+
+      try {
+        const res = await fetchWithAuth('/api/expenses', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, amount, category, expense_date })
+        });
+        const json = await res.json();
+        showToast(json.message || "Gider kaydedildi.");
+        if (json.ok) {
+          document.getElementById('exp-title').value = '';
+          document.getElementById('exp-amount').value = '';
+          loadExpenses();
+          loadSalesAnalytics();
+        }
+      } catch (err) {
+        showToast("⚠️ Gider kaydedilemedi.");
+      }
+    }
+
+    async function loadExpenses() {
+      const container = document.getElementById('expense-list-container');
+      if (!container) return;
+
+      let url = '/api/expenses?1=1';
+      if (currentStartDate) url += '&start_date=' + currentStartDate;
+      if (currentEndDate) url += '&end_date=' + currentEndDate;
+
+      try {
+        const res = await fetchWithAuth(url);
+        const json = await res.json();
+        const expenses = json.expenses || [];
+
+        if (!expenses.length) {
+          container.innerHTML = '<div style="font-size:0.75rem; color:var(--text-muted); text-align:center; padding:6px;">Seçilen dönemde kaydedilmiş gider bulunamadı.</div>';
+          return;
+        }
+
+        container.innerHTML = expenses.map(e => `
+          <div style="font-size:0.8rem; display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px dashed var(--border);">
+            <div>
+              <span style="font-weight:700; color:var(--text);">${e.title}</span>
+              <span style="font-size:0.7rem; color:var(--text-muted); margin-left:6px;">(${e.category} | ${e.expense_date})</span>
+            </div>
+            <div style="font-weight:700; color:var(--danger);">${e.amount.toFixed(2)} ₺</div>
+          </div>
+        `).join('');
+      } catch (err) {
+        container.innerHTML = '<div style="font-size:0.75rem; color:var(--danger);">Giderler yüklenemedi.</div>';
+      }
+    }
+
     async function loadSalesHistory() {
       const container = document.getElementById('sales-history-container');
       if (!container) return;
       container.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:20px;">⏳ Satış geçmişi yükleniyor...</div>';
 
+      let url = '/api/sales/history?1=1';
+      if (currentStartDate) url += '&start_date=' + currentStartDate;
+      if (currentEndDate) url += '&end_date=' + currentEndDate;
+
       try {
-        const res = await fetchWithAuth('/api/sales/history');
+        const res = await fetchWithAuth(url);
         const json = await res.json();
         const sales = json.sales || [];
 
         if (!sales.length) {
-          container.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:20px;">Henüz kaydedilmiş satış hareketi yok</div>';
+          container.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:20px;">Seçilen tarih aralığında kaydedilmiş satış hareketi yok</div>';
+          loadSalesAnalytics();
           return;
         }
 
@@ -1215,18 +1412,28 @@
       }
 
       loadSalesAnalytics();
+      loadExpenses();
     }
 
     async function loadSalesAnalytics() {
+      let url = '/api/sales/analytics?1=1';
+      if (currentStartDate) url += '&start_date=' + currentStartDate;
+      if (currentEndDate) url += '&end_date=' + currentEndDate;
+
       try {
-        const res = await fetchWithAuth('/api/sales/analytics');
+        const res = await fetchWithAuth(url);
         const json = await res.json();
         if (json.ok && json.analytics) {
           const a = json.analytics;
           document.getElementById('stat-total-revenue').innerText = (a.total_revenue || 0).toFixed(2) + ' ₺';
+          document.getElementById('stat-total-expenses').innerText = (a.total_expenses || 0).toFixed(2) + ' ₺';
+          
+          const netEl = document.getElementById('stat-net-profit');
+          const net = a.net_profit || 0;
+          netEl.innerText = net.toFixed(2) + ' ₺';
+          netEl.style.color = net >= 0 ? '#38BDF8' : 'var(--danger)';
+
           document.getElementById('stat-total-items').innerText = (a.total_items_sold || 0) + ' adet';
-          document.getElementById('stat-avg-cart').innerText = (a.average_cart || 0).toFixed(2) + ' ₺';
-          document.getElementById('stat-total-tx').innerText = (a.total_transactions || 0) + ' işlem';
         }
         if (json.ok && json.store_hours) {
           const h = json.store_hours;
@@ -1241,7 +1448,11 @@
       box.innerHTML = '⏳ <i>Yapay zeka satışlarınızı, stoklarınızı ve çalışma saatlerinizi analiz ediyor...</i>';
 
       try {
-        const res = await fetchWithAuth('/api/ai/analyze-sales', { method: 'POST' });
+        const res = await fetchWithAuth('/api/ai/analyze-sales', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ start_date: currentStartDate, end_date: currentEndDate })
+        });
         const json = await res.json();
         
         if (json.ok && json.analysis) {

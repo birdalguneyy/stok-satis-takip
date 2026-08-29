@@ -224,22 +224,55 @@ def record_sale():
 @app.route("/api/sales/history", methods=["GET"])
 def get_sales_history():
     user_id = get_current_user_id()
-    history = cloud_db.get_sales_history(user_id=user_id)
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+    history = cloud_db.get_sales_history(user_id=user_id, start_date=start_date, end_date=end_date)
     return jsonify({"ok": True, "sales": history})
 
 
 @app.route("/api/sales/analytics", methods=["GET"])
 def get_sales_analytics():
     user_id = get_current_user_id()
-    analytics = cloud_db.get_sales_analytics(user_id=user_id)
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+    analytics = cloud_db.get_sales_analytics(user_id=user_id, start_date=start_date, end_date=end_date)
     hours = cloud_db.get_store_hours(user_id=user_id)
     return jsonify({"ok": True, "analytics": analytics, "store_hours": hours})
+
+
+@app.route("/api/expenses", methods=["GET", "POST"])
+def handle_expenses():
+    user_id = get_current_user_id()
+    if request.method == "POST":
+        data = request.json or {}
+        title = data.get("title", "")
+        amount = float(data.get("amount", 0))
+        category = data.get("category", "Fatura")
+        expense_date = data.get("expense_date")
+        note = data.get("note", "")
+
+        ok, msg, exp = cloud_db.add_expense(
+            title=title,
+            amount=amount,
+            category=category,
+            expense_date=expense_date,
+            note=note,
+            user_id=user_id,
+        )
+        return jsonify({"ok": ok, "message": msg, "expense": exp})
+
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+    expenses = cloud_db.get_expenses(user_id=user_id, start_date=start_date, end_date=end_date)
+    return jsonify({"ok": True, "expenses": expenses})
 
 
 @app.route("/api/ai/analyze-sales", methods=["POST"])
 def api_analyze_sales():
     user_id = get_current_user_id()
-    analytics = cloud_db.get_sales_analytics(user_id=user_id)
+    start_date = request.json.get("start_date") if request.json else None
+    end_date = request.json.get("end_date") if request.json else None
+    analytics = cloud_db.get_sales_analytics(user_id=user_id, start_date=start_date, end_date=end_date)
     hours = cloud_db.get_store_hours(user_id=user_id)
     res = ai_service.analyze_sales_and_business(analytics, hours)
     return jsonify(res)

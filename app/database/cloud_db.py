@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from app.config import DATA_DIR, DB_PATH
 from app.database.connection import Database
+from app.database.migrations import run_migrations
 from app.models.product import Product
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,10 @@ class CloudDatabase:
         if self._initialized:
             return
         self.db = Database()
+        try:
+            run_migrations()
+        except Exception as exc:
+            logger.warning(f"Migration otomatik çalıştırma uyarısı: {exc}")
         self.firestore_db = None
         self._init_firebase_optional()
         self._initialized = True

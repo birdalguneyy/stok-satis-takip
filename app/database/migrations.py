@@ -188,6 +188,15 @@ def run_migrations() -> None:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_products_user_id ON products(user_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_categories_user_id ON categories(user_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_sales_user_id ON sales(user_id)")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS store_settings (
+                    user_id         INTEGER PRIMARY KEY,
+                    weekday_hours   TEXT,
+                    weekend_hours   TEXT
+                )
+                """
+            )
 
 
 

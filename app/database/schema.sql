@@ -80,3 +80,24 @@ CREATE TABLE IF NOT EXISTS sale_items (
 CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON sale_items(sale_id);
 CREATE INDEX IF NOT EXISTS idx_sale_items_product_id ON sale_items(product_id);
 
+CREATE TABLE IF NOT EXISTS expenses (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER REFERENCES users(id),
+    title           TEXT NOT NULL,
+    amount          REAL NOT NULL,
+    category        TEXT DEFAULT 'Fatura',
+    expense_date    TEXT NOT NULL,
+    note            TEXT,
+    synced_to_cloud INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_expenses_user_id ON expenses(user_id);
+CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date);
+
+CREATE TABLE IF NOT EXISTS store_settings (
+    user_id         INTEGER PRIMARY KEY REFERENCES users(id),
+    weekday_hours   TEXT,
+    weekend_hours   TEXT
+);
+

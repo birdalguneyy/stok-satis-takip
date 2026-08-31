@@ -1990,7 +1990,10 @@
       } catch (err) {
         container.innerHTML = '<div style="font-size:0.75rem; color:var(--danger);">Giderler yüklenemedi.</div>';
       }
+    }
+
     let pendingDeleteSaleId = null;
+
 
     function promptDeleteSale(saleId, soldAt, totalAmount) {
       pendingDeleteSaleId = saleId;

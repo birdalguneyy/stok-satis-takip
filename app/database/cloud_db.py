@@ -628,6 +628,58 @@ class CloudDatabase:
         prod_data["synced_to_cloud"] = synced
         return True, msg, prod_data
 
+    def delete_product(self, product_id: int, user_id: Optional[int] = None) -> tuple[bool, str]:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with self.db.get_connection() as conn:
+            query = "UPDATE products SET is_active = 0, synced_to_cloud = 0, updated_at = ? WHERE id = ?"
+            params: list = [now, product_id]
+            if user_id is not None:
+                query += " AND (user_id = ? OR user_id IS NULL)"
+                params.append(user_id)
+            conn.execute(query, params)
+
+        if self.firestore_db:
+            try:
+                self.firestore_db.collection("products").document(str(product_id)).update({
+                    "is_active": 0,
+                    "updated_at": now,
+                    "synced_to_cloud": 1
+                })
+                with self.db.get_connection() as conn:
+                    conn.execute("UPDATE products SET synced_to_cloud = 1 WHERE id = ?", (product_id,))
+            except Exception as e:
+                logger.warning(f"Firestore ürün silme uyarısı: {e}")
+
+        return True, "Ürün stok kataloğundan silindi."
+
+    def update_product_stock(self, product_id: int, stock_quantity: int, user_id: Optional[int] = None) -> tuple[bool, str]:
+        if stock_quantity < 0:
+            return False, "Stok miktarı negatif olamaz!"
+
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with self.db.get_connection() as conn:
+            query = "UPDATE products SET stock_quantity = ?, synced_to_cloud = 0, updated_at = ? WHERE id = ?"
+            params: list = [stock_quantity, now, product_id]
+            if user_id is not None:
+                query += " AND (user_id = ? OR user_id IS NULL)"
+                params.append(user_id)
+            conn.execute(query, params)
+
+        if self.firestore_db:
+            try:
+                self.firestore_db.collection("products").document(str(product_id)).update({
+                    "stock_quantity": stock_quantity,
+                    "updated_at": now,
+                    "synced_to_cloud": 1
+                })
+                with self.db.get_connection() as conn:
+                    conn.execute("UPDATE products SET synced_to_cloud = 1 WHERE id = ?", (product_id,))
+            except Exception as e:
+                logger.warning(f"Firestore stok güncelleme uyarısı: {e}")
+
+        return True, f"Stok miktarı {stock_quantity} adet olarak güncellendi."
+
+
     # ════════════════════════════════════════════════════════════════════
     # SATIŞ İŞLEMLERİ
     # ════════════════════════════════════════════════════════════════════

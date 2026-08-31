@@ -339,12 +339,60 @@
     </div>
   </div>
 
+  <!-- P2P WEBRTC IMAGE STORAGE MODAL POPUP OVERLAY -->
+  <div id="p2p-modal-overlay" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(15,23,42,0.95); backdrop-filter:blur(16px); z-index:999; justify-content:center; align-items:center; padding:16px;">
+    <div class="card" style="width:100%; max-width:460px; box-shadow:0 15px 40px rgba(0,0,0,0.6);">
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:14px;">
+        <h3 style="margin:0; font-size:1.05rem; color:var(--accent); display:flex; align-items:center; gap:6px;">
+          <span>📡 Telefon ➔ PC Doğrudan P2P Görsel Deposu</span>
+        </h3>
+        <button style="background:none; border:none; color:var(--text-muted); font-size:1.4rem; cursor:pointer;" onclick="closeP2PModal()">&times;</button>
+      </div>
+
+      <!-- STATUS BANNER INSIDE MODAL -->
+      <div id="p2p-modal-status" style="padding:10px; border-radius:10px; background:rgba(239,68,68,0.15); border:1px solid var(--danger); color:var(--danger); font-size:0.85rem; font-weight:700; margin-bottom:14px; text-align:center;">
+        🔴 PC İle Bağlantı Kurulmadı (Yerel Depolama Aktif)
+      </div>
+
+      <!-- SECTION 1: PC NODE MODE -->
+      <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:14px;">
+        <div style="font-weight:700; font-size:0.9rem; color:var(--text); margin-bottom:4px;">💻 PC Görsel Depo Sunucusu Modu</div>
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:10px;">
+          Bu bilgisayarı görsel depolama cihazı yapın. Telefonlardan gelen fotoğraflar doğrudan PC'ye kaydedilir.
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px;">
+          <button id="btn-pc-start" class="btn" style="flex:1; font-size:0.8rem; padding:10px;" onclick="startPCNode()">🖥️ PC Kodu Oluştur & Dinle</button>
+          <button id="btn-pc-folder" class="btn btn-secondary" style="flex:1; font-size:0.8rem; padding:10px;" onclick="selectPCFolder()">📂 Klasör Seç (Opsiyonel)</button>
+        </div>
+        <div id="pc-pair-code-box" style="display:none; text-align:center; background:rgba(16,185,129,0.1); border:1px solid var(--accent); border-radius:10px; padding:12px; margin-top:10px;">
+          <div style="font-size:0.75rem; color:var(--text-muted);">Telefondan Girilecek Eşleşme Kodu:</div>
+          <div id="pc-pair-code-display" style="font-size:1.8rem; font-weight:800; letter-spacing:4px; color:var(--accent); margin:4px 0;">------</div>
+          <div style="font-size:0.7rem; color:var(--text-muted);">Telefonda bu kodu girerek P2P bağlantısı kurabilirsiniz.</div>
+        </div>
+        <div id="pc-folder-status" style="font-size:0.75rem; color:var(--accent); margin-top:6px; display:none;"></div>
+      </div>
+
+      <!-- SECTION 2: PHONE NODE MODE -->
+      <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:14px;">
+        <div style="font-weight:700; font-size:0.9rem; color:var(--text); margin-bottom:4px;">📱 Telefon Modu — PC'ye Bağlan</div>
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:10px;">
+          PC ekranında görünen 6 haneli eşleşme kodunu yazıp bağlanın.
+        </div>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="phone-pair-code-input" placeholder="Örn: 847291" maxlength="6" style="text-align:center; font-size:1.2rem; font-weight:700; letter-spacing:2px; padding:10px;">
+          <button class="btn" style="width:120px; font-size:0.85rem;" onclick="connectPhoneToPC()">📱 Bağlan</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <header>
     <h1 style="display:flex; align-items:center; gap:10px;">
       <img src="/static/logo.png" alt="Logo" style="width:34px; height:34px; border-radius:8px; object-fit:cover; border:1px solid var(--accent);">
       <span>Stok & Satış</span>
     </h1>
     <div style="display:flex; gap:6px; align-items:center;">
+      <div id="p2p-status-badge" class="status-badge" style="background:rgba(239,68,68,0.25); color:#EF4444; font-weight:700;" onclick="openP2PModal()">🔴 PC Bağlı Değil</div>
       <div id="sync-status-badge" class="status-badge" style="background:rgba(16,185,129,0.2); color:#10B981; font-weight:700;" onclick="triggerManualSync()">🔥 🟢 Firebase Aktif</div>
       <div id="user-profile-badge" class="status-badge" style="background:rgba(16,185,129,0.15); color:var(--accent); display:none;" onclick="handleLogout()">🏢 <span id="user-profile-name">Firma</span> (Çıkış)</div>
       <div id="pwa-install-badge" class="status-badge" style="display:none; background:rgba(16, 185, 129, 0.25); color:var(--accent); font-weight:bold;" onclick="installPWA()">📲 Uygulamayı Yükle</div>
@@ -353,6 +401,7 @@
   </header>
 
   <div id="toast">✅ Bildirim</div>
+
 
   <main>
     <!-- TAB 1: MOBILE POS SALES SCANNER (DEFAULT STARTUP TAB) -->
@@ -854,9 +903,413 @@
     }
 
     // ════════════════════════════════════════════════════════════════════
-    // AI AMBALAJ YÜKLEME & IŞIK HIZINDA SIKIŞTIRMA
+    // IndexedDB & FILE SYSTEM ACCESS API STORAGE ENGINE FOR PWA IMAGES
     // ════════════════════════════════════════════════════════════════════
-    function compressImageClientSide(file, maxWidth = 300, quality = 0.55) {
+    let idbDB = null;
+
+    function initIndexedDB() {
+      return new Promise((resolve) => {
+        if (!window.indexedDB) { resolve(false); return; }
+        const req = indexedDB.open('StokPwaImagesDB', 1);
+        req.onupgradeneeded = function(e) {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains('product_images')) {
+            db.createObjectStore('product_images', { keyPath: 'image_key' });
+          }
+          if (!db.objectStoreNames.contains('offline_image_queue')) {
+            db.createObjectStore('offline_image_queue', { autoIncrement: true });
+          }
+        };
+        req.onsuccess = function(e) {
+          idbDB = e.target.result;
+          resolve(true);
+        };
+        req.onerror = function() { resolve(false); };
+      });
+    }
+
+    function saveImageToIndexedDB(imageKey, blob) {
+      return new Promise((resolve) => {
+        if (!idbDB) { resolve(false); return; }
+        try {
+          const tx = idbDB.transaction('product_images', 'readwrite');
+          const store = tx.objectStore('product_images');
+          store.put({ image_key: imageKey, blob: blob, timestamp: Date.now() });
+          tx.oncomplete = () => resolve(true);
+          tx.onerror = () => resolve(false);
+        } catch(e) { resolve(false); }
+      });
+    }
+
+    function getImageFromIndexedDB(imageKey) {
+      return new Promise((resolve) => {
+        if (!idbDB) { resolve(null); return; }
+        try {
+          const tx = idbDB.transaction('product_images', 'readonly');
+          const store = tx.objectStore('product_images');
+          const req = store.get(imageKey);
+          req.onsuccess = () => resolve(req.result ? req.result.blob : null);
+          req.onerror = () => resolve(null);
+        } catch(e) { resolve(null); }
+      });
+    }
+
+    function enqueueOfflineImage(item) {
+      return new Promise((resolve) => {
+        if (!idbDB) { resolve(false); return; }
+        try {
+          const tx = idbDB.transaction('offline_image_queue', 'readwrite');
+          const store = tx.objectStore('offline_image_queue');
+          store.add(item);
+          tx.oncomplete = () => resolve(true);
+        } catch(e) { resolve(false); }
+      });
+    }
+
+    function getOfflineImagesQueue() {
+      return new Promise((resolve) => {
+        if (!idbDB) { resolve([]); return; }
+        try {
+          const tx = idbDB.transaction('offline_image_queue', 'readonly');
+          const store = tx.objectStore('offline_image_queue');
+          const req = store.getAll();
+          req.onsuccess = () => resolve(req.result || []);
+          req.onerror = () => resolve([]);
+        } catch(e) { resolve([]); }
+      });
+    }
+
+    function clearOfflineImagesQueue() {
+      return new Promise((resolve) => {
+        if (!idbDB) { resolve(); return; }
+        try {
+          const tx = idbDB.transaction('offline_image_queue', 'readwrite');
+          const store = tx.objectStore('offline_image_queue');
+          store.clear();
+        } catch(e) {}
+      });
+    }
+
+    async function handleProductImageError(imgEl, imagePath) {
+      if (!imagePath) return;
+      const blob = await getImageFromIndexedDB(imagePath);
+      if (blob) {
+        imgEl.src = URL.createObjectURL(blob);
+      } else {
+        imgEl.src = 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2250%22 height=%2250%22><rect width=%2250%22 height=%2250%22 fill=%22%23334155%22/><text x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 fill=%22%2394A3B8%22 font-size=%2220%22>📦</text></svg>';
+      }
+    }
+
+    let pcDirHandle = null;
+
+    async function selectPCFolder() {
+      if (!('showDirectoryPicker' in window)) {
+        showToast("⚠️ Bu tarayıcı doğrudan klasör seçimini desteklemiyor; IndexedDB kullanılacak.");
+        return;
+      }
+      try {
+        pcDirHandle = await window.showDirectoryPicker();
+        const statusEl = document.getElementById('pc-folder-status');
+        statusEl.innerText = `📂 Kayıt Klasörü Seçildi: "${pcDirHandle.name}"`;
+        statusEl.style.display = 'block';
+        showToast(`✅ Klasör seçildi: ${pcDirHandle.name}`);
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          showToast("⚠️ Klasör erişim izni alınamadı.");
+        }
+      }
+    }
+
+    async function saveFileToPCDirectory(filename, blob) {
+      if (pcDirHandle) {
+        try {
+          const cleanName = filename.split('/').pop();
+          const fileHandle = await pcDirHandle.getFileHandle(cleanName, { create: true });
+          const writable = await fileHandle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          return true;
+        } catch (e) {
+          console.warn("File System Access API yazma hatası:", e);
+        }
+      }
+      return false;
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // WEBRTC P2P DATACHANNEL & SIGNALING SYSTEM
+    // ════════════════════════════════════════════════════════════════════
+    let peerConnection = null;
+    let dataChannel = null;
+    let activePairCode = null;
+    let p2pRole = null;
+    let p2pConnected = false;
+    let signalingPollInterval = null;
+
+    function openP2PModal() {
+      const modal = document.getElementById('p2p-modal-overlay');
+      if (modal) modal.style.display = 'flex';
+    }
+
+    function closeP2PModal() {
+      const modal = document.getElementById('p2p-modal-overlay');
+      if (modal) modal.style.display = 'none';
+    }
+
+    function updateP2PStatus(state, msg) {
+      const badge = document.getElementById('p2p-status-badge');
+      const modalStatus = document.getElementById('p2p-modal-status');
+
+      if (state === 'connected') {
+        p2pConnected = true;
+        if (badge) {
+          badge.innerText = "🟢 PC Bağlı";
+          badge.style.background = "rgba(16, 185, 129, 0.25)";
+          badge.style.color = "#10B981";
+        }
+        if (modalStatus) {
+          modalStatus.innerText = "🟢 PC ve Telefon P2P Bağlantısı Aktif!";
+          modalStatus.style.background = "rgba(16, 185, 129, 0.15)";
+          modalStatus.style.borderColor = "#10B981";
+          modalStatus.style.color = "#10B981";
+        }
+        flushOfflineImageQueue();
+      } else if (state === 'connecting') {
+        p2pConnected = false;
+        if (badge) {
+          badge.innerText = "🟡 PC Aranıyor...";
+          badge.style.background = "rgba(245, 158, 11, 0.25)";
+          badge.style.color = "#F59E0B";
+        }
+        if (modalStatus) {
+          modalStatus.innerText = "🟡 " + (msg || "Eşleşme bekleniyor...");
+          modalStatus.style.background = "rgba(245, 158, 11, 0.15)";
+          modalStatus.style.borderColor = "#F59E0B";
+          modalStatus.style.color = "#F59E0B";
+        }
+      } else {
+        p2pConnected = false;
+        if (badge) {
+          badge.innerText = "🔴 PC Bağlı Değil";
+          badge.style.background = "rgba(239, 68, 68, 0.25)";
+          badge.style.color = "#EF4444";
+        }
+        if (modalStatus) {
+          modalStatus.innerText = "🔴 PC Bağlı Değil (Görseller İstemci / IndexedDB'de)";
+          modalStatus.style.background = "rgba(239, 68, 68, 0.15)";
+          modalStatus.style.borderColor = "#EF4444";
+          modalStatus.style.color = "#EF4444";
+        }
+      }
+    }
+
+    const rtcConfig = {
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    };
+
+    async function startPCNode() {
+      p2pRole = 'pc';
+      updateP2PStatus('connecting', 'PC kodu oluşturuluyor...');
+      try {
+        const res = await fetch('/api/webrtc/create-pair', { method: 'POST' });
+        const json = await res.json();
+        if (json.ok && json.pair_code) {
+          activePairCode = json.pair_code;
+          document.getElementById('pc-pair-code-display').innerText = activePairCode;
+          document.getElementById('pc-pair-code-box').style.display = 'block';
+          showToast("🖥️ PC Eşleşme Kodu: " + activePairCode);
+          startSignalingPolling();
+        }
+      } catch (e) {
+        showToast("⚠️ Sunucu eşleşme hatası!");
+      }
+    }
+
+    async function connectPhoneToPC() {
+      const codeInput = document.getElementById('phone-pair-code-input').value.trim();
+      if (codeInput.length < 6) {
+        showToast("⚠️ Lütfen 6 haneli kodu giriniz!");
+        return;
+      }
+      p2pRole = 'phone';
+      activePairCode = codeInput;
+      updateP2PStatus('connecting', 'PC bağlantısı kuruluyor...');
+
+      initPeerConnection();
+
+      dataChannel = peerConnection.createDataChannel('image-transfer');
+      setupDataChannelHandlers();
+
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+
+      await postSignal({ type: 'offer', offer: offer });
+      startSignalingPolling();
+    }
+
+    function initPeerConnection() {
+      if (peerConnection) {
+        try { peerConnection.close(); } catch(e){}
+      }
+
+      peerConnection = new RTCPeerConnection(rtcConfig);
+
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+          postSignal({ type: 'candidate', candidate: event.candidate });
+        }
+      };
+
+      peerConnection.ondatachannel = (event) => {
+        dataChannel = event.channel;
+        setupDataChannelHandlers();
+      };
+
+      peerConnection.onconnectionstatechange = () => {
+        if (peerConnection.connectionState === 'connected') {
+          updateP2PStatus('connected');
+        } else if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed') {
+          updateP2PStatus('disconnected');
+        }
+      };
+    }
+
+    function setupDataChannelHandlers() {
+      if (!dataChannel) return;
+
+      dataChannel.onopen = () => {
+        updateP2PStatus('connected');
+        showToast("🟢 P2P Görsel Bağlantısı Sağlandı!");
+      };
+
+      dataChannel.onclose = () => {
+        updateP2PStatus('disconnected');
+      };
+
+      dataChannel.onmessage = async (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'IMAGE_TRANSFER') {
+            const { filename, base64 } = msg;
+            const res = await fetch(base64);
+            const blob = await res.blob();
+
+            const savedToFile = await saveFileToPCDirectory(filename, blob);
+            await saveImageToIndexedDB(filename, blob);
+
+            if (savedToFile) {
+              showToast(`📥 Görsel PC klasörüne kaydedildi: ${filename}`);
+            } else {
+              showToast(`📥 Görsel PC IndexedDB'ye kaydedildi: ${filename}`);
+            }
+
+            if (dataChannel && dataChannel.readyState === 'open') {
+              dataChannel.send(JSON.stringify({ type: 'IMAGE_ACK', filename: filename }));
+            }
+
+            loadProducts();
+          }
+        } catch(e) {}
+      };
+    }
+
+    async function postSignal(payload) {
+      if (!activePairCode) return;
+      try {
+        await fetch('/api/webrtc/signal', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pair_code: activePairCode,
+            sender: p2pRole,
+            payload: payload
+          })
+        });
+      } catch(e){}
+    }
+
+    function startSignalingPolling() {
+      if (signalingPollInterval) clearInterval(signalingPollInterval);
+
+      signalingPollInterval = setInterval(async () => {
+        if (!activePairCode) return;
+        try {
+          const res = await fetch(`/api/webrtc/signal?pair_code=${activePairCode}&role=${p2pRole}`);
+          const json = await res.json();
+          if (json.ok && json.signals && json.signals.length > 0) {
+            for (const sig of json.signals) {
+              await handleIncomingSignal(sig);
+            }
+          }
+        } catch(e){}
+      }, 1000);
+    }
+
+    async function handleIncomingSignal(sig) {
+      if (!sig) return;
+
+      if (sig.type === 'offer' && p2pRole === 'pc') {
+        initPeerConnection();
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(sig.offer));
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+        await postSignal({ type: 'answer', answer: answer });
+      } else if (sig.type === 'answer' && p2pRole === 'phone') {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(sig.answer));
+      } else if (sig.type === 'candidate' && peerConnection) {
+        try {
+          await peerConnection.addIceCandidate(new RTCIceCandidate(sig.candidate));
+        } catch(e){}
+      }
+    }
+
+    async function sendOrQueueImageP2P(filename, blob) {
+      await saveImageToIndexedDB(filename, blob);
+
+      const base64 = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.readAsDataURL(blob);
+      });
+
+      const payload = {
+        type: 'IMAGE_TRANSFER',
+        filename: filename,
+        base64: base64
+      };
+
+      if (dataChannel && dataChannel.readyState === 'open') {
+        try {
+          dataChannel.send(JSON.stringify(payload));
+          showToast("⚡ Görsel P2P ile PC'ye aktarıldı!");
+          return true;
+        } catch(e) {}
+      }
+
+      await enqueueOfflineImage(payload);
+      showToast("📦 PC bağlı değil; görsel yerel olarak saklandı, PC bağlanınca aktarılacak.");
+      return false;
+    }
+
+    async function flushOfflineImageQueue() {
+      const queue = await getOfflineImagesQueue();
+      if (!queue.length) return;
+
+      if (dataChannel && dataChannel.readyState === 'open') {
+        for (const item of queue) {
+          try {
+            dataChannel.send(JSON.stringify(item));
+          } catch(e){}
+        }
+        await clearOfflineImagesQueue();
+        showToast("✅ Bekleyen görseller PC'ye aktarıldı!");
+      }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // AI AMBALAJ YÜKLEME & MÜKEMMEL SIKIŞTIRMA (300px WebP)
+    // ════════════════════════════════════════════════════════════════════
+    function compressImageClientSide(file, maxWidth = 300, quality = 0.25) {
       return new Promise((resolve) => {
         const reader = new FileReader();
         reader.onload = function(e) {
@@ -877,8 +1330,14 @@
             ctx.drawImage(img, 0, 0, width, height);
 
             canvas.toBlob((blob) => {
-              resolve(blob || file);
-            }, 'image/jpeg', quality);
+              if (blob && blob.type.includes('webp')) {
+                resolve(blob);
+              } else {
+                canvas.toBlob((jpgBlob) => {
+                  resolve(jpgBlob || file);
+                }, 'image/jpeg', quality);
+              }
+            }, 'image/webp', quality);
           };
           img.onerror = function() { resolve(file); };
           img.src = e.target.result;
@@ -892,15 +1351,20 @@
       if (!input.files || !input.files[0]) return;
       const originalFile = input.files[0];
 
-      showToast("⚡ Fotoğraf sıkıştırılıyor & Yapay zekaya aktarılıyor...");
-      const compressedBlob = await compressImageClientSide(originalFile, 300, 0.55);
+      showToast("⚡ Fotoğraf sıkıştırılıyor (300px WebP)...");
+      const compressedBlob = await compressImageClientSide(originalFile, 300, 0.25);
 
       const imgPreview = document.getElementById('img-preview');
       imgPreview.src = URL.createObjectURL(compressedBlob);
       imgPreview.style.display = 'block';
 
+      const imageFilename = 'products/product_' + Date.now() + '.webp';
+      document.getElementById('form-image-path').value = imageFilename;
+
+      sendOrQueueImageP2P(imageFilename, compressedBlob);
+
       const formData = new FormData();
-      formData.append('file', compressedBlob, 'package.jpg');
+      formData.append('file', compressedBlob, 'package.webp');
 
       try {
         const res = await fetchWithAuth('/api/ai/scan-package', { method: 'POST', body: formData });
@@ -912,7 +1376,6 @@
           if (d.category) document.getElementById('form-category').value = d.category;
           if (d.sale_price) document.getElementById('form-sale').value = d.sale_price;
           if (d.purchase_price) document.getElementById('form-purchase').value = d.purchase_price;
-          if (d.image_path) document.getElementById('form-image-path').value = d.image_path;
 
           const currentBarcode = document.getElementById('form-barcode').value.trim();
           if (d.barcode && (!currentBarcode || currentBarcode === '')) {
@@ -921,7 +1384,7 @@
 
           playBeep();
           if (d.ai_success) {
-            showToast("✨ Yapay zeka '" + d.name + "' ürününü anında okudu!");
+            showToast("✨ Yapay zeka '" + d.name + "' ürününü okudu!");
           } else {
             showToast("📸 Görsel eklendi! Yapay zeka uyarısı: " + (d.last_error ? d.last_error.substring(0, 60) : "Görsel kaydedildi"));
           }
@@ -929,9 +1392,10 @@
           showToast("❌ " + (json.message || "Görsel okunamadı!"));
         }
       } catch (err) {
-        showToast("⚠️ Bağlantı hatası! Lütfen bilgileri kontrol edin.");
+        showToast("⚠️ Görsel yerel olarak kaydedildi.");
       }
     }
+
 
     async function fetchWithAuth(url, options = {}) {
       const token = localStorage.getItem('stok_auth_token') || sessionStorage.getItem('stok_auth_token');
@@ -1166,17 +1630,51 @@
         return;
       }
 
-      container.innerHTML = products.map(p => `
-        <div class="product-item">
-          <img src="${p.image_path || '/static/placeholder.png'}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2250%22 height=%2250%22><rect width=%2250%22 height=%2250%22 fill=%22%23334155%22/><text x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 fill=%22%2394A3B8%22 font-size=%2220%22>📦</text></svg>'">
-          <div class="product-info">
-            <h3>${p.name}</h3>
-            <p>Barkod: ${p.barcode} | Stok: ${p.stock_quantity} adet</p>
+      container.innerHTML = products.map(p => {
+        const safeName = (p.name || '').replace(/'/g, "\\'");
+        return `
+          <div class="product-item" style="flex-wrap:wrap; gap:10px;">
+            <img src="${p.image_path || '/static/placeholder.png'}" id="prod-img-${p.id}" onerror="handleProductImageError(this, '${p.image_path || ''}')">
+            <div class="product-info" style="min-width:140px; flex:1;">
+              <h3>${p.name}</h3>
+              <p>Barkod: ${p.barcode} | Stok: <strong style="color:var(--accent);">${p.stock_quantity}</strong> adet</p>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px; margin-left:auto;">
+              <div class="product-price">${p.sale_price.toFixed(2)} ₺</div>
+              <button class="btn btn-secondary" style="padding:6px 10px; font-size:0.75rem; width:auto;" title="Stok Miktarını Düzenle" onclick="editProductStockPrompt(${p.id}, ${p.stock_quantity}, '${safeName}')">✏️ Stok</button>
+              <button class="btn btn-danger" style="padding:6px 10px; font-size:0.75rem; width:auto;" title="Ürünü Stoktan Sil" onclick="deleteProductPrompt(${p.id}, '${safeName}')">🗑️ Sil</button>
+            </div>
           </div>
-          <div class="product-price">${p.sale_price.toFixed(2)} ₺</div>
-        </div>
-      `).join('');
+        `;
+      }).join('');
     }
+
+    async function editProductStockPrompt(id, currentStock, name) {
+      const input = prompt(`'${name}' için yeni stok miktarını giriniz:`, currentStock);
+      if (input === null) return;
+      const newStock = parseInt(input);
+      if (isNaN(newStock) || newStock < 0) {
+        showToast("⚠️ Geçersiz stok miktarı!");
+        return;
+      }
+      const res = await fetchWithAuth(`/api/products/${id}/stock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stock_quantity: newStock })
+      });
+      const json = await res.json();
+      showToast(json.message);
+      if (json.ok) loadProducts();
+    }
+
+    async function deleteProductPrompt(id, name) {
+      if (!confirm(`'${name}' ürününü stok kataloğundan silmek istediğinize emin misiniz?`)) return;
+      const res = await fetchWithAuth(`/api/products/${id}`, { method: 'DELETE' });
+      const json = await res.json();
+      showToast(json.message);
+      if (json.ok) loadProducts();
+    }
+
 
     let allProductsCache = [];
 
@@ -1704,9 +2202,11 @@
 
     setInterval(checkSyncStatus, 30000);
 
-    // Init AI status check and Auth session check on load
+    // Init AI status check, IndexedDB storage, and Auth session check on load
+    initIndexedDB();
     checkAIStatus();
     checkSavedAuthSession();
+
   </script>
 </body>
 </html>

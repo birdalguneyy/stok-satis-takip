@@ -237,6 +237,74 @@ def save_product():
     return jsonify({"ok": ok, "message": msg, "product": prod})
 
 
+@app.route("/api/products/<int:product_id>", methods=["DELETE"])
+def delete_product_route(product_id):
+    user_id = get_current_user_id()
+    ok, msg = cloud_db.delete_product(product_id, user_id=user_id)
+    return jsonify({"ok": ok, "message": msg})
+
+
+@app.route("/api/products/<int:product_id>/stock", methods=["POST"])
+def update_product_stock_route(product_id):
+    user_id = get_current_user_id()
+    data = request.json or {}
+    try:
+        stock = int(data.get("stock_quantity", 0))
+    except (ValueError, TypeError):
+        return jsonify({"ok": False, "message": "Geçersiz stok miktarı!"}), 400
+
+    ok, msg = cloud_db.update_product_stock(product_id, stock, user_id=user_id)
+    return jsonify({"ok": ok, "message": msg})
+
+
+# ════════════════════════════════════════════════════════════════════
+# WEBRTC P2P GÖRSEL AKTARIM SIGNALING ENDPOINTS
+# ════════════════════════════════════════════════════════════════════
+webrtc_sessions: dict = {}
+
+
+@app.route("/api/webrtc/create-pair", methods=["POST"])
+def webrtc_create_pair():
+    import random
+    code = f"{random.randint(100000, 999999)}"
+    webrtc_sessions[code] = {
+        "pc_signals": [],
+        "phone_signals": [],
+        "created_at": os.times().elapsed,
+    }
+    return jsonify({"ok": True, "pair_code": code})
+
+
+@app.route("/api/webrtc/signal", methods=["POST"])
+def webrtc_post_signal():
+    data = request.json or {}
+    code = str(data.get("pair_code", "")).strip()
+    sender = data.get("sender")  # "pc" or "phone"
+    payload = data.get("payload")
+
+    if not code or code not in webrtc_sessions:
+        return jsonify({"ok": False, "message": "Geçersiz veya bulunamayan eşleşme kodu!"}), 404
+
+    target_key = "phone_signals" if sender == "pc" else "pc_signals"
+    webrtc_sessions[code][target_key].append(payload)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/webrtc/signal", methods=["GET"])
+def webrtc_get_signal():
+    code = request.args.get("pair_code", "").strip()
+    role = request.args.get("role", "").strip()  # "pc" or "phone"
+
+    if not code or code not in webrtc_sessions:
+        return jsonify({"ok": False, "signals": []})
+
+    my_signals_key = f"{role}_signals"
+    signals = list(webrtc_sessions[code].get(my_signals_key, []))
+    webrtc_sessions[code][my_signals_key] = []
+    return jsonify({"ok": True, "signals": signals})
+
+
+
 @app.route("/api/sales", methods=["POST"])
 def record_sale():
     user_id = get_current_user_id()

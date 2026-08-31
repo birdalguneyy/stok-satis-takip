@@ -77,14 +77,24 @@ def api_info():
     })
 
 
-@app.route("/api/settings/gemini-key", methods=["POST"])
-def save_gemini_key():
-    data = request.json or {}
-    key = data.get("key", "").strip()
-    if not key:
-        return jsonify({"ok": False, "message": "API Key boş olamaz!"}), 400
-    ok = ai_service.save_api_key(key)
-    return jsonify({"ok": ok, "message": "✨ Gemini Yapay Zeka API Key başarıyla kaydedildi!" if ok else "Kaydetme hatası!"})
+@app.route("/api/settings/gemini-key", methods=["GET", "POST"])
+def handle_gemini_key():
+    if request.method == "POST":
+        data = request.json or {}
+        key = (data.get("key") or data.get("api_key") or "").strip()
+        if not key:
+            return jsonify({"ok": False, "message": "API Key boş olamaz!"}), 400
+        ok = ai_service.save_api_key(key)
+        cloud_db.save_gemini_key(key)
+        return jsonify({"ok": ok, "message": "✨ Gemini API Key Firebase Firestore'a ve sisteme başarıyla kaydedildi!" if ok else "Kaydetme hatası!"})
+
+    key = cloud_db.get_gemini_key() or ai_service.api_key or ""
+    return jsonify({
+        "ok": True,
+        "has_key": bool(key),
+        "key_preview": (key[:8] + "..." + key[-4:]) if len(key) > 12 else ""
+    })
+
 
 
 @app.route("/api/auth/register", methods=["POST"])

@@ -289,7 +289,7 @@ class CloudDatabase:
                 except Exception as e:
                     logger.warning(f"Giderleri buluttan çekme hatası: {e}")
 
-                # 6. PULL STORE SETTINGS
+                # 6. PULL STORE SETTINGS & GEMINI API KEY
                 try:
                     settings_docs = self.firestore_db.collection("store_settings").stream()
                     for doc in settings_docs:
@@ -304,6 +304,20 @@ class CloudDatabase:
                         )
                 except Exception as e:
                     logger.warning(f"İşletme ayarlarını buluttan çekme hatası: {e}")
+
+                # 6.1 PULL GEMINI API KEY FROM FIRESTORE
+                try:
+                    g_doc = self.firestore_db.collection("system_settings").document("gemini").get()
+                    if g_doc.exists:
+                        g_data = g_doc.to_dict()
+                        remote_key = (g_data.get("api_key") or "").strip()
+                        if remote_key:
+                            key_file = DATA_DIR / "gemini_key.txt"
+                            key_file.write_text(remote_key, encoding="utf-8")
+                            logger.info("Gemini API Key Firebase Firestore'dan başarıyla yerel ortama aktarıldı.")
+                except Exception as e:
+                    logger.warning(f"Firestore Gemini Key çekme uyarısı: {e}")
+
 
                 # 7. UPDATE SQLITE AUTOINCREMENT SEQUENCES
                 for tbl in ["users", "categories", "products", "sales", "expenses"]:
@@ -417,12 +431,27 @@ class CloudDatabase:
                     try:
                         self.firestore_db.collection("expenses").document(str(e_id)).set(e_dict)
                         conn.execute("UPDATE expenses SET synced_to_cloud = 1 WHERE id = ?", (e_id,))
-                        pushed_count += 1
                     except Exception as ex:
                         logger.warning(f"Gider {e_id} bulut senkronizasyon hatası: {ex}")
 
-            # 6. PULL REMOTE CHANGES
+                # 6. PUSH GEMINI API KEY IF LOCAL EXISTS
+                key_file = DATA_DIR / "gemini_key.txt"
+
+                if key_file.exists():
+                    try:
+                        k = key_file.read_text(encoding="utf-8").strip()
+                        if k:
+                            self.firestore_db.collection("system_settings").document("gemini").set({
+                                "api_key": k,
+                                "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            }, merge=True)
+                            pushed_count += 1
+                    except Exception as ex:
+                        logger.warning(f"Gemini API key Firestore aktarma uyarısı: {ex}")
+
+            # 7. PULL REMOTE CHANGES
             pulled_count = self.pull_all_from_firebase(user_id=user_id)
+
 
             return {
                 "synced": True,
@@ -970,11 +999,57 @@ class CloudDatabase:
                 })
             except Exception:
                 pass
+    def save_gemini_key(self, api_key: str) -> bool:
+        clean_key = api_key.strip()
+        if not clean_key:
+            return False
+
+        key_file = DATA_DIR / "gemini_key.txt"
+        try:
+            key_file.write_text(clean_key, encoding="utf-8")
+        except Exception as e:
+            logger.warning(f"Yerel gemini_key.txt yazma hatası: {e}")
+
+        if self.firestore_db:
+            try:
+                self.firestore_db.collection("system_settings").document("gemini").set({
+                    "api_key": clean_key,
+                    "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }, merge=True)
+                logger.info("Gemini API Key Firebase Firestore'a başarıyla kaydedildi.")
+            except Exception as exc:
+                logger.warning(f"Firestore Gemini key senkronizasyon hatası: {exc}")
+
         return True
+
+    def get_gemini_key(self) -> Optional[str]:
+        key_file = DATA_DIR / "gemini_key.txt"
+        if key_file.exists():
+            try:
+                k = key_file.read_text(encoding="utf-8").strip()
+                if k:
+                    return k
+            except Exception:
+                pass
+
+        if self.firestore_db:
+            try:
+                doc = self.firestore_db.collection("system_settings").document("gemini").get()
+                if doc.exists:
+                    d = doc.to_dict()
+                    k = (d.get("api_key") or "").strip()
+                    if k:
+                        key_file.write_text(k, encoding="utf-8")
+                        return k
+            except Exception:
+                pass
+
+        return None
 
     # ════════════════════════════════════════════════════════════════════
     # BULUT TABANLI KULLANICI ÜYELİK VE GİRİŞ İŞLEMLERİ (CLOUD AUTH)
     # ════════════════════════════════════════════════════════════════════
+
     def _clean_phone(self, phone: str) -> str:
         cleaned = "".join(c for c in phone if c.isdigit())
         if cleaned.startswith("0"):

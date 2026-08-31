@@ -786,81 +786,202 @@
     }
 
     // ════════════════════════════════════════════════════════════════════
-    // CANLI KESİNTİSİZ VİDEO KAMERA İLE BARKOD TARAMA (FOTOĞRAFSIZ)
+    // ULTRA-HIZLI DONANIM HIZLANDIRMALI (NATIVE / ZXING) BARKOD ÇÖZÜCÜ
     // ════════════════════════════════════════════════════════════════════
+    let nativeBarcodeDetector = null;
+    if ('BarcodeDetector' in window) {
+      try {
+        nativeBarcodeDetector = new BarcodeDetector({
+          formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'code_93', 'qr_code', 'itf', 'data_matrix']
+        });
+      } catch (e) {
+        nativeBarcodeDetector = null;
+      }
+    }
+
+    async function scanBarcodeFromSourceClientSide(source) {
+      // 1. Hardware Native BarcodeDetector (Chrome/Android/Edge GPU/CPU - Sub-5ms)
+      if (nativeBarcodeDetector) {
+        try {
+          const results = await nativeBarcodeDetector.detect(source);
+          if (results && results.length > 0) {
+            for (const r of results) {
+              if (r.rawValue && r.rawValue.trim()) {
+                return r.rawValue.trim();
+              }
+            }
+          }
+        } catch (e) {}
+      }
+
+      // 2. ZXing BrowserMultiFormatReader Fallback on Client
+      if (window.ZXing) {
+        try {
+          if (!codeReader) codeReader = new ZXing.BrowserMultiFormatReader();
+          let result = null;
+          if (source instanceof HTMLImageElement || source instanceof HTMLCanvasElement || source instanceof ImageBitmap) {
+            result = await codeReader.decodeFromImageElement(source);
+          } else if (source instanceof HTMLVideoElement) {
+            result = codeReader.decodeFromVideoElement(source);
+          }
+          if (result && result.getText && result.getText().trim()) {
+            return result.getText().trim();
+          }
+        } catch (e) {}
+      }
+
+      return null;
+    }
+
+    let liveScanInterval = null;
+
     async function startMobileBarcodeScanner(targetInputId = null) {
       playBeep();
 
       const videoBox = document.getElementById('pos-video-box');
       videoBox.style.display = 'block';
+      const videoEl = document.getElementById('pos-video');
 
-      if (!window.ZXing) {
-        showToast("⚠️ Kamera kütüphanesi yükleniyor, lütfen bekleyin...");
-        return;
-      }
+      isScanning = true;
+      showToast("📷 Canlı kamera açılıyor, barkodu tutun...");
 
       try {
-        if (!codeReader) {
-          codeReader = new ZXing.BrowserMultiFormatReader();
+        if (videoEl.srcObject) {
+          videoEl.srcObject.getTracks().forEach(t => t.stop());
         }
 
-        isScanning = true;
-        showToast("📷 Canlı video kamerası açılıyor, barkodu kameraya tutun...");
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        });
 
-        let selectedDeviceId = undefined;
-        try {
-          const devices = await codeReader.listVideoInputDevices();
-          if (devices && devices.length > 0) {
-            const rear = devices.find(d => /back|rear|environment|arka/i.test(d.label));
-            selectedDeviceId = rear ? rear.deviceId : devices[devices.length - 1].deviceId;
-          }
-        } catch (e) {}
+        videoEl.srcObject = stream;
+        await videoEl.play();
 
-        codeReader.decodeFromVideoDevice(selectedDeviceId, 'pos-video', (result, err) => {
-          if (result && isScanning) {
-            const code = result.getText();
-            const now = Date.now();
-            if (code !== lastScannedCode || (now - lastScanTime) > 1500) {
-              lastScannedCode = code;
-              lastScanTime = now;
-              playBeep();
+        const onBarcodeFound = (code) => {
+          const now = Date.now();
+          if (code !== lastScannedCode || (now - lastScanTime) > 1200) {
+            lastScannedCode = code;
+            lastScanTime = now;
+            playBeep();
 
-              if (targetInputId) {
-                document.getElementById(targetInputId).value = code;
-                showToast("✅ Barkod okundu: " + code);
-                stopMobileBarcodeScanner();
-              } else {
-                document.getElementById('pos-barcode-input').value = code;
-                handlePOSScan();
-              }
+            if (targetInputId) {
+              document.getElementById(targetInputId).value = code;
+              showToast("⚡ Barkod okundu: " + code);
+              stopMobileBarcodeScanner();
+            } else {
+              document.getElementById('pos-barcode-input').value = code;
+              handlePOSScan();
             }
           }
-        });
+        };
+
+        if (liveScanInterval) clearInterval(liveScanInterval);
+        liveScanInterval = setInterval(async () => {
+          if (!isScanning || !videoEl || videoEl.paused || videoEl.ended) return;
+          try {
+            const detected = await scanBarcodeFromSourceClientSide(videoEl);
+            if (detected) {
+              onBarcodeFound(detected);
+            }
+          } catch(e){}
+        }, 60);
+
       } catch (err) {
-        console.error('Canlı kamera hatası:', err);
-        showToast("⚠️ Canlı video başlatılamadı! 'Fotoğraf Çek & Oku' butonunu kullanabilirsiniz.");
+        if (window.ZXing) {
+          if (!codeReader) codeReader = new ZXing.BrowserMultiFormatReader();
+          codeReader.decodeFromVideoDevice(undefined, 'pos-video', (result, err) => {
+            if (result && isScanning) {
+              const code = result.getText();
+              const now = Date.now();
+              if (code !== lastScannedCode || (now - lastScanTime) > 1200) {
+                lastScannedCode = code;
+                lastScanTime = now;
+                playBeep();
+                if (targetInputId) {
+                  document.getElementById(targetInputId).value = code;
+                  showToast("⚡ Barkod okundu: " + code);
+                  stopMobileBarcodeScanner();
+                } else {
+                  document.getElementById('pos-barcode-input').value = code;
+                  handlePOSScan();
+                }
+              }
+            }
+          });
+        } else {
+          showToast("⚠️ Canlı video açılamadı! 'Fotoğraf Çek & Oku' butonunu kullanabilirsiniz.");
+        }
       }
     }
 
     function stopMobileBarcodeScanner() {
       isScanning = false;
+      if (liveScanInterval) {
+        clearInterval(liveScanInterval);
+        liveScanInterval = null;
+      }
+      const videoEl = document.getElementById('pos-video');
+      if (videoEl && videoEl.srcObject) {
+        try {
+          videoEl.srcObject.getTracks().forEach(t => t.stop());
+          videoEl.srcObject = null;
+        } catch(e){}
+      }
       if (codeReader) {
-        try { codeReader.reset(); } catch (e) {}
+        try { codeReader.reset(); } catch(e){}
       }
       const videoBox = document.getElementById('pos-video-box');
       if (videoBox) videoBox.style.display = 'none';
     }
 
     // ════════════════════════════════════════════════════════════════════
-    // FOTOĞRAF ÇEKİP SUNUCUDA 7 AŞAMALI PYZBAR ÇÖZME
+    // FOTOĞRAF ÇEKİP CPU / DONANIM İLE IŞIK HIZINDA BARKOD ÇÖZME
     // ════════════════════════════════════════════════════════════════════
     async function handlePOSPhotoUpload(input) {
       if (!input.files || !input.files[0]) return;
       const file = input.files[0];
-      showToast("⏳ Fotoğraftan barkod taranıyor...");
+      showToast("⚡ Cihaz işlemcisiyle barkod taranıyor...");
 
+      // 1. Client-Side CPU/GPU Instant Decoding
+      let scannedCode = null;
+      try {
+        const imgBitmap = await createImageBitmap(file);
+        scannedCode = await scanBarcodeFromSourceClientSide(imgBitmap);
+      } catch (e) {}
+
+      if (!scannedCode) {
+        try {
+          const img = new Image();
+          const imgUrl = URL.createObjectURL(file);
+          await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = reject;
+            img.src = imgUrl;
+          });
+          scannedCode = await scanBarcodeFromSourceClientSide(img);
+          URL.revokeObjectURL(imgUrl);
+        } catch(e){}
+      }
+
+      if (scannedCode) {
+        playBeep();
+        document.getElementById('pos-barcode-input').value = scannedCode;
+        showToast("⚡ Barkod anında okundu: " + scannedCode);
+        handlePOSScan();
+        input.value = '';
+        return;
+      }
+
+      // 2. Client-Side CPU Image Compression before Server Fallback (Sub-50KB)
+      showToast("⏳ Sunucu C++ motorunda çözümleniyor...");
+      const compressedBlob = await compressImageClientSide(file, 800, 0.70);
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('file', compressedBlob, 'barcode.jpg');
 
       try {
         const res = await fetch('/api/barcode/decode', { method: 'POST', body: formData });
@@ -868,9 +989,10 @@
         if (json.ok && json.barcode) {
           playBeep();
           document.getElementById('pos-barcode-input').value = json.barcode;
+          showToast("✅ Barkod okundu: " + json.barcode);
           handlePOSScan();
         } else {
-          showToast("❌ " + json.message);
+          showToast("❌ " + (json.message || "Barkod okunamadı!"));
         }
       } catch (e) {
         showToast("⚠️ Bağlantı hatası!");
@@ -881,10 +1003,40 @@
     async function handleFormCameraUpload(input) {
       if (!input.files || !input.files[0]) return;
       const file = input.files[0];
-      showToast("⏳ Fotoğraftan barkod taranıyor...");
+      showToast("⚡ Cihaz işlemcisiyle barkod taranıyor...");
 
+      let scannedCode = null;
+      try {
+        const imgBitmap = await createImageBitmap(file);
+        scannedCode = await scanBarcodeFromSourceClientSide(imgBitmap);
+      } catch (e) {}
+
+      if (!scannedCode) {
+        try {
+          const img = new Image();
+          const imgUrl = URL.createObjectURL(file);
+          await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = reject;
+            img.src = imgUrl;
+          });
+          scannedCode = await scanBarcodeFromSourceClientSide(img);
+          URL.revokeObjectURL(imgUrl);
+        } catch(e){}
+      }
+
+      if (scannedCode) {
+        playBeep();
+        document.getElementById('form-barcode').value = scannedCode;
+        showToast("⚡ Barkod anında okundu: " + scannedCode);
+        input.value = '';
+        return;
+      }
+
+      showToast("⏳ Sunucu C++ motorunda çözümleniyor...");
+      const compressedBlob = await compressImageClientSide(file, 800, 0.70);
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('file', compressedBlob, 'barcode.jpg');
 
       try {
         const res = await fetch('/api/barcode/decode', { method: 'POST', body: formData });
@@ -901,6 +1053,7 @@
       }
       input.value = '';
     }
+
 
     // ════════════════════════════════════════════════════════════════════
     // IndexedDB & FILE SYSTEM ACCESS API STORAGE ENGINE FOR PWA IMAGES

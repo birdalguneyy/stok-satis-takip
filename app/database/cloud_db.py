@@ -858,7 +858,61 @@ class CloudDatabase:
 
         return True, f"Satış başarıyla tamamlandı. Toplam: {total_amount:.2f} ₺"
 
+    def delete_sale(
+        self,
+        sale_id: int,
+        user_id: Optional[int] = None,
+        restore_stock: bool = True,
+    ) -> tuple[bool, str]:
+        uid = user_id or 1
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        with self.db.get_connection() as conn:
+            # Satışın bu kullanıcıya ait olduğunu doğrula
+            sale = conn.execute(
+                "SELECT id, total_amount FROM sales WHERE id = ? AND user_id = ?",
+                (sale_id, uid)
+            ).fetchone()
+
+            if not sale:
+                return False, "Satış kaydı bulunamadı veya bu hesaba ait değil!"
+
+            if restore_stock:
+                # Satıştaki ürünlerin stoklarını geri yükle (aktif ürünler için)
+                items = conn.execute(
+                    "SELECT product_id, quantity FROM sale_items WHERE sale_id = ?",
+                    (sale_id,)
+                ).fetchall()
+                for it in items:
+                    pid = it["product_id"]
+                    qty = it["quantity"]
+                    if pid:
+                        conn.execute(
+                            """
+                            UPDATE products
+                            SET stock_quantity = stock_quantity + ?, updated_at = ?
+                            WHERE id = ? AND user_id = ? AND is_active = 1
+                            """,
+                            (qty, now, pid, uid),
+                        )
+
+            # Satış kalemlerini ve ana satış kaydını sil
+            conn.execute("DELETE FROM sale_items WHERE sale_id = ?", (sale_id,))
+            conn.execute("DELETE FROM sales WHERE id = ? AND user_id = ?", (sale_id, uid))
+
+        if self.firestore_db:
+            try:
+                doc_id = f"u{uid}_s{sale_id}"
+                self.firestore_db.collection("sales").document(doc_id).delete()
+                # Eski ID ile de silmeyi dene
+                self.firestore_db.collection("sales").document(str(sale_id)).delete()
+            except Exception as e:
+                logger.warning(f"Firestore satış silme uyarısı: {e}")
+
+        return True, "Satış başarıyla silindi ve ürün stokları geri yüklendi."
+
     def get_sales_history(
+
         self,
         user_id: Optional[int] = None,
         start_date: Optional[str] = None,

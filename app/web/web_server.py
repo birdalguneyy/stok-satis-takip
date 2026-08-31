@@ -157,12 +157,70 @@ def get_current_user_id() -> Optional[int]:
     return None
 
 
+# ════════════════════════════════════════════════════════════════════
+# GERÇEK ZAMANLI VERİ SENKRONİZASYONU (LIVE INSTANT SYNC)
+# ════════════════════════════════════════════════════════════════════
+_data_version_lock = threading.Lock()
+_user_data_versions: dict[int, int] = {}
+_version_events: dict[int, threading.Event] = {}
+
+
+def notify_data_change(user_id: Optional[int] = None) -> int:
+    """Telefon veya PC'de herhangi bir değişiklik olduğunda diğer tüm cihazlara anında haber verir."""
+    uid = user_id or 1
+    with _data_version_lock:
+        current = _user_data_versions.get(uid, 0) + 1
+        _user_data_versions[uid] = current
+        if uid in _version_events:
+            _version_events[uid].set()
+            _version_events[uid] = threading.Event()
+        else:
+            _version_events[uid] = threading.Event()
+        return current
+
+
+def get_data_version(user_id: Optional[int] = None) -> int:
+    uid = user_id or 1
+    with _data_version_lock:
+        return _user_data_versions.get(uid, 0)
+
+
+@app.route("/api/events/poll", methods=["GET"])
+def poll_events():
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"ok": False, "authenticated": False}), 401
+
+    try:
+        client_version = int(request.args.get("version", 0))
+    except Exception:
+        client_version = 0
+
+    current_version = get_data_version(user_id)
+    if current_version > client_version:
+        return jsonify({"ok": True, "changed": True, "version": current_version})
+
+    with _data_version_lock:
+        if user_id not in _version_events:
+            _version_events[user_id] = threading.Event()
+        event = _version_events[user_id]
+
+    event.wait(timeout=8.0)
+    current_version = get_data_version(user_id)
+    return jsonify({
+        "ok": True,
+        "changed": current_version > client_version,
+        "version": current_version,
+    })
+
+
 @app.route("/api/sync/trigger", methods=["GET", "POST"])
 def trigger_sync():
     user_id = get_current_user_id()
     if user_id is None:
         return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
     res = cloud_db.sync_offline_data_with_firebase(user_id=user_id)
+    notify_data_change(user_id)
     return jsonify({"ok": True, "result": res})
 
 
@@ -256,6 +314,8 @@ def save_product():
         product_id=product_id,
         user_id=user_id,
     )
+    if ok:
+        notify_data_change(user_id)
     return jsonify({"ok": ok, "message": msg, "product": prod})
 
 
@@ -265,6 +325,8 @@ def delete_product_route(product_id):
     if user_id is None:
         return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
     ok, msg = cloud_db.delete_product(product_id, user_id=user_id)
+    if ok:
+        notify_data_change(user_id)
     return jsonify({"ok": ok, "message": msg})
 
 
@@ -280,6 +342,8 @@ def update_product_stock_route(product_id):
         return jsonify({"ok": False, "message": "Geçersiz stok miktarı!"}), 400
 
     ok, msg = cloud_db.update_product_stock(product_id, stock, user_id=user_id)
+    if ok:
+        notify_data_change(user_id)
     return jsonify({"ok": ok, "message": msg})
 
 
@@ -343,6 +407,21 @@ def record_sale():
         return jsonify({"ok": False, "message": "Sepet boş!"}), 400
 
     ok, msg = cloud_db.add_sale(items, note=note, user_id=user_id)
+    if ok:
+        notify_data_change(user_id)
+    return jsonify({"ok": ok, "message": msg})
+
+
+@app.route("/api/sales/<int:sale_id>", methods=["DELETE"])
+def delete_sale_route(sale_id):
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
+
+    restore_stock = request.args.get("restore_stock", "true").lower() != "false"
+    ok, msg = cloud_db.delete_sale(sale_id, user_id=user_id, restore_stock=restore_stock)
+    if ok:
+        notify_data_change(user_id)
     return jsonify({"ok": ok, "message": msg})
 
 
@@ -390,6 +469,8 @@ def handle_expenses():
             note=note,
             user_id=user_id,
         )
+        if ok:
+            notify_data_change(user_id)
         return jsonify({"ok": ok, "message": msg, "expense": exp})
 
     start_date = request.args.get("start_date")
@@ -421,10 +502,12 @@ def handle_store_hours():
         weekday = data.get("weekday", "08:00 - 22:00")
         weekend = data.get("weekend", "09:00 - 23:00")
         cloud_db.save_store_hours(weekday, weekend, user_id=user_id)
+        notify_data_change(user_id)
         return jsonify({"ok": True, "message": "İşletme çalışma saatleri başarıyla kaydedildi."})
 
     hours = cloud_db.get_store_hours(user_id=user_id)
     return jsonify({"ok": True, "store_hours": hours})
+
 
 
 
@@ -490,7 +573,7 @@ def run_web_server_in_thread(host: str = "0.0.0.0", port: Optional[int] = None) 
 
     # 1. Standart HTTP Sunucusu (Port 5000 - PC ve Mobil için Kolay Erişim)
     t_http = threading.Thread(
-        target=lambda: app.run(host=host, port=server_port, debug=False, use_reloader=False),
+        target=lambda: app.run(host=host, port=server_port, debug=False, use_reloader=False, threaded=True),
         daemon=True,
     )
     t_http.start()
@@ -503,7 +586,7 @@ def run_web_server_in_thread(host: str = "0.0.0.0", port: Optional[int] = None) 
             ssl_port = server_port + 1
             ssl_ctx = (str(cert_path), str(key_path))
             t_https = threading.Thread(
-                target=lambda: app.run(host=host, port=ssl_port, ssl_context=ssl_ctx, debug=False, use_reloader=False),
+                target=lambda: app.run(host=host, port=ssl_port, ssl_context=ssl_ctx, debug=False, use_reloader=False, threaded=True),
                 daemon=True,
             )
             t_https.start()
@@ -511,6 +594,7 @@ def run_web_server_in_thread(host: str = "0.0.0.0", port: Optional[int] = None) 
             logger.info(f"7/24 Mobil Web Sunucusu (HTTPS) çalışıyor: https://{get_local_ip()}:{ssl_port}")
         except Exception as exc:
             logger.warning(f"HTTPS sunucusu başlatılamadı: {exc}")
+
 
     return threads
 

@@ -40,8 +40,20 @@ class CloudDatabase:
         except Exception as exc:
             logger.warning(f"Migration otomatik çalıştırma uyarısı: {exc}")
         self.firestore_db = None
+        # Clean orphan rows from older single-user versions by attaching them to primary user 1
+        try:
+            with self.db.get_connection() as conn:
+                conn.execute("UPDATE products SET user_id = 1 WHERE user_id IS NULL")
+                conn.execute("UPDATE categories SET user_id = 1 WHERE user_id IS NULL")
+                conn.execute("UPDATE sales SET user_id = 1 WHERE user_id IS NULL")
+                conn.execute("UPDATE expenses SET user_id = 1 WHERE user_id IS NULL")
+                conn.execute("UPDATE store_settings SET user_id = 1 WHERE user_id IS NULL")
+        except Exception:
+            pass
+
         self._init_firebase_optional()
         self._initialized = True
+
 
     def _init_firebase_optional(self) -> None:
         """Firebase Admin / Firestore bağlantısını dondurmadan arka planda dener."""
@@ -110,9 +122,10 @@ class CloudDatabase:
     # ════════════════════════════════════════════════════════════════════
     # BULUTTAN YEREL VERİTABANINA TAM VERİ AKTARIMI (HYDRATION)
     # ════════════════════════════════════════════════════════════════════
+
     def pull_all_from_firebase(self, user_id: Optional[int] = None) -> int:
-        """Firestore üzerindeki tüm verileri (users, categories, products, sales, expenses, settings)
-        yerel SQLite veritabanına aktarır. Böylece sunucu yeniden başladığında hiçbir veri kaybolmaz.
+        """Firestore üzerindeki verileri yerel SQLite veritabanına aktarır.
+        Eğer user_id belirtilmişse SADECE o kullanıcıya ait verileri çeker (Kullanıcılar Arası Tam İzolasyon!).
         """
         if not self.firestore_db:
             return 0
@@ -159,9 +172,18 @@ class CloudDatabase:
                     cat_docs = self.firestore_db.collection("categories").stream()
                     for doc in cat_docs:
                         d = doc.to_dict()
-                        cid = d.get("id") or (int(doc.id) if doc.id.isdigit() else None)
+                        cid = d.get("id")
                         if not cid and doc.id.isdigit():
                             cid = int(doc.id)
+                        elif not cid and "_c" in doc.id:
+                            try:
+                                cid = int(doc.id.split("_c")[-1])
+                            except Exception:
+                                pass
+                        doc_user_id = d.get("user_id")
+                        if user_id is not None and doc_user_id is not None and doc_user_id != user_id:
+                            continue
+                        final_uid = doc_user_id if doc_user_id is not None else (user_id or 1)
                         if cid and d.get("name"):
                             conn.execute(
                                 """
@@ -169,7 +191,7 @@ class CloudDatabase:
                                     id, name, user_id, synced_to_cloud
                                 ) VALUES (?, ?, ?, 1)
                                 """,
-                                (cid, d.get("name"), d.get("user_id")),
+                                (cid, d.get("name"), final_uid),
                             )
                             pulled_count += 1
                 except Exception as e:
@@ -180,9 +202,18 @@ class CloudDatabase:
                     p_docs = self.firestore_db.collection("products").stream()
                     for doc in p_docs:
                         d = doc.to_dict()
-                        pid = d.get("id") or (int(doc.id) if doc.id.isdigit() else None)
+                        pid = d.get("id")
                         if not pid and doc.id.isdigit():
                             pid = int(doc.id)
+                        elif not pid and "_p" in doc.id:
+                            try:
+                                pid = int(doc.id.split("_p")[-1])
+                            except Exception:
+                                pass
+                        doc_user_id = d.get("user_id")
+                        if user_id is not None and doc_user_id is not None and doc_user_id != user_id:
+                            continue
+                        final_uid = doc_user_id if doc_user_id is not None else (user_id or 1)
                         if pid and d.get("name"):
                             cat_id = d.get("category_id") or 1
                             conn.execute(
@@ -194,7 +225,7 @@ class CloudDatabase:
                                 """,
                                 (
                                     pid,
-                                    d.get("user_id"),
+                                    final_uid,
                                     cat_id,
                                     d.get("name", "Ürün"),
                                     d.get("barcode", f"KOD{pid}"),
@@ -217,9 +248,18 @@ class CloudDatabase:
                     sales_docs = self.firestore_db.collection("sales").stream()
                     for doc in sales_docs:
                         d = doc.to_dict()
-                        sid = d.get("id") or (int(doc.id) if doc.id.isdigit() else None)
+                        sid = d.get("id")
                         if not sid and doc.id.isdigit():
                             sid = int(doc.id)
+                        elif not sid and "_s" in doc.id:
+                            try:
+                                sid = int(doc.id.split("_s")[-1])
+                            except Exception:
+                                pass
+                        doc_user_id = d.get("user_id")
+                        if user_id is not None and doc_user_id is not None and doc_user_id != user_id:
+                            continue
+                        final_uid = doc_user_id if doc_user_id is not None else (user_id or 1)
                         if sid:
                             conn.execute(
                                 """
@@ -229,7 +269,7 @@ class CloudDatabase:
                                 """,
                                 (
                                     sid,
-                                    d.get("user_id"),
+                                    final_uid,
                                     float(d.get("total_amount", 0)),
                                     int(d.get("item_count", 0)),
                                     d.get("sold_at", now),
@@ -264,9 +304,18 @@ class CloudDatabase:
                     exp_docs = self.firestore_db.collection("expenses").stream()
                     for doc in exp_docs:
                         d = doc.to_dict()
-                        eid = d.get("id") or (int(doc.id) if doc.id.isdigit() else None)
+                        eid = d.get("id")
                         if not eid and doc.id.isdigit():
                             eid = int(doc.id)
+                        elif not eid and "_e" in doc.id:
+                            try:
+                                eid = int(doc.id.split("_e")[-1])
+                            except Exception:
+                                pass
+                        doc_user_id = d.get("user_id")
+                        if user_id is not None and doc_user_id is not None and doc_user_id != user_id:
+                            continue
+                        final_uid = doc_user_id if doc_user_id is not None else (user_id or 1)
                         if eid and d.get("title"):
                             conn.execute(
                                 """
@@ -276,7 +325,7 @@ class CloudDatabase:
                                 """,
                                 (
                                     eid,
-                                    d.get("user_id"),
+                                    final_uid,
                                     d.get("title"),
                                     float(d.get("amount", 0)),
                                     d.get("category", "Fatura"),
@@ -294,7 +343,9 @@ class CloudDatabase:
                     settings_docs = self.firestore_db.collection("store_settings").stream()
                     for doc in settings_docs:
                         d = doc.to_dict()
-                        suid = d.get("user_id") or (int(doc.id) if doc.id.isdigit() else 1)
+                        suid = d.get("user_id") or (int(doc.id.replace("u", "")) if doc.id.replace("u", "").isdigit() else 1)
+                        if user_id is not None and suid != user_id:
+                            continue
                         conn.execute(
                             """
                             INSERT OR REPLACE INTO store_settings (user_id, weekday_hours, weekend_hours)
@@ -333,7 +384,7 @@ class CloudDatabase:
 
                 conn.execute("PRAGMA foreign_keys = ON")
 
-            logger.info(f"Firestore\'dan {pulled_count} adet kayıt yerel SQLite veritabanına başarıyla senkronize edildi.")
+            logger.info(f"Firestore'dan {pulled_count} adet kayıt yerel SQLite veritabanına başarıyla senkronize edildi.")
         except Exception as exc:
             logger.error(f"Firestore tam indirme (pull) hatası: {exc}")
 
@@ -344,7 +395,7 @@ class CloudDatabase:
     # ════════════════════════════════════════════════════════════════════
     def sync_offline_data_with_firebase(self, user_id: Optional[int] = None) -> Dict[str, Any]:
         """Yerel SQLite veritabanında henüz buluta gönderilmemiş (synced_to_cloud = 0) kayıtları
-        Firebase Firestore\'a aktarır ve Firestore\'daki güncel verileri yerelle senkronize eder.
+        Firebase Firestore'a aktarır ve Firestore'daki güncel verileri yerelle senkronize eder.
         """
         if not self.firestore_db:
             self._init_firebase_optional()
@@ -374,69 +425,95 @@ class CloudDatabase:
                     except Exception as e:
                         logger.warning(f"Kullanıcı {u_id} bulut senkronizasyon hatası: {e}")
 
-                # 2. PUSH UN-SYNCED CATEGORIES
-                un_cats = conn.execute("SELECT * FROM categories WHERE synced_to_cloud = 0").fetchall()
+                # 2. PUSH UN-SYNCED CATEGORIES (User Scoped Doc ID: u{uid}_c{cid})
+                cat_query = "SELECT * FROM categories WHERE synced_to_cloud = 0"
+                cat_params = []
+                if user_id is not None:
+                    cat_query += " AND user_id = ?"
+                    cat_params.append(user_id)
+                un_cats = conn.execute(cat_query, cat_params).fetchall()
                 for c in un_cats:
                     c_dict = dict(c)
                     c_id = c_dict["id"]
+                    c_uid = c_dict.get("user_id") or 1
                     c_dict["synced_to_cloud"] = 1
+                    doc_id = f"u{c_uid}_c{c_id}"
                     try:
-                        self.firestore_db.collection("categories").document(str(c_id)).set(c_dict)
+                        self.firestore_db.collection("categories").document(doc_id).set(c_dict)
                         conn.execute("UPDATE categories SET synced_to_cloud = 1 WHERE id = ?", (c_id,))
                         pushed_count += 1
                     except Exception as e:
                         logger.warning(f"Kategori {c_id} bulut senkronizasyon hatası: {e}")
 
-                # 3. PUSH UN-SYNCED PRODUCTS
-                un_prods = conn.execute(
-                    """
+                # 3. PUSH UN-SYNCED PRODUCTS (User Scoped Doc ID: u{uid}_p{pid})
+                prod_query = """
                     SELECT p.*, c.name as category_name 
                     FROM products p 
                     LEFT JOIN categories c ON p.category_id = c.id 
                     WHERE p.synced_to_cloud = 0
-                    """
-                ).fetchall()
+                """
+                prod_params = []
+                if user_id is not None:
+                    prod_query += " AND p.user_id = ?"
+                    prod_params.append(user_id)
+                un_prods = conn.execute(prod_query, prod_params).fetchall()
                 for p in un_prods:
                     p_dict = dict(p)
                     p_id = p_dict["id"]
+                    p_uid = p_dict.get("user_id") or 1
                     p_dict["synced_to_cloud"] = 1
+                    doc_id = f"u{p_uid}_p{p_id}"
                     try:
-                        self.firestore_db.collection("products").document(str(p_id)).set(p_dict)
+                        self.firestore_db.collection("products").document(doc_id).set(p_dict)
                         conn.execute("UPDATE products SET synced_to_cloud = 1 WHERE id = ?", (p_id,))
                         pushed_count += 1
                     except Exception as e:
                         logger.warning(f"Ürün {p_id} bulut senkronizasyon hatası: {e}")
 
-                # 4. PUSH UN-SYNCED SALES
-                un_sales = conn.execute("SELECT * FROM sales WHERE synced_to_cloud = 0").fetchall()
+                # 4. PUSH UN-SYNCED SALES (User Scoped Doc ID: u{uid}_s{sid})
+                sales_query = "SELECT * FROM sales WHERE synced_to_cloud = 0"
+                sales_params = []
+                if user_id is not None:
+                    sales_query += " AND user_id = ?"
+                    sales_params.append(user_id)
+                un_sales = conn.execute(sales_query, sales_params).fetchall()
                 for s in un_sales:
                     s_dict = dict(s)
                     s_id = s_dict["id"]
+                    s_uid = s_dict.get("user_id") or 1
                     items_rows = conn.execute("SELECT * FROM sale_items WHERE sale_id = ?", (s_id,)).fetchall()
                     s_dict["items"] = [dict(i) for i in items_rows]
                     s_dict["synced_to_cloud"] = 1
+                    doc_id = f"u{s_uid}_s{s_id}"
                     try:
-                        self.firestore_db.collection("sales").document(str(s_id)).set(s_dict)
+                        self.firestore_db.collection("sales").document(doc_id).set(s_dict)
                         conn.execute("UPDATE sales SET synced_to_cloud = 1 WHERE id = ?", (s_id,))
                         pushed_count += 1
                     except Exception as e:
                         logger.warning(f"Satış {s_id} bulut senkronizasyon hatası: {e}")
 
-                # 5. PUSH UN-SYNCED EXPENSES
-                un_exp = conn.execute("SELECT * FROM expenses WHERE synced_to_cloud = 0").fetchall()
+                # 5. PUSH UN-SYNCED EXPENSES (User Scoped Doc ID: u{uid}_e{eid})
+                exp_query = "SELECT * FROM expenses WHERE synced_to_cloud = 0"
+                exp_params = []
+                if user_id is not None:
+                    exp_query += " AND user_id = ?"
+                    exp_params.append(user_id)
+                un_exp = conn.execute(exp_query, exp_params).fetchall()
                 for e in un_exp:
                     e_dict = dict(e)
                     e_id = e_dict["id"]
+                    e_uid = e_dict.get("user_id") or 1
                     e_dict["synced_to_cloud"] = 1
+                    doc_id = f"u{e_uid}_e{e_id}"
                     try:
-                        self.firestore_db.collection("expenses").document(str(e_id)).set(e_dict)
+                        self.firestore_db.collection("expenses").document(doc_id).set(e_dict)
                         conn.execute("UPDATE expenses SET synced_to_cloud = 1 WHERE id = ?", (e_id,))
+                        pushed_count += 1
                     except Exception as ex:
                         logger.warning(f"Gider {e_id} bulut senkronizasyon hatası: {ex}")
 
                 # 6. PUSH GEMINI API KEY IF LOCAL EXISTS
                 key_file = DATA_DIR / "gemini_key.txt"
-
                 if key_file.exists():
                     try:
                         k = key_file.read_text(encoding="utf-8").strip()
@@ -449,9 +526,8 @@ class CloudDatabase:
                     except Exception as ex:
                         logger.warning(f"Gemini API key Firestore aktarma uyarısı: {ex}")
 
-            # 7. PULL REMOTE CHANGES
+            # 7. PULL REMOTE CHANGES (Strictly for this user!)
             pulled_count = self.pull_all_from_firebase(user_id=user_id)
-
 
             return {
                 "synced": True,
@@ -464,13 +540,14 @@ class CloudDatabase:
             return {"synced": False, "reason": str(exc), "pushed": pushed_count, "pulled": 0}
 
     # ════════════════════════════════════════════════════════════════════
-    # KATEGORİ İŞLEMLERİ
+    # KATEGORİ İŞLEMLERİ (KULLANICIYA ÖZEL İZOLE)
     # ════════════════════════════════════════════════════════════════════
     def get_categories(self, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        uid = user_id or 1
         with self.db.get_connection() as conn:
             rows = conn.execute(
-                "SELECT id, name FROM categories WHERE (user_id = ? OR user_id IS NULL OR ? IS NULL) ORDER BY name ASC",
-                (user_id, user_id),
+                "SELECT id, name FROM categories WHERE user_id = ? ORDER BY name ASC",
+                (uid,),
             ).fetchall()
             return [{"id": r["id"], "name": r["name"]} for r in rows]
 
@@ -478,25 +555,27 @@ class CloudDatabase:
         name_clean = name.strip()
         if not name_clean:
             return None
+        uid = user_id or 1
         with self.db.get_connection() as conn:
             cursor = conn.execute(
                 "INSERT OR IGNORE INTO categories (name, user_id, synced_to_cloud) VALUES (?, ?, 0)",
-                (name_clean, user_id),
+                (name_clean, uid),
             )
             cat_id = cursor.lastrowid
             if not cat_id:
                 row = conn.execute(
-                    "SELECT id FROM categories WHERE name = ? AND (user_id = ? OR user_id IS NULL OR ? IS NULL)",
-                    (name_clean, user_id, user_id),
+                    "SELECT id FROM categories WHERE name = ? AND user_id = ?",
+                    (name_clean, uid),
                 ).fetchone()
                 cat_id = row["id"] if row else None
 
         if cat_id and self.firestore_db:
             try:
-                self.firestore_db.collection("categories").document(str(cat_id)).set({
+                doc_id = f"u{uid}_c{cat_id}"
+                self.firestore_db.collection("categories").document(doc_id).set({
                     "id": cat_id,
                     "name": name_clean,
-                    "user_id": user_id,
+                    "user_id": uid,
                     "synced_to_cloud": 1,
                 })
                 with self.db.get_connection() as conn:
@@ -506,19 +585,17 @@ class CloudDatabase:
         return cat_id
 
     # ════════════════════════════════════════════════════════════════════
-    # ÜRÜN İŞLEMLERİ (KALICI VE KAPSAYICI)
+    # ÜRÜN İŞLEMLERİ (KULLANICIYA ÖZEL İZOLE & STOK KORUMALI)
     # ════════════════════════════════════════════════════════════════════
     def get_products(self, user_id: Optional[int] = None, search: str = "") -> List[Dict[str, Any]]:
+        uid = user_id or 1
         query = """
             SELECT p.*, c.name as category_name
             FROM products p
             LEFT JOIN categories c ON p.category_id = c.id
-            WHERE p.is_active = 1
+            WHERE p.is_active = 1 AND p.user_id = ?
         """
-        params: list = []
-        if user_id is not None:
-            query += " AND (p.user_id = ? OR p.user_id IS NULL)"
-            params.append(user_id)
+        params: list = [uid]
 
         if search and search.strip():
             s = f"%{search.strip()}%"
@@ -532,16 +609,14 @@ class CloudDatabase:
             return [dict(r) for r in rows]
 
     def get_product_by_barcode(self, barcode: str, user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        uid = user_id or 1
         query = """
             SELECT p.*, c.name as category_name
             FROM products p
             LEFT JOIN categories c ON p.category_id = c.id
-            WHERE p.barcode = ? AND p.is_active = 1
+            WHERE p.barcode = ? AND p.is_active = 1 AND p.user_id = ?
         """
-        params: list = [barcode.strip()]
-        if user_id is not None:
-            query += " AND (p.user_id = ? OR p.user_id IS NULL)"
-            params.append(user_id)
+        params: list = [barcode.strip(), uid]
 
         with self.db.get_connection() as conn:
             row = conn.execute(query, params).fetchone()
@@ -561,19 +636,20 @@ class CloudDatabase:
         user_id: Optional[int] = None,
     ) -> tuple[bool, str, Optional[Dict[str, Any]]]:
 
-        cat_id = self.add_category(category_name, user_id=user_id) or 1
+        uid = user_id or 1
+        cat_id = self.add_category(category_name, user_id=uid) or 1
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         with self.db.get_connection() as conn:
             if product_id:
-                # Update existing product
+                # Update existing product for this user
                 conn.execute(
                     """
                     UPDATE products
                     SET category_id = ?, name = ?, barcode = ?, purchase_price = ?,
                         sale_price = ?, stock_quantity = ?, critical_stock_level = ?,
-                        image_path = ?, updated_at = ?, user_id = COALESCE(user_id, ?)
-                    WHERE id = ?
+                        image_path = ?, updated_at = ?, is_active = 1
+                    WHERE id = ? AND user_id = ?
                     """,
                     (
                         cat_id,
@@ -585,18 +661,18 @@ class CloudDatabase:
                         critical_stock_level,
                         image_path or "",
                         now,
-                        user_id,
                         product_id,
+                        uid,
                     ),
                 )
                 pid = product_id
                 msg = f"'{name}' ürünü başarıyla güncellendi."
             else:
-                # Check duplicate barcode
-                if user_id is not None:
-                    existing = conn.execute("SELECT id FROM products WHERE barcode = ? AND (user_id = ? OR user_id IS NULL) AND is_active = 1", (barcode, user_id)).fetchone()
-                else:
-                    existing = conn.execute("SELECT id FROM products WHERE barcode = ? AND is_active = 1", (barcode,)).fetchone()
+                # Check duplicate barcode for this user
+                existing = conn.execute(
+                    "SELECT id FROM products WHERE barcode = ? AND user_id = ? AND is_active = 1",
+                    (barcode, uid)
+                ).fetchone()
 
                 if existing:
                     return False, f"'{barcode}' barkodlu bir ürününüz zaten mevcut!", None
@@ -605,11 +681,11 @@ class CloudDatabase:
                     """
                     INSERT INTO products (
                         user_id, category_id, name, barcode, purchase_price, sale_price,
-                        stock_quantity, critical_stock_level, image_path, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        stock_quantity, critical_stock_level, image_path, is_active, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                     """,
                     (
-                        user_id,
+                        uid,
                         cat_id,
                         name,
                         barcode,
@@ -627,7 +703,7 @@ class CloudDatabase:
 
         prod_data = {
             "id": pid,
-            "user_id": user_id,
+            "user_id": uid,
             "category_id": cat_id,
             "category_name": category_name,
             "name": name,
@@ -645,7 +721,8 @@ class CloudDatabase:
         if self.firestore_db:
             try:
                 prod_data["synced_to_cloud"] = 1
-                self.firestore_db.collection("products").document(str(pid)).set(prod_data)
+                doc_id = f"u{uid}_p{pid}"
+                self.firestore_db.collection("products").document(doc_id).set(prod_data)
                 synced = 1
             except Exception as e:
                 logger.warning(f"Firestore ürün bulut kaydı uyarısı: {e}")
@@ -658,18 +735,18 @@ class CloudDatabase:
         return True, msg, prod_data
 
     def delete_product(self, product_id: int, user_id: Optional[int] = None) -> tuple[bool, str]:
+        uid = user_id or 1
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with self.db.get_connection() as conn:
-            query = "UPDATE products SET is_active = 0, synced_to_cloud = 0, updated_at = ? WHERE id = ?"
-            params: list = [now, product_id]
-            if user_id is not None:
-                query += " AND (user_id = ? OR user_id IS NULL)"
-                params.append(user_id)
-            conn.execute(query, params)
+            conn.execute(
+                "UPDATE products SET is_active = 0, synced_to_cloud = 0, updated_at = ? WHERE id = ? AND user_id = ?",
+                (now, product_id, uid)
+            )
 
         if self.firestore_db:
             try:
-                self.firestore_db.collection("products").document(str(product_id)).update({
+                doc_id = f"u{uid}_p{product_id}"
+                self.firestore_db.collection("products").document(doc_id).update({
                     "is_active": 0,
                     "updated_at": now,
                     "synced_to_cloud": 1
@@ -685,18 +762,18 @@ class CloudDatabase:
         if stock_quantity < 0:
             return False, "Stok miktarı negatif olamaz!"
 
+        uid = user_id or 1
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with self.db.get_connection() as conn:
-            query = "UPDATE products SET stock_quantity = ?, synced_to_cloud = 0, updated_at = ? WHERE id = ?"
-            params: list = [stock_quantity, now, product_id]
-            if user_id is not None:
-                query += " AND (user_id = ? OR user_id IS NULL)"
-                params.append(user_id)
-            conn.execute(query, params)
+            conn.execute(
+                "UPDATE products SET stock_quantity = ?, synced_to_cloud = 0, updated_at = ? WHERE id = ? AND user_id = ? AND is_active = 1",
+                (stock_quantity, now, product_id, uid)
+            )
 
         if self.firestore_db:
             try:
-                self.firestore_db.collection("products").document(str(product_id)).update({
+                doc_id = f"u{uid}_p{product_id}"
+                self.firestore_db.collection("products").document(doc_id).update({
                     "stock_quantity": stock_quantity,
                     "updated_at": now,
                     "synced_to_cloud": 1
@@ -708,9 +785,8 @@ class CloudDatabase:
 
         return True, f"Stok miktarı {stock_quantity} adet olarak güncellendi."
 
-
     # ════════════════════════════════════════════════════════════════════
-    # SATIŞ İŞLEMLERİ
+    # SATIŞ İŞLEMLERİ (KULLANICIYA ÖZEL İZOLE)
     # ════════════════════════════════════════════════════════════════════
     def add_sale(
         self,
@@ -721,6 +797,7 @@ class CloudDatabase:
         if not cart_items:
             return False, "Sepet boş!"
 
+        uid = user_id or 1
         total_amount = sum(item["subtotal"] for item in cart_items)
         item_count = sum(item["quantity"] for item in cart_items)
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -728,7 +805,7 @@ class CloudDatabase:
         with self.db.get_connection() as conn:
             cursor = conn.execute(
                 "INSERT INTO sales (user_id, total_amount, item_count, sold_at, note) VALUES (?, ?, ?, ?, ?)",
-                (user_id, total_amount, item_count, now, note),
+                (uid, total_amount, item_count, now, note),
             )
             sale_id = cursor.lastrowid
 
@@ -748,18 +825,23 @@ class CloudDatabase:
                         item["subtotal"],
                     ),
                 )
-                # Deduct stock
+                # Deduct stock ONLY for active products of this user
                 conn.execute(
-                    "UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?), updated_at = ? WHERE id = ?",
-                    (item["quantity"], now, item["product_id"]),
+                    """
+                    UPDATE products
+                    SET stock_quantity = MAX(0, stock_quantity - ?), updated_at = ?
+                    WHERE id = ? AND user_id = ? AND is_active = 1
+                    """,
+                    (item["quantity"], now, item["product_id"], uid),
                 )
 
         synced = 0
         if self.firestore_db:
             try:
-                self.firestore_db.collection("sales").document(str(sale_id)).set({
+                doc_id = f"u{uid}_s{sale_id}"
+                self.firestore_db.collection("sales").document(doc_id).set({
                     "id": sale_id,
-                    "user_id": user_id,
+                    "user_id": uid,
                     "total_amount": total_amount,
                     "item_count": item_count,
                     "sold_at": now,
@@ -782,11 +864,9 @@ class CloudDatabase:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        query = "SELECT * FROM sales WHERE 1=1"
-        params: list = []
-        if user_id is not None:
-            query += " AND (user_id = ? OR user_id IS NULL)"
-            params.append(user_id)
+        uid = user_id or 1
+        query = "SELECT * FROM sales WHERE user_id = ?"
+        params: list = [uid]
         if start_date:
             query += " AND sold_at >= ?"
             params.append(start_date + " 00:00:00")
@@ -813,12 +893,10 @@ class CloudDatabase:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
     ) -> Dict[str, Any]:
+        uid = user_id or 1
         with self.db.get_connection() as conn:
-            sales_query = "SELECT COUNT(*) as total_transactions, SUM(total_amount) as total_revenue, SUM(item_count) as total_items FROM sales WHERE 1=1"
-            s_params: list = []
-            if user_id is not None:
-                sales_query += " AND (user_id = ? OR user_id IS NULL)"
-                s_params.append(user_id)
+            sales_query = "SELECT COUNT(*) as total_transactions, SUM(total_amount) as total_revenue, SUM(item_count) as total_items FROM sales WHERE user_id = ?"
+            s_params: list = [uid]
             if start_date:
                 sales_query += " AND sold_at >= ?"
                 s_params.append(start_date + " 00:00:00")
@@ -832,17 +910,14 @@ class CloudDatabase:
             total_items = s_row["total_items"] or 0
             avg_cart = (total_rev / total_tx) if total_tx > 0 else 0.0
 
-            # Top 5 Best Selling Products
+            # Top 5 Best Selling Products for this user
             top_query = """
                 SELECT si.product_name, SUM(si.quantity) as total_qty, SUM(si.subtotal) as total_sales_amount
                 FROM sale_items si
                 JOIN sales s ON si.sale_id = s.id
-                WHERE 1=1
+                WHERE s.user_id = ?
             """
-            top_params: list = []
-            if user_id is not None:
-                top_query += " AND (s.user_id = ? OR s.user_id IS NULL)"
-                top_params.append(user_id)
+            top_params: list = [uid]
             if start_date:
                 top_query += " AND s.sold_at >= ?"
                 top_params.append(start_date + " 00:00:00")
@@ -853,21 +928,14 @@ class CloudDatabase:
             top_rows = conn.execute(top_query, top_params).fetchall()
             top_products = [dict(r) for r in top_rows]
 
-            # Low Stock Items
-            low_query = "SELECT id, name, barcode, stock_quantity, critical_stock_level FROM products WHERE is_active = 1 AND stock_quantity <= critical_stock_level"
-            low_params: list = []
-            if user_id is not None:
-                low_query += " AND (user_id = ? OR user_id IS NULL)"
-                low_params.append(user_id)
-            low_rows = conn.execute(low_query, low_params).fetchall()
+            # Low Stock Items for this user
+            low_query = "SELECT id, name, barcode, stock_quantity, critical_stock_level FROM products WHERE is_active = 1 AND user_id = ? AND stock_quantity <= critical_stock_level"
+            low_rows = conn.execute(low_query, [uid]).fetchall()
             low_stock_items = [dict(r) for r in low_rows]
 
-            # Total Expenses
-            exp_query = "SELECT SUM(amount) as total_exp FROM expenses WHERE 1=1"
-            exp_params: list = []
-            if user_id is not None:
-                exp_query += " AND (user_id = ? OR user_id IS NULL)"
-                exp_params.append(user_id)
+            # Total Expenses for this user
+            exp_query = "SELECT SUM(amount) as total_exp FROM expenses WHERE user_id = ?"
+            exp_params: list = [uid]
             if start_date:
                 exp_query += " AND expense_date >= ?"
                 exp_params.append(start_date)
@@ -891,7 +959,7 @@ class CloudDatabase:
             }
 
     # ════════════════════════════════════════════════════════════════════
-    # GİDER VE FATURA İŞLEMLERİ
+    # GİDER VE FATURA İŞLEMLERİ (KULLANICIYA ÖZEL İZOLE)
     # ════════════════════════════════════════════════════════════════════
     def add_expense(
         self,
@@ -906,6 +974,7 @@ class CloudDatabase:
         if not t_clean or amount <= 0:
             return False, "Lütfen geçerli bir gider adı ve tutar giriniz!", None
 
+        uid = user_id or 1
         exp_date = expense_date or datetime.now().strftime("%Y-%m-%d")
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -915,13 +984,13 @@ class CloudDatabase:
                 INSERT INTO expenses (user_id, title, amount, category, expense_date, note, synced_to_cloud, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, 0, ?)
                 """,
-                (user_id, t_clean, amount, category.strip(), exp_date, note.strip(), now),
+                (uid, t_clean, amount, category.strip(), exp_date, note.strip(), now),
             )
             eid = cursor.lastrowid
 
         exp_data = {
             "id": eid,
-            "user_id": user_id,
+            "user_id": uid,
             "title": t_clean,
             "amount": amount,
             "category": category,
@@ -933,8 +1002,9 @@ class CloudDatabase:
         synced = 0
         if self.firestore_db:
             try:
+                doc_id = f"u{uid}_e{eid}"
                 exp_data["synced_to_cloud"] = 1
-                self.firestore_db.collection("expenses").document(str(eid)).set(exp_data)
+                self.firestore_db.collection("expenses").document(doc_id).set(exp_data)
                 synced = 1
             except Exception:
                 synced = 0
@@ -951,12 +1021,10 @@ class CloudDatabase:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        uid = user_id or 1
         with self.db.get_connection() as conn:
-            query = "SELECT * FROM expenses WHERE 1=1"
-            params: list = []
-            if user_id is not None:
-                query += " AND (user_id = ? OR user_id IS NULL)"
-                params.append(user_id)
+            query = "SELECT * FROM expenses WHERE user_id = ?"
+            params: list = [uid]
             if start_date:
                 query += " AND expense_date >= ?"
                 params.append(start_date)
@@ -969,8 +1037,8 @@ class CloudDatabase:
             return [dict(r) for r in rows]
 
     def get_store_hours(self, user_id: Optional[int] = None) -> Dict[str, str]:
+        uid = user_id or 1
         with self.db.get_connection() as conn:
-            uid = user_id or 1
             row = conn.execute("SELECT weekday_hours, weekend_hours FROM store_settings WHERE user_id = ?", (uid,)).fetchone()
             if row:
                 return {
@@ -992,17 +1060,21 @@ class CloudDatabase:
             )
         if self.firestore_db:
             try:
-                self.firestore_db.collection("store_settings").document(str(uid)).set({
+                doc_id = f"u{uid}"
+                self.firestore_db.collection("store_settings").document(doc_id).set({
                     "user_id": uid,
                     "weekday_hours": weekday.strip(),
                     "weekend_hours": weekend.strip(),
                 })
             except Exception:
                 pass
+        return True
+
     def save_gemini_key(self, api_key: str) -> bool:
         clean_key = api_key.strip()
         if not clean_key:
             return False
+
 
         key_file = DATA_DIR / "gemini_key.txt"
         try:

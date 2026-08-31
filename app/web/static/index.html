@@ -672,6 +672,27 @@
     let lastScannedCode = '';
     let lastScanTime = 0;
 
+    async function fetchWithAuth(url, options = {}) {
+      const token = localStorage.getItem('stok_auth_token') || sessionStorage.getItem('stok_auth_token');
+      options.headers = options.headers || {};
+      if (token) {
+        options.headers['Authorization'] = 'Bearer ' + token;
+      }
+      try {
+        const res = await fetch(url, options);
+        if (res.status === 401 && !url.includes('/api/auth/')) {
+          const authOverlay = document.getElementById('auth-modal-overlay');
+          if (authOverlay && authOverlay.style.display !== 'flex') {
+            authOverlay.style.display = 'flex';
+          }
+        }
+        return res;
+      } catch (err) {
+        throw err;
+      }
+    }
+
+
     let audioCtx = null;
 
     function initAudio() {
@@ -1550,15 +1571,6 @@
     }
 
 
-    async function fetchWithAuth(url, options = {}) {
-      const token = localStorage.getItem('stok_auth_token') || sessionStorage.getItem('stok_auth_token');
-      options.headers = options.headers || {};
-      if (token) {
-        options.headers['Authorization'] = 'Bearer ' + token;
-      }
-      return fetch(url, options);
-    }
-
     async function saveProductFromForm(e) {
       e.preventDefault();
       const payload = {
@@ -1585,75 +1597,6 @@
       }
     }
 
-    async function handleFormCameraUpload(input) {
-      if (!input.files || !input.files[0]) return;
-      const file = input.files[0];
-      showToast("⚡ Barkod taranıyor...");
-
-      try {
-        const codeReader = new ZXing.BrowserMultiFormatReader();
-        const imgUrl = URL.createObjectURL(file);
-        const result = await codeReader.decodeFromImageUrl(imgUrl);
-        if (result && result.text) {
-          document.getElementById('form-barcode').value = result.text;
-          playBeep();
-          showToast("✅ Barkod okundu: " + result.text);
-          return;
-        }
-      } catch(e) {}
-
-      // Fallback to server side
-      const formData = new FormData();
-      formData.append('file', file);
-      try {
-        const res = await fetchWithAuth('/api/barcode/decode', { method: 'POST', body: formData });
-        const json = await res.json();
-        if (json.ok && json.barcode) {
-          document.getElementById('form-barcode').value = json.barcode;
-          playBeep();
-          showToast("✅ Barkod okundu: " + json.barcode);
-        } else {
-          showToast("⚠️ Barkod okunamadı, manuel yazabilirsiniz.");
-        }
-      } catch (err) {
-        showToast("⚠️ Barkod okunamadı.");
-      }
-    }
-
-    async function handlePOSPhotoUpload(input) {
-      if (!input.files || !input.files[0]) return;
-      const file = input.files[0];
-      showToast("⚡ Fotoğraf barkodu taranıyor...");
-
-      let scannedCode = null;
-      try {
-        const codeReader = new ZXing.BrowserMultiFormatReader();
-        const imgUrl = URL.createObjectURL(file);
-        const result = await codeReader.decodeFromImageUrl(imgUrl);
-        if (result && result.text) {
-          scannedCode = result.text;
-        }
-      } catch(e) {}
-
-      if (!scannedCode) {
-        const formData = new FormData();
-        formData.append('file', file);
-        try {
-          const res = await fetchWithAuth('/api/barcode/decode', { method: 'POST', body: formData });
-          const json = await res.json();
-          if (json.ok && json.barcode) {
-            scannedCode = json.barcode;
-          }
-        } catch (err) {}
-      }
-
-      if (scannedCode) {
-        document.getElementById('pos-barcode-input').value = scannedCode;
-        handlePOSScan();
-      } else {
-        showToast("❌ Fotoğrafta okunabilir barkod bulunamadı.");
-      }
-    }
 
     // ════════════════════════════════════════════════════════════════════
     // POS SATIŞ & SEPET ADET YÖNETİMİ
@@ -2298,7 +2241,12 @@
       if (user) {
         localStorage.setItem('stok_user_info', JSON.stringify(user));
       }
+      // Reset POS cart to avoid cross-user item mixing
+      posCart = [];
+      renderPOSCart();
       loadPOSProductPicker();
+      loadProducts();
+      loadSalesHistory();
       checkSyncStatus();
     }
 
@@ -2307,10 +2255,22 @@
       localStorage.removeItem('stok_user_info');
       sessionStorage.removeItem('stok_auth_token');
       sessionStorage.removeItem('stok_user_info');
+      posCart = [];
+      renderPOSCart();
+      allProductsCache = [];
+      const prodList = document.getElementById('product-list-container');
+      if (prodList) prodList.innerHTML = '';
+      const picker = document.getElementById('pos-product-picker');
+      if (picker) picker.innerHTML = '<option value="">-- Ürün Listesinden Seçin --</option>';
+      const salesList = document.getElementById('sales-history-list');
+      if (salesList) salesList.innerHTML = '';
+      const expList = document.getElementById('expenses-list');
+      if (expList) expList.innerHTML = '';
       document.getElementById('user-profile-badge').style.display = 'none';
       document.getElementById('auth-modal-overlay').style.display = 'flex';
       showToast("Oturum kapatıldı.");
     }
+
 
     async function checkSavedAuthSession() {
       const token = localStorage.getItem('stok_auth_token') || sessionStorage.getItem('stok_auth_token');

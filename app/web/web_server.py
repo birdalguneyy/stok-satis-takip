@@ -160,6 +160,8 @@ def get_current_user_id() -> Optional[int]:
 @app.route("/api/sync/trigger", methods=["GET", "POST"])
 def trigger_sync():
     user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
     res = cloud_db.sync_offline_data_with_firebase(user_id=user_id)
     return jsonify({"ok": True, "result": res})
 
@@ -167,11 +169,13 @@ def trigger_sync():
 @app.route("/api/sync/status", methods=["GET"])
 def sync_status():
     user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
     has_firebase = bool(cloud_db.firestore_db)
     with cloud_db.db.get_connection() as conn:
-        un_prods = conn.execute("SELECT COUNT(*) as cnt FROM products WHERE synced_to_cloud = 0").fetchone()["cnt"]
-        un_sales = conn.execute("SELECT COUNT(*) as cnt FROM sales WHERE synced_to_cloud = 0").fetchone()["cnt"]
-        un_exp = conn.execute("SELECT COUNT(*) as cnt FROM expenses WHERE synced_to_cloud = 0").fetchone()["cnt"]
+        un_prods = conn.execute("SELECT COUNT(*) as cnt FROM products WHERE synced_to_cloud = 0 AND user_id = ?", (user_id,)).fetchone()["cnt"]
+        un_sales = conn.execute("SELECT COUNT(*) as cnt FROM sales WHERE synced_to_cloud = 0 AND user_id = ?", (user_id,)).fetchone()["cnt"]
+        un_exp = conn.execute("SELECT COUNT(*) as cnt FROM expenses WHERE synced_to_cloud = 0 AND user_id = ?", (user_id,)).fetchone()["cnt"]
         total_unsynced = un_prods + un_sales + un_exp
 
     return jsonify({
@@ -189,12 +193,16 @@ def sync_status():
 @app.route("/api/categories")
 def get_categories():
     user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify([])
     return jsonify(cloud_db.get_categories(user_id=user_id))
 
 
 @app.route("/api/products", methods=["GET"])
 def get_products():
     user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify([])
     search = request.args.get("search", "")
     products = cloud_db.get_products(user_id=user_id, search=search)
     return jsonify(products)
@@ -203,6 +211,8 @@ def get_products():
 @app.route("/api/products/barcode/<barcode>")
 def get_product_by_barcode(barcode):
     user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"found": False, "message": "Lütfen önce giriş yapınız!"}), 401
     code_clean = barcode.strip()
     prod = cloud_db.get_product_by_barcode(code_clean, user_id=user_id)
     if not prod:
@@ -218,6 +228,8 @@ def get_product_by_barcode(barcode):
 @app.route("/api/products", methods=["POST"])
 def save_product():
     user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
     data = request.json or {}
     name = data.get("name", "").strip()
     barcode = data.get("barcode", "").strip()
@@ -250,6 +262,8 @@ def save_product():
 @app.route("/api/products/<int:product_id>", methods=["DELETE"])
 def delete_product_route(product_id):
     user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
     ok, msg = cloud_db.delete_product(product_id, user_id=user_id)
     return jsonify({"ok": ok, "message": msg})
 
@@ -257,6 +271,8 @@ def delete_product_route(product_id):
 @app.route("/api/products/<int:product_id>/stock", methods=["POST"])
 def update_product_stock_route(product_id):
     user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
     data = request.json or {}
     try:
         stock = int(data.get("stock_quantity", 0))
@@ -318,6 +334,8 @@ def webrtc_get_signal():
 @app.route("/api/sales", methods=["POST"])
 def record_sale():
     user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
     data = request.json or {}
     items = data.get("items", [])
     note = data.get("note", "Mobil Satış")
@@ -331,6 +349,8 @@ def record_sale():
 @app.route("/api/sales/history", methods=["GET"])
 def get_sales_history():
     user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"ok": False, "authenticated": False, "sales": []}), 401
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
     history = cloud_db.get_sales_history(user_id=user_id, start_date=start_date, end_date=end_date)
@@ -340,6 +360,8 @@ def get_sales_history():
 @app.route("/api/sales/analytics", methods=["GET"])
 def get_sales_analytics():
     user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
     analytics = cloud_db.get_sales_analytics(user_id=user_id, start_date=start_date, end_date=end_date)
@@ -350,6 +372,8 @@ def get_sales_analytics():
 @app.route("/api/expenses", methods=["GET", "POST"])
 def handle_expenses():
     user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"ok": False, "authenticated": False, "expenses": []}), 401
     if request.method == "POST":
         data = request.json or {}
         title = data.get("title", "")
@@ -377,6 +401,8 @@ def handle_expenses():
 @app.route("/api/ai/analyze-sales", methods=["POST"])
 def api_analyze_sales():
     user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
     start_date = request.json.get("start_date") if request.json else None
     end_date = request.json.get("end_date") if request.json else None
     analytics = cloud_db.get_sales_analytics(user_id=user_id, start_date=start_date, end_date=end_date)
@@ -388,6 +414,8 @@ def api_analyze_sales():
 @app.route("/api/settings/store-hours", methods=["GET", "POST"])
 def handle_store_hours():
     user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
     if request.method == "POST":
         data = request.json or {}
         weekday = data.get("weekday", "08:00 - 22:00")
@@ -397,6 +425,7 @@ def handle_store_hours():
 
     hours = cloud_db.get_store_hours(user_id=user_id)
     return jsonify({"ok": True, "store_hours": hours})
+
 
 
 @app.route("/api/barcode/decode", methods=["POST"])

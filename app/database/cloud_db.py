@@ -48,13 +48,22 @@ class CloudDatabase:
             from firebase_admin import credentials, firestore
 
             if firebase_admin._apps:
-                self.firestore_db = firestore.client()
-                return
+                try:
+                    self.firestore_db = firestore.client()
+                    return
+                except Exception:
+                    pass
 
             cred = None
             env_json = os.environ.get("FIREBASE_CREDENTIALS_JSON")
             env_path = os.environ.get("FIREBASE_CREDENTIALS_PATH")
-            file_path = Path(__file__).parent.parent.parent / "firebase_credentials.json"
+
+            candidate_paths = [
+                Path(__file__).resolve().parent.parent.parent / "firebase_credentials.json",
+                DATA_DIR.parent / "firebase_credentials.json",
+                Path.cwd() / "firebase_credentials.json",
+            ]
+            file_path = next((p for p in candidate_paths if p.exists()), None)
 
             if env_json and env_json.strip():
                 raw_json = env_json.strip()
@@ -73,13 +82,13 @@ class CloudDatabase:
                 cred = credentials.Certificate(env_path)
                 logger.info(f"Firebase kimlik bilgileri ortam yolundan ({env_path}) yüklendi.")
 
-            if not cred and file_path.exists():
+            if not cred and file_path and file_path.exists():
                 try:
                     c_dict = json.loads(file_path.read_text(encoding="utf-8"))
                     if isinstance(c_dict, dict) and "private_key" in c_dict:
                         c_dict["private_key"] = c_dict["private_key"].replace("\\n", "\n").replace("\\\\n", "\n")
                     cred = credentials.Certificate(c_dict)
-                    logger.info("Firebase kimlik bilgileri yerel dosyadan (firebase_credentials.json) yüklendi.")
+                    logger.info(f"Firebase kimlik bilgileri yerel dosyadan ({file_path.name}) yüklendi.")
                 except Exception as e:
                     logger.warning(f"Yerel Firebase JSON ayrıştırma uyarısı: {e}")
                     cred = credentials.Certificate(str(file_path))

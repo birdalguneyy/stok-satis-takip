@@ -50,6 +50,27 @@ class App(ctk.CTk):
         self.show_view("dashboard")
         self.bind("<F2>", self._on_f2_pressed)
 
+        try:
+            from app.database.cloud_db import CloudDatabase
+            cloud_db = CloudDatabase()
+            has_fb = bool(cloud_db.firestore_db)
+            status_text = "🔥 🟢 Firebase Cloud Aktif" if has_fb else "🔥 🟡 Firebase Yerel (SQLite)"
+            status_color = "#10B981" if has_fb else "#F59E0B"
+
+            self.fb_badge = ctk.CTkLabel(
+                self,
+                text=status_text,
+                font=("Segoe UI", 11, "bold"),
+                text_color=status_color,
+                fg_color="#1E293B",
+                corner_radius=12,
+                padx=10,
+                pady=4,
+            )
+            self.fb_badge.place(relx=0.98, rely=0.015, anchor="ne")
+        except Exception:
+            pass
+
 
     def _on_f2_pressed(self, _event=None) -> None:
         self.show_view("sales")

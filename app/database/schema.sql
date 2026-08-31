@@ -5,15 +5,16 @@ CREATE TABLE IF NOT EXISTS schema_version (
 );
 
 CREATE TABLE IF NOT EXISTS users (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    company_name  TEXT NOT NULL,
-    full_name     TEXT NOT NULL,
-    phone         TEXT NOT NULL UNIQUE,
-    email         TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    auth_token    TEXT UNIQUE,
-    created_at    TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-    updated_at    TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_name    TEXT NOT NULL,
+    full_name       TEXT NOT NULL,
+    phone           TEXT NOT NULL UNIQUE,
+    email           TEXT NOT NULL UNIQUE,
+    password_hash   TEXT NOT NULL,
+    auth_token      TEXT UNIQUE,
+    synced_to_cloud INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
@@ -21,10 +22,11 @@ CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_auth_token ON users(auth_token);
 
 CREATE TABLE IF NOT EXISTS categories (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id     INTEGER REFERENCES users(id),
-    name        TEXT NOT NULL,
-    created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER REFERENCES users(id),
+    name            TEXT NOT NULL,
+    synced_to_cloud INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_categories_user_id ON categories(user_id);
@@ -41,6 +43,7 @@ CREATE TABLE IF NOT EXISTS products (
     critical_stock_level INTEGER NOT NULL DEFAULT 5,
     image_path           TEXT,
     is_active            INTEGER NOT NULL DEFAULT 1,
+    synced_to_cloud      INTEGER NOT NULL DEFAULT 0,
     created_at           TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     updated_at           TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
@@ -51,12 +54,13 @@ CREATE INDEX IF NOT EXISTS idx_products_name ON products(name);
 CREATE INDEX IF NOT EXISTS idx_products_stock ON products(stock_quantity);
 
 CREATE TABLE IF NOT EXISTS sales (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id      INTEGER REFERENCES users(id),
-    total_amount REAL NOT NULL CHECK (total_amount >= 0),
-    item_count   INTEGER NOT NULL CHECK (item_count > 0),
-    sold_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-    note         TEXT
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER REFERENCES users(id),
+    total_amount    REAL NOT NULL CHECK (total_amount >= 0),
+    item_count      INTEGER NOT NULL CHECK (item_count > 0),
+    sold_at         TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    note            TEXT,
+    synced_to_cloud INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_sales_user_id ON sales(user_id);
@@ -75,3 +79,4 @@ CREATE TABLE IF NOT EXISTS sale_items (
 
 CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON sale_items(sale_id);
 CREATE INDEX IF NOT EXISTS idx_sale_items_product_id ON sale_items(product_id);
+

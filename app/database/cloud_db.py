@@ -94,6 +94,153 @@ class CloudDatabase:
             logger.warning(f"Firebase Firestore istemcisi çevrimdışı modda başlatıldı: {exc}")
 
     # ════════════════════════════════════════════════════════════════════
+    # FİREBASE OTOMATİK SENKRONİZASYON (2-WAY OFFLINE-FIRST SYNC)
+    # ════════════════════════════════════════════════════════════════════
+    def sync_offline_data_with_firebase(self, user_id: Optional[int] = None) -> Dict[str, Any]:
+        """Yerel SQLite veritabanında henüz buluta gönderilmemiş (synced_to_cloud = 0) kayıtları
+        Firebase Firestore'a aktarır ve Firestore'daki güncel verileri yerelle senkronize eder.
+        """
+        if not self.firestore_db:
+            self._init_firebase_optional()
+
+        if not self.firestore_db:
+            return {
+                "synced": False,
+                "reason": "Firebase bağlantısı çevrimdışı. Veriler yerel SQLite üzerinde saklanmaktadır.",
+                "pushed": 0,
+                "pulled": 0,
+            }
+
+        pushed_count = 0
+        pulled_count = 0
+
+        try:
+            with self.db.get_connection() as conn:
+                # 1. PUSH UN-SYNCED USERS
+                un_users = conn.execute("SELECT * FROM users WHERE synced_to_cloud = 0").fetchall()
+                for u in un_users:
+                    u_dict = dict(u)
+                    u_id = u_dict["id"]
+                    u_dict.pop("password_hash", None)
+                    u_dict["synced_to_cloud"] = 1
+                    try:
+                        self.firestore_db.collection("users").document(str(u_id)).set(u_dict)
+                        conn.execute("UPDATE users SET synced_to_cloud = 1 WHERE id = ?", (u_id,))
+                        pushed_count += 1
+                    except Exception as e:
+                        logger.warning(f"Kullanıcı {u_id} bulut senkronizasyon hatası: {e}")
+
+                # 2. PUSH UN-SYNCED CATEGORIES
+                un_cats = conn.execute("SELECT * FROM categories WHERE synced_to_cloud = 0").fetchall()
+                for c in un_cats:
+                    c_dict = dict(c)
+                    c_id = c_dict["id"]
+                    c_dict["synced_to_cloud"] = 1
+                    try:
+                        self.firestore_db.collection("categories").document(str(c_id)).set(c_dict)
+                        conn.execute("UPDATE categories SET synced_to_cloud = 1 WHERE id = ?", (c_id,))
+                        pushed_count += 1
+                    except Exception as e:
+                        logger.warning(f"Kategori {c_id} bulut senkronizasyon hatası: {e}")
+
+                # 3. PUSH UN-SYNCED PRODUCTS
+                un_prods = conn.execute(
+                    """
+                    SELECT p.*, c.name as category_name 
+                    FROM products p 
+                    LEFT JOIN categories c ON p.category_id = c.id 
+                    WHERE p.synced_to_cloud = 0
+                    """
+                ).fetchall()
+                for p in un_prods:
+                    p_dict = dict(p)
+                    p_id = p_dict["id"]
+                    p_dict["synced_to_cloud"] = 1
+                    try:
+                        self.firestore_db.collection("products").document(str(p_id)).set(p_dict)
+                        conn.execute("UPDATE products SET synced_to_cloud = 1 WHERE id = ?", (p_id,))
+                        pushed_count += 1
+                    except Exception as e:
+                        logger.warning(f"Ürün {p_id} bulut senkronizasyon hatası: {e}")
+
+                # 4. PUSH UN-SYNCED SALES
+                un_sales = conn.execute("SELECT * FROM sales WHERE synced_to_cloud = 0").fetchall()
+                for s in un_sales:
+                    s_dict = dict(s)
+                    s_id = s_dict["id"]
+                    items_rows = conn.execute("SELECT * FROM sale_items WHERE sale_id = ?", (s_id,)).fetchall()
+                    s_dict["items"] = [dict(i) for i in items_rows]
+                    s_dict["synced_to_cloud"] = 1
+                    try:
+                        self.firestore_db.collection("sales").document(str(s_id)).set(s_dict)
+                        conn.execute("UPDATE sales SET synced_to_cloud = 1 WHERE id = ?", (s_id,))
+                        pushed_count += 1
+                    except Exception as e:
+                        logger.warning(f"Satış {s_id} bulut senkronizasyon hatası: {e}")
+
+                # 5. PUSH UN-SYNCED EXPENSES
+                un_exp = conn.execute("SELECT * FROM expenses WHERE synced_to_cloud = 0").fetchall()
+                for e in un_exp:
+                    e_dict = dict(e)
+                    e_id = e_dict["id"]
+                    e_dict["synced_to_cloud"] = 1
+                    try:
+                        self.firestore_db.collection("expenses").document(str(e_id)).set(e_dict)
+                        conn.execute("UPDATE expenses SET synced_to_cloud = 1 WHERE id = ?", (e_id,))
+                        pushed_count += 1
+                    except Exception as ex:
+                        logger.warning(f"Gider {e_id} bulut senkronizasyon hatası: {ex}")
+
+            # 6. PULL REMOTE PRODUCTS FROM FIRESTORE
+            if user_id is not None:
+                try:
+                    p_docs = self.firestore_db.collection("products").where("user_id", "==", user_id).stream()
+                    with self.db.get_connection() as conn:
+                        for doc in p_docs:
+                            data = doc.to_dict()
+                            pid = data.get("id")
+                            if not pid:
+                                continue
+                            ex = conn.execute("SELECT id FROM products WHERE id = ?", (pid,)).fetchone()
+                            if not ex:
+                                cat_id = data.get("category_id") or 1
+                                conn.execute(
+                                    """
+                                    INSERT OR REPLACE INTO products (
+                                        id, user_id, category_id, name, barcode, purchase_price, sale_price,
+                                        stock_quantity, critical_stock_level, image_path, is_active, synced_to_cloud, updated_at
+                                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                                    """,
+                                    (
+                                        pid,
+                                        user_id,
+                                        cat_id,
+                                        data.get("name", "Ürün"),
+                                        data.get("barcode", f"KOD{pid}"),
+                                        data.get("purchase_price", 0),
+                                        data.get("sale_price", 0),
+                                        data.get("stock_quantity", 0),
+                                        data.get("critical_stock_level", 5),
+                                        data.get("image_path", ""),
+                                        data.get("is_active", 1),
+                                        data.get("updated_at", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+                                    ),
+                                )
+                                pulled_count += 1
+                except Exception as exc:
+                    logger.warning(f"Buluttan veri çekme uyarısı: {exc}")
+
+            return {
+                "synced": True,
+                "reason": f"Firebase eşitlendi ({pushed_count} veri buluta aktarıldı, {pulled_count} veri buluttan indirildi).",
+                "pushed": pushed_count,
+                "pulled": pulled_count,
+            }
+        except Exception as exc:
+            logger.error(f"Senkronizasyon hatası: {exc}")
+            return {"synced": False, "reason": str(exc), "pushed": pushed_count, "pulled": pulled_count}
+
+    # ════════════════════════════════════════════════════════════════════
     # KATEGORİ İŞLEMLERİ (FİRMA BAZLI İZOLE)
     # ════════════════════════════════════════════════════════════════════
     def get_categories(self, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -110,22 +257,26 @@ class CloudDatabase:
             return None
         with self.db.get_connection() as conn:
             cursor = conn.execute(
-                "INSERT OR IGNORE INTO categories (name, user_id) VALUES (?, ?)",
+                "INSERT OR IGNORE INTO categories (name, user_id, synced_to_cloud) VALUES (?, ?, 0)",
                 (name_clean, user_id),
             )
             cat_id = cursor.lastrowid
+            if not cat_id:
+                row = conn.execute(
+                    "SELECT id FROM categories WHERE name = ? AND (user_id = ? OR user_id IS NULL OR ? IS NULL)",
+                    (name_clean, user_id, user_id),
+                ).fetchone()
+                cat_id = row["id"] if row else None
+
             if cat_id:
                 if self.firestore_db:
                     try:
-                        self.firestore_db.collection("categories").document(str(cat_id)).set({"name": name_clean, "user_id": user_id})
+                        self.firestore_db.collection("categories").document(str(cat_id)).set({"name": name_clean, "user_id": user_id, "synced_to_cloud": 1})
+                        conn.execute("UPDATE categories SET synced_to_cloud = 1 WHERE id = ?", (cat_id,))
                     except Exception:
                         pass
                 return cat_id
-            row = conn.execute(
-                "SELECT id FROM categories WHERE name = ? AND (user_id = ? OR user_id IS NULL OR ? IS NULL)",
-                (name_clean, user_id, user_id),
-            ).fetchone()
-            return row["id"] if row else None
+            return None
 
     # ════════════════════════════════════════════════════════════════════
     # ÜRÜN İŞLEMLERİ (FİRMA BAZLI İZOLE)
@@ -262,12 +413,20 @@ class CloudDatabase:
                 "image_path": image_path or "",
                 "updated_at": now,
             }
+            synced = 0
             if self.firestore_db:
                 try:
+                    prod_data["synced_to_cloud"] = 1
                     self.firestore_db.collection("products").document(str(pid)).set(prod_data)
+                    synced = 1
                 except Exception as e:
-                    logger.warning(f"Firestore cloud save error: {e}")
+                    logger.warning(f"Firestore ürün bulut kaydı uyarısı (çevrimdışı mod): {e}")
+                    synced = 0
 
+            with self.db.get_connection() as conn:
+                conn.execute("UPDATE products SET synced_to_cloud = ? WHERE id = ?", (synced, pid))
+
+            prod_data["synced_to_cloud"] = synced
             return True, msg, prod_data
 
     # ════════════════════════════════════════════════════════════════════
@@ -315,7 +474,7 @@ class CloudDatabase:
                     (item["quantity"], now, item["product_id"]),
                 )
 
-            # Sync sale to Firestore
+            synced = 0
             if self.firestore_db:
                 try:
                     self.firestore_db.collection("sales").document(str(sale_id)).set({
@@ -326,9 +485,14 @@ class CloudDatabase:
                         "sold_at": now,
                         "note": note,
                         "items": cart_items,
+                        "synced_to_cloud": 1,
                     })
+                    synced = 1
                 except Exception:
-                    pass
+                    synced = 0
+
+            with self.db.get_connection() as conn:
+                conn.execute("UPDATE sales SET synced_to_cloud = ? WHERE id = ?", (synced, sale_id))
 
             return True, f"Satış başarıyla tamamlandı. Toplam: {total_amount:.2f} ₺"
 
@@ -500,12 +664,19 @@ class CloudDatabase:
                 "note": note,
             }
 
+            synced = 0
             if self.firestore_db:
                 try:
+                    exp_data["synced_to_cloud"] = 1
                     self.firestore_db.collection("expenses").document(str(eid)).set(exp_data)
+                    synced = 1
                 except Exception:
-                    pass
+                    synced = 0
 
+            with self.db.get_connection() as conn:
+                conn.execute("UPDATE expenses SET synced_to_cloud = ? WHERE id = ?", (synced, eid))
+
+            exp_data["synced_to_cloud"] = synced
             return True, f"'{t_clean}' ({amount:.2f} ₺) gideri başarıyla eklendi.", exp_data
 
     def get_expenses(
@@ -655,11 +826,18 @@ class CloudDatabase:
                 "auth_token": token,
             }
 
+            synced = 0
             if self.firestore_db:
                 try:
-                    self.firestore_db.collection("users").document(str(uid)).set(user_data)
+                    user_data_cloud = dict(user_data)
+                    user_data_cloud["synced_to_cloud"] = 1
+                    self.firestore_db.collection("users").document(str(uid)).set(user_data_cloud)
+                    synced = 1
                 except Exception:
-                    pass
+                    synced = 0
+
+            conn.execute("UPDATE users SET synced_to_cloud = ? WHERE id = ?", (synced, uid))
+            user_data["synced_to_cloud"] = synced
 
             return True, f"Tebrikler '{c_name}' firması ile hesabınız başarıyla oluşturuldu!", user_data
 

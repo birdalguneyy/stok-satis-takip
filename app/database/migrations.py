@@ -38,6 +38,12 @@ def run_migrations() -> None:
                 except Exception:
                     pass
 
+            if "synced_to_cloud" not in cols:
+                try:
+                    conn.execute("ALTER TABLE products ADD COLUMN synced_to_cloud INTEGER NOT NULL DEFAULT 0")
+                except Exception:
+                    pass
+
             cat_cols = [r["name"] for r in conn.execute("PRAGMA table_info(categories)").fetchall()]
             if "user_id" not in cat_cols:
                 try:
@@ -45,10 +51,69 @@ def run_migrations() -> None:
                 except Exception:
                     pass
 
+            if "synced_to_cloud" not in cat_cols:
+                try:
+                    conn.execute("ALTER TABLE categories ADD COLUMN synced_to_cloud INTEGER NOT NULL DEFAULT 0")
+                except Exception:
+                    pass
+
             sales_cols = [r["name"] for r in conn.execute("PRAGMA table_info(sales)").fetchall()]
             if "user_id" not in sales_cols:
                 try:
                     conn.execute("ALTER TABLE sales ADD COLUMN user_id INTEGER")
+                except Exception:
+                    pass
+
+            if "synced_to_cloud" not in sales_cols:
+                try:
+                    conn.execute("ALTER TABLE sales ADD COLUMN synced_to_cloud INTEGER NOT NULL DEFAULT 0")
+                except Exception:
+                    pass
+
+            # Ensure users table exists in existing database
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    company_name    TEXT NOT NULL,
+                    full_name       TEXT NOT NULL,
+                    phone           TEXT NOT NULL UNIQUE,
+                    email           TEXT NOT NULL UNIQUE,
+                    password_hash   TEXT NOT NULL,
+                    auth_token      TEXT UNIQUE,
+                    synced_to_cloud INTEGER NOT NULL DEFAULT 0,
+                    created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                    updated_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+                )
+                """
+            )
+            users_cols = [r["name"] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
+            if "synced_to_cloud" not in users_cols:
+                try:
+                    conn.execute("ALTER TABLE users ADD COLUMN synced_to_cloud INTEGER NOT NULL DEFAULT 0")
+                except Exception:
+                    pass
+
+            # Ensure expenses table exists and has synced_to_cloud
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS expenses (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id         INTEGER,
+                    title           TEXT NOT NULL,
+                    amount          REAL NOT NULL,
+                    category        TEXT DEFAULT 'Fatura',
+                    expense_date    TEXT NOT NULL,
+                    note            TEXT,
+                    synced_to_cloud INTEGER NOT NULL DEFAULT 0,
+                    created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+                )
+                """
+            )
+            exp_cols = [r["name"] for r in conn.execute("PRAGMA table_info(expenses)").fetchall()]
+            if "synced_to_cloud" not in exp_cols:
+                try:
+                    conn.execute("ALTER TABLE expenses ADD COLUMN synced_to_cloud INTEGER NOT NULL DEFAULT 0")
                 except Exception:
                     pass
 

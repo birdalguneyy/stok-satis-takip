@@ -147,6 +147,35 @@ def get_current_user_id() -> Optional[int]:
     return None
 
 
+@app.route("/api/sync/trigger", methods=["GET", "POST"])
+def trigger_sync():
+    user_id = get_current_user_id()
+    res = cloud_db.sync_offline_data_with_firebase(user_id=user_id)
+    return jsonify({"ok": True, "result": res})
+
+
+@app.route("/api/sync/status", methods=["GET"])
+def sync_status():
+    user_id = get_current_user_id()
+    has_firebase = bool(cloud_db.firestore_db)
+    with cloud_db.db.get_connection() as conn:
+        un_prods = conn.execute("SELECT COUNT(*) as cnt FROM products WHERE synced_to_cloud = 0").fetchone()["cnt"]
+        un_sales = conn.execute("SELECT COUNT(*) as cnt FROM sales WHERE synced_to_cloud = 0").fetchone()["cnt"]
+        un_exp = conn.execute("SELECT COUNT(*) as cnt FROM expenses WHERE synced_to_cloud = 0").fetchone()["cnt"]
+        total_unsynced = un_prods + un_sales + un_exp
+
+    return jsonify({
+        "ok": True,
+        "has_firebase": has_firebase,
+        "unsynced_items": total_unsynced,
+        "details": {
+            "products": un_prods,
+            "sales": un_sales,
+            "expenses": un_exp,
+        }
+    })
+
+
 @app.route("/api/categories")
 def get_categories():
     user_id = get_current_user_id()
@@ -328,6 +357,17 @@ def ai_scan_package():
     return jsonify({"ok": ok, "message": msg, "data": ai_data})
 
 
+def _background_sync_loop():
+    import time
+    logger.info("Firebase 7/24 Arka Plan Otomatik Senkronizasyon Servisi başlatıldı.")
+    while True:
+        try:
+            time.sleep(25)
+            cloud_db.sync_offline_data_with_firebase()
+        except Exception as exc:
+            logger.debug(f"Arka plan senkronizasyon uyarısı: {exc}")
+
+
 def run_web_server_in_thread(host: str = "0.0.0.0", port: Optional[int] = None) -> list:
     """Flask Web sunucusunu HTTP (Port 5000) ve HTTPS (Port 5001) modlarında çalıştırır."""
     server_port = port or int(os.environ.get("PORT", 5000))
@@ -335,6 +375,11 @@ def run_web_server_in_thread(host: str = "0.0.0.0", port: Optional[int] = None) 
     key_path = DATA_DIR / "key.pem"
 
     threads = []
+
+    # 0. Arka Plan Firebase Otomatik Senkronizasyon Servisi
+    t_sync = threading.Thread(target=_background_sync_loop, daemon=True)
+    t_sync.start()
+    threads.append(t_sync)
 
     # 1. Standart HTTP Sunucusu (Port 5000 - PC ve Mobil için Kolay Erişim)
     t_http = threading.Thread(

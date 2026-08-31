@@ -345,9 +345,10 @@
       <span>Stok & Satış</span>
     </h1>
     <div style="display:flex; gap:6px; align-items:center;">
+      <div id="sync-status-badge" class="status-badge" style="background:rgba(16,185,129,0.2); color:#10B981; font-weight:700;" onclick="triggerManualSync()">🔥 🟢 Firebase Aktif</div>
       <div id="user-profile-badge" class="status-badge" style="background:rgba(16,185,129,0.15); color:var(--accent); display:none;" onclick="handleLogout()">🏢 <span id="user-profile-name">Firma</span> (Çıkış)</div>
       <div id="pwa-install-badge" class="status-badge" style="display:none; background:rgba(16, 185, 129, 0.25); color:var(--accent); font-weight:bold;" onclick="installPWA()">📲 Uygulamayı Yükle</div>
-      <div class="status-badge" onclick="toggleKeyModal()">🔑 AI Ayarı</div>
+      <div class="status-badge" onclick="openAIKeyModal()">🔑 AI Ayarı</div>
     </div>
   </header>
 
@@ -1519,6 +1520,55 @@
       errDiv.style.display = 'block';
     }
 
+    async function checkSyncStatus() {
+      const badge = document.getElementById('sync-status-badge');
+      if (!badge) return;
+      try {
+        const res = await fetch('/api/sync/status');
+        const json = await res.json();
+        if (json.ok) {
+          if (!json.has_firebase) {
+            badge.innerText = '🔥 🟡 Firebase Yerel (SQLite)';
+            badge.style.background = 'rgba(245, 158, 11, 0.2)';
+            badge.style.color = '#F59E0B';
+          } else if (json.unsynced_items > 0) {
+            badge.innerText = `🔥 🔄 Firebase Eşitleniyor (${json.unsynced_items})`;
+            badge.style.background = 'rgba(234, 179, 8, 0.2)';
+            badge.style.color = '#EAB308';
+            triggerManualSync();
+          } else {
+            badge.innerText = '🔥 🟢 Firebase Aktif';
+            badge.style.background = 'rgba(16, 185, 129, 0.2)';
+            badge.style.color = '#10B981';
+          }
+        }
+      } catch (err) {
+        badge.innerText = '🔥 🟡 Firebase Çevrimdışı';
+        badge.style.background = 'rgba(245, 158, 11, 0.2)';
+        badge.style.color = '#F59E0B';
+      }
+    }
+
+    async function triggerManualSync() {
+      const badge = document.getElementById('sync-status-badge');
+      if (badge) {
+        badge.innerText = '🔄 Eşitleniyor...';
+      }
+      try {
+        const token = localStorage.getItem('stok_auth_token') || sessionStorage.getItem('stok_auth_token');
+        const res = await fetch('/api/sync/trigger', {
+          headers: token ? { 'Authorization': 'Bearer ' + token } : {}
+        });
+        const json = await res.json();
+        if (json.ok && json.result) {
+          showToast(json.result.reason || "Firebase ile eşitlendi.");
+        }
+      } catch (err) {
+        showToast("🌐 İnternet bağlantısı bekleniyor...");
+      }
+      checkSyncStatus();
+    }
+
     async function handleLoginSubmit(e) {
       e.preventDefault();
       const identifier = document.getElementById('login-identifier').value.trim();
@@ -1535,11 +1585,14 @@
         if (json.ok && json.user) {
           if (remember && json.user.auth_token) {
             localStorage.setItem('stok_auth_token', json.user.auth_token);
+            localStorage.setItem('stok_user_info', JSON.stringify(json.user));
           } else {
             sessionStorage.setItem('stok_auth_token', json.user.auth_token);
+            sessionStorage.setItem('stok_user_info', JSON.stringify(json.user));
           }
           setLoggedInUser(json.user);
           showToast(json.message);
+          triggerManualSync();
         } else {
           showAuthError(json.message || "Giriş başarısız!");
         }
@@ -1565,8 +1618,10 @@
         const json = await res.json();
         if (json.ok && json.user) {
           localStorage.setItem('stok_auth_token', json.user.auth_token);
+          localStorage.setItem('stok_user_info', JSON.stringify(json.user));
           setLoggedInUser(json.user);
           showToast(json.message);
+          triggerManualSync();
         } else {
           showAuthError(json.message || "Kayıt hatası!");
         }
@@ -1575,20 +1630,27 @@
       }
     }
 
-    function setLoggedInUser(user) {
+    function setLoggedInUser(user, isOffline = false) {
       document.getElementById('auth-modal-overlay').style.display = 'none';
       const badge = document.getElementById('user-profile-badge');
       const nameSpan = document.getElementById('user-profile-name');
       if (badge && nameSpan) {
-        nameSpan.innerText = user.company_name || user.full_name;
+        const prefix = isOffline ? '🌐 ' : '🏢 ';
+        nameSpan.innerText = prefix + (user.company_name || user.full_name);
         badge.style.display = 'block';
       }
+      if (user) {
+        localStorage.setItem('stok_user_info', JSON.stringify(user));
+      }
       loadPOSProductPicker();
+      checkSyncStatus();
     }
 
     function handleLogout() {
       localStorage.removeItem('stok_auth_token');
+      localStorage.removeItem('stok_user_info');
       sessionStorage.removeItem('stok_auth_token');
+      sessionStorage.removeItem('stok_user_info');
       document.getElementById('user-profile-badge').style.display = 'none';
       document.getElementById('auth-modal-overlay').style.display = 'flex';
       showToast("Oturum kapatıldı.");
@@ -1596,6 +1658,10 @@
 
     async function checkSavedAuthSession() {
       const token = localStorage.getItem('stok_auth_token') || sessionStorage.getItem('stok_auth_token');
+      const cachedUserRaw = localStorage.getItem('stok_user_info') || sessionStorage.getItem('stok_user_info');
+      let cachedUser = null;
+      try { if (cachedUserRaw) cachedUser = JSON.parse(cachedUserRaw); } catch(e) {}
+
       if (token) {
         try {
           const res = await fetch('/api/auth/me?token=' + encodeURIComponent(token));
@@ -1604,10 +1670,34 @@
             setLoggedInUser(json.user);
             return;
           }
-        } catch (e) {}
+        } catch (e) {
+          if (cachedUser) {
+            setLoggedInUser(cachedUser, true);
+            showToast("🌐 Çevrimdışı Mod: Bağlantı yok, yerel kayıtlar kullanılmaktadır.");
+            return;
+          }
+        }
       }
+
+      if (cachedUser) {
+        setLoggedInUser(cachedUser, true);
+        return;
+      }
+
       document.getElementById('auth-modal-overlay').style.display = 'flex';
     }
+
+    window.addEventListener('online', () => {
+      showToast("📶 İnternet bağlantısı sağlandı. Firebase eşitleniyor...");
+      triggerManualSync();
+    });
+
+    window.addEventListener('offline', () => {
+      showToast("🌐 Çevrimdışı moda geçildi. Kayıtlar yerel olarak saklanacak.");
+      checkSyncStatus();
+    });
+
+    setInterval(checkSyncStatus, 30000);
 
     // Init AI status check and Auth session check on load
     checkAIStatus();

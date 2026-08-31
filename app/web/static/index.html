@@ -2282,6 +2282,16 @@
 
     async function handleLoginSubmit(e) {
       e.preventDefault();
+      const errDiv = document.getElementById('auth-error');
+      if (errDiv) errDiv.style.display = 'none';
+
+      const btn = e.target.querySelector('button[type="submit"]');
+      const originalText = btn ? btn.innerText : '🔑 Giriş Yap';
+      if (btn) {
+        btn.disabled = true;
+        btn.innerText = '⏳ Giriş Yapılıyor...';
+      }
+
       const identifier = document.getElementById('login-identifier').value.trim();
       const password = document.getElementById('login-password').value.trim();
       const remember = document.getElementById('login-remember').checked;
@@ -2302,18 +2312,33 @@
             sessionStorage.setItem('stok_user_info', JSON.stringify(json.user));
           }
           setLoggedInUser(json.user);
-          showToast(json.message);
+          showToast("✅ " + (json.message || "Başarıyla giriş yapıldı!"));
           triggerManualSync();
         } else {
-          showAuthError(json.message || "Giriş başarısız!");
+          showAuthError(json.message || "Giriş başarısız! Lütfen bilgilerinizi kontrol ediniz.");
         }
       } catch (err) {
-        showAuthError("Sunucu bağlantı hatası!");
+        showAuthError("Sunucu bağlantı hatası! Lütfen internetinizi kontrol ediniz.");
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerText = originalText;
+        }
       }
     }
 
     async function handleRegisterSubmit(e) {
       e.preventDefault();
+      const errDiv = document.getElementById('auth-error');
+      if (errDiv) errDiv.style.display = 'none';
+
+      const btn = e.target.querySelector('button[type="submit"]');
+      const originalText = btn ? btn.innerText : '✨ Kurumsal Hesap Oluştur';
+      if (btn) {
+        btn.disabled = true;
+        btn.innerText = '⏳ Kaydediliyor...';
+      }
+
       const company_name = document.getElementById('reg-company').value.trim();
       const full_name = document.getElementById('reg-fullname').value.trim();
       const phone = document.getElementById('reg-phone').value.trim();
@@ -2331,18 +2356,25 @@
           localStorage.setItem('stok_auth_token', json.user.auth_token);
           localStorage.setItem('stok_user_info', JSON.stringify(json.user));
           setLoggedInUser(json.user);
-          showToast(json.message);
+          showToast("✅ " + (json.message || "Hesabınız başarıyla oluşturuldu!"));
           triggerManualSync();
         } else {
-          showAuthError(json.message || "Kayıt hatası!");
+          showAuthError(json.message || "Kayıt oluşturulamadı!");
         }
       } catch (err) {
         showAuthError("Sunucu bağlantı hatası!");
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerText = originalText;
+        }
       }
     }
 
     function setLoggedInUser(user, isOffline = false) {
-      document.getElementById('auth-modal-overlay').style.display = 'none';
+      const authOverlay = document.getElementById('auth-modal-overlay');
+      if (authOverlay) authOverlay.style.display = 'none';
+
       const badge = document.getElementById('user-profile-badge');
       const nameSpan = document.getElementById('user-profile-name');
       if (badge && nameSpan) {
@@ -2355,12 +2387,13 @@
       }
       // Reset POS cart to avoid cross-user item mixing
       posCart = [];
-      renderPOSCart();
-      loadPOSProductPicker();
-      loadProducts();
-      loadSalesHistory();
-      checkSyncStatus();
+      try { renderPOSCart(); } catch(e) {}
+      try { loadPOSProductPicker(); } catch(e) {}
+      try { loadProducts(); } catch(e) {}
+      try { loadSalesHistory(); } catch(e) {}
+      try { checkSyncStatus(); } catch(e) {}
     }
+
 
     function handleLogout() {
       localStorage.removeItem('stok_auth_token');

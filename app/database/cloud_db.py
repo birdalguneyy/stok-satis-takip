@@ -1178,7 +1178,9 @@ class CloudDatabase:
 
     def _clean_phone(self, phone: str) -> str:
         cleaned = "".join(c for c in phone if c.isdigit())
-        if cleaned.startswith("0"):
+        if cleaned.startswith("90") and len(cleaned) == 12:
+            cleaned = cleaned[2:]
+        if cleaned.startswith("0") and len(cleaned) == 11:
             cleaned = cleaned[1:]
         return cleaned
 
@@ -1217,7 +1219,7 @@ class CloudDatabase:
                     data = d.to_dict()
                     d_phone = self._clean_phone(str(data.get("phone", "")))
                     d_email = str(data.get("email", "")).strip().lower()
-                    if d_phone == p_clean or d_email == e_clean:
+                    if (p_clean and d_phone == p_clean) or d_email == e_clean:
                         saved_hash = data.get("password_hash")
                         if not saved_hash or saved_hash == pass_hash:
                             uid = data.get("id") or (int(d.id) if d.id.isdigit() else 1)
@@ -1248,21 +1250,28 @@ class CloudDatabase:
 
         # 2. SQLite kontrolü
         with self.db.get_connection() as conn:
-            existing_p = conn.execute("SELECT id, password_hash FROM users WHERE phone = ? OR phone = ?", (p_raw, p_clean)).fetchone()
+            existing_p = conn.execute(
+                "SELECT id, password_hash, company_name FROM users WHERE phone = ? OR phone = ? OR phone = ?",
+                (p_raw, p_clean, "0" + p_clean)
+            ).fetchone()
             if existing_p:
-                if existing_p["password_hash"] == pass_hash:
+                if existing_p["password_hash"] == pass_hash or not existing_p["password_hash"]:
                     pass
                 else:
-                    return False, "Bu telefon numarası ile kayıtlı bir hesap zaten var!", None
+                    return False, "Bu telefon numarası ile kayıtlı bir hesap zaten var! Lütfen 'Giriş Yap' sekmesinden giriş yapın.", None
 
-            existing_e = conn.execute("SELECT id, password_hash FROM users WHERE LOWER(email) = ?", (e_clean,)).fetchone()
+            existing_e = conn.execute(
+                "SELECT id, password_hash, company_name FROM users WHERE LOWER(email) = ?",
+                (e_clean,)
+            ).fetchone()
             if existing_e:
-                if existing_e["password_hash"] == pass_hash:
+                if existing_e["password_hash"] == pass_hash or not existing_e["password_hash"]:
                     pass
                 else:
-                    return False, "Bu e-posta adresi ile kayıtlı bir hesap zaten var!", None
+                    return False, "Bu e-posta adresi ile kayıtlı bir hesap zaten var! Lütfen 'Giriş Yap' sekmesinden giriş yapın.", None
 
-        if (existing_p and existing_p["password_hash"] == pass_hash) or (existing_e and existing_e["password_hash"] == pass_hash):
+        if (existing_p and (existing_p["password_hash"] == pass_hash or not existing_p["password_hash"])) or \
+           (existing_e and (existing_e["password_hash"] == pass_hash or not existing_e["password_hash"])):
             return self.login_user(phone_or_email=p_clean if existing_p else e_clean, password=password)
 
         with self.db.get_connection() as conn:
@@ -1273,7 +1282,7 @@ class CloudDatabase:
 
             uid = max_id + 1
 
-            cursor = conn.execute(
+            conn.execute(
                 """
                 INSERT INTO users (id, company_name, full_name, phone, email, password_hash, auth_token, synced_to_cloud, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
@@ -1307,26 +1316,42 @@ class CloudDatabase:
     def login_user(self, phone_or_email: str, password: str, remember_me: bool = True) -> tuple[bool, str, Optional[Dict[str, Any]]]:
         query_val = phone_or_email.strip()
         p_clean = self._clean_phone(query_val)
+        p_zero = ("0" + p_clean) if p_clean else ""
+        p_90 = ("90" + p_clean) if p_clean else ""
+        p_plus90 = ("+90" + p_clean) if p_clean else ""
+        e_clean = query_val.lower()
+
         if not query_val or not password:
-            return False, "Telefon / E-posta ve şifre giriniz!", None
+            return False, "Lütfen telefon/e-posta ve şifrenizi giriniz!", None
 
         pass_hash = self._hash_password(password)
-
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         user_dict = None
+
         # 1. SQLite'da ara
         with self.db.get_connection() as conn:
             row = conn.execute(
-                "SELECT * FROM users WHERE (phone = ? OR phone = ? OR LOWER(email) = LOWER(?)) AND password_hash = ?",
-                (query_val, p_clean, query_val, pass_hash),
+                """
+                SELECT * FROM users 
+                WHERE phone = ? OR phone = ? OR phone = ? OR phone = ? OR phone = ? OR LOWER(email) = ?
+                """,
+                (query_val, p_clean, p_zero, p_90, p_plus90, e_clean),
             ).fetchone()
 
             if row:
-                user_dict = dict(row)
-                token = user_dict.get("auth_token")
-                if not token or remember_me:
-                    token = self._generate_token()
-                    conn.execute("UPDATE users SET auth_token = ? WHERE id = ?", (token, user_dict["id"]))
-                    user_dict["auth_token"] = token
+                saved_hash = row["password_hash"]
+                if not saved_hash or saved_hash == pass_hash:
+                    user_dict = dict(row)
+                    token = user_dict.get("auth_token")
+                    if not token or remember_me or not saved_hash:
+                        token = self._generate_token()
+                        conn.execute(
+                            "UPDATE users SET auth_token = ?, password_hash = ?, updated_at = ? WHERE id = ?",
+                            (token, pass_hash, now, user_dict["id"])
+                        )
+                        user_dict["auth_token"] = token
+                else:
+                    return False, "Girilen şifre hatalı! Lütfen kontrol ediniz.", None
 
         if user_dict:
             if self.firestore_db:
@@ -1334,13 +1359,13 @@ class CloudDatabase:
                     self.firestore_db.collection("users").document(str(user_dict["id"])).update({
                         "auth_token": user_dict["auth_token"],
                         "password_hash": pass_hash,
-                        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "updated_at": now,
                     })
                 except Exception:
                     pass
             user_dict.pop("password_hash", None)
             self.pull_all_from_firebase(user_id=user_dict["id"])
-            return True, f"Hoş geldiniz, {user_dict['full_name']} ({user_dict['company_name']})", user_dict
+            return True, f"Hoş geldiniz, {user_dict.get('full_name', '')} ({user_dict.get('company_name', '')})", user_dict
 
         # 2. SQLite'da bulunamazsa Firestore'dan sorgula
         if self.firestore_db:
@@ -1351,12 +1376,11 @@ class CloudDatabase:
                     data = d.to_dict()
                     d_phone = self._clean_phone(str(data.get("phone", "")))
                     d_email = str(data.get("email", "")).strip().lower()
-                    if d_phone in (p_clean, query_val) or d_email == query_val.lower():
+                    if (p_clean and d_phone == p_clean) or d_email == e_clean or str(data.get("phone", "")) == query_val:
                         saved_hash = data.get("password_hash")
                         if not saved_hash or saved_hash == pass_hash:
                             token = self._generate_token()
                             uid = data.get("id") or (int(d.id) if d.id.isdigit() else 1)
-                            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             data["id"] = uid
                             data["password_hash"] = pass_hash
                             data["auth_token"] = token
@@ -1387,10 +1411,13 @@ class CloudDatabase:
                             user_dict.pop("password_hash", None)
                             self.pull_all_from_firebase(user_id=uid)
                             return True, f"Hoş geldiniz, {user_dict.get('full_name', '')} ({user_dict.get('company_name', '')})", user_dict
+                        else:
+                            return False, "Girilen şifre hatalı! Lütfen kontrol ediniz.", None
             except Exception as e:
                 logger.warning(f"Firestore oturum kontrol hatası: {e}")
 
-        return False, "Telefon/E-posta veya şifre hatalı!", None
+        return False, "Bu telefon numarası veya e-posta ile kayıtlı bir hesap bulunamadı! 'Yeni Üyelik' sekmesinden ücretsiz kayıt olabilirsiniz.", None
+
 
     def verify_token(self, token: str) -> Optional[Dict[str, Any]]:
         if not token or not token.strip():

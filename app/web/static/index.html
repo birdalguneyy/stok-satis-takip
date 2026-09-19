@@ -378,6 +378,70 @@
     </div>
   </div>
 
+  <!-- ONLINE SALES ENTRY MODAL POPUP OVERLAY -->
+  <div id="online-sale-modal-overlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(15,23,42,0.92); backdrop-filter:blur(12px); z-index:9999; justify-content:center; align-items:center; padding:16px;">
+    <div class="card" style="width:100%; max-width:480px; box-shadow:0 20px 50px rgba(0,0,0,0.7); border:1px solid #38BDF8;">
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:14px;">
+        <h3 style="margin:0; font-size:1.1rem; color:#38BDF8; display:flex; align-items:center; gap:8px;">
+          <span>🌐 İnternet Satışı Girişi</span>
+        </h3>
+        <button style="background:none; border:none; color:var(--text-muted); font-size:1.5rem; cursor:pointer;" onclick="closeOnlineSaleModal()">&times;</button>
+      </div>
+
+      <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:14px; line-height:1.4;">
+        Trendyol, Hepsiburada, Web sitesi gibi kanallardan satılan ürünlerin adedini girin; anında stoktan düşülür ve internet satışı olarak kaydedilir.
+      </p>
+
+      <form onsubmit="handleOnlineSaleSubmit(event)" style="display:flex; flex-direction:column; gap:12px;">
+        <div class="form-group" style="margin-bottom:0;">
+          <label style="color:var(--text); font-weight:600;">Satışı Yapılan Ürün</label>
+          <select id="online-sale-product-select" onchange="handleOnlineProductSelectChange(this)" required style="width:100%; padding:10px; background:#0F172A; border:1px solid var(--border); color:var(--text); border-radius:10px; font-weight:600;">
+            <option value="">-- Ürün Listesinden Seçin --</option>
+          </select>
+          <div id="online-sale-stock-hint" style="font-size:0.75rem; color:#38BDF8; margin-top:4px; font-weight:600;"></div>
+        </div>
+
+        <div style="display:flex; gap:10px;">
+          <div style="flex:1;">
+            <label style="font-size:0.8rem; color:var(--text-muted); display:block; margin-bottom:4px;">Satış Adedi</label>
+            <input type="number" id="online-sale-qty" min="1" value="1" required style="width:100%; padding:10px; font-size:1.1rem; font-weight:700; color:var(--accent);">
+          </div>
+          <div style="flex:1;">
+            <label style="font-size:0.8rem; color:var(--text-muted); display:block; margin-bottom:4px;">Birim Fiyat (₺)</label>
+            <input type="number" step="0.5" id="online-sale-price" required style="width:100%; padding:10px; font-size:1.0rem; font-weight:700;">
+          </div>
+        </div>
+
+        <div style="display:flex; gap:10px;">
+          <div style="flex:1;">
+            <label style="font-size:0.8rem; color:var(--text-muted); display:block; margin-bottom:4px;">Satış Kanalı / Platform</label>
+            <select id="online-sale-platform" style="width:100%; padding:10px; background:#0F172A; border:1px solid var(--border); color:var(--text); border-radius:10px; font-size:0.85rem;">
+              <option value="Trendyol">Trendyol</option>
+              <option value="Hepsiburada">Hepsiburada</option>
+              <option value="Web Sitesi">Kendi Web Sitemiz</option>
+              <option value="N11">N11</option>
+              <option value="ÇiçekSepeti">ÇiçekSepeti</option>
+              <option value="Amazon TR">Amazon TR</option>
+              <option value="Pazarama">Pazarama</option>
+              <option value="Diğer Online">Diğer Online Kanal</option>
+            </select>
+          </div>
+          <div style="flex:1;">
+            <label style="font-size:0.8rem; color:var(--text-muted); display:block; margin-bottom:4px;">Sipariş / Fatura No (Opsiyonel)</label>
+            <input type="text" id="online-sale-note" placeholder="Örn: #94012" style="width:100%; padding:10px; font-size:0.85rem;">
+          </div>
+        </div>
+
+        <div style="display:flex; gap:10px; margin-top:8px;">
+          <button type="button" class="btn btn-secondary" style="flex:1; padding:12px;" onclick="closeOnlineSaleModal()">Vazgeç</button>
+          <button type="submit" class="btn" style="flex:2; background:#0284C7; color:#fff; padding:12px; font-weight:700;">
+            🚀 Satışı Onayla & Stoktan Düş
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- P2P WEBRTC IMAGE STORAGE MODAL POPUP OVERLAY -->
   <div id="p2p-modal-overlay" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(15,23,42,0.95); backdrop-filter:blur(16px); z-index:999; justify-content:center; align-items:center; padding:16px;">
 
@@ -467,6 +531,11 @@
           <input type="file" id="pos-photo-file" accept="image/*" capture="environment" style="display:none" onchange="handlePOSPhotoUpload(this)">
         </div>
 
+        <!-- ONLINE SALES QUICK ENTRY BUTTON -->
+        <button type="button" class="btn" onclick="openOnlineSaleModal()" style="margin-bottom:14px; background:linear-gradient(135deg, #0284C7, #0369A1); color:#fff; display:flex; align-items:center; justify-content:center; gap:8px; font-weight:700; box-shadow:0 4px 14px rgba(2,132,199,0.35);">
+          🌐 İnternet Satışı Gir (Adet & Platform)
+        </button>
+
         <div class="form-group">
           <label>Manuel Barkod / Ürün Adı Ara</label>
           <div style="display: flex; gap: 8px;">
@@ -547,6 +616,122 @@
           <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px;">
             <div style="font-size:0.75rem; color:var(--text-muted);">Satılan Ürün</div>
             <div id="stat-total-items" style="font-size:1.3rem; font-weight:800; color:var(--text);">0 adet</div>
+          </div>
+        </div>
+
+        <!-- CHANNEL BREAKDOWN (STORE VS ONLINE) -->
+        <div style="background:#0F172A; border:1px solid var(--border); border-radius:14px; padding:14px; margin-bottom:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <h3 style="margin:0; font-size:0.95rem; color:#38BDF8; display:flex; align-items:center; gap:6px;">
+              <span>🌐 Satış Kanalları Kıyaslaması (Mağaza vs İnternet)</span>
+            </h3>
+            <button class="btn btn-secondary" style="width:auto; padding:4px 10px; font-size:0.75rem;" onclick="openOnlineSaleModal()">➕ İnternet Satışı Gir</button>
+          </div>
+          
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px;">
+            <div style="background:var(--card); border:1px solid rgba(16,185,129,0.3); border-radius:10px; padding:10px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <span style="font-size:0.8rem; font-weight:700; color:var(--accent);">🏬 Fiziki Mağaza</span>
+                <span id="ch-store-share" style="font-size:0.75rem; color:var(--accent); font-weight:700;">%0</span>
+              </div>
+              <div id="ch-store-revenue" style="font-size:1.15rem; font-weight:800; color:var(--text); margin-bottom:2px;">0.00 ₺</div>
+              <div id="ch-store-details" style="font-size:0.75rem; color:var(--text-muted);">0 adet • 0 işlem</div>
+            </div>
+
+            <div style="background:var(--card); border:1px solid rgba(56,189,248,0.3); border-radius:10px; padding:10px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <span style="font-size:0.8rem; font-weight:700; color:#38BDF8;">🌐 İnternet / Pazaryeri</span>
+                <span id="ch-net-share" style="font-size:0.75rem; color:#38BDF8; font-weight:700;">%0</span>
+              </div>
+              <div id="ch-net-revenue" style="font-size:1.15rem; font-weight:800; color:var(--text); margin-bottom:2px;">0.00 ₺</div>
+              <div id="ch-net-details" style="font-size:0.75rem; color:var(--text-muted);">0 adet • 0 işlem</div>
+            </div>
+          </div>
+
+          <!-- Channel Share Progress Bar -->
+          <div style="height:8px; background:rgba(255,255,255,0.06); border-radius:4px; overflow:hidden; display:flex;">
+            <div id="ch-bar-store" style="width:50%; background:var(--accent); transition:width 0.4s ease;"></div>
+            <div id="ch-bar-net" style="width:50%; background:#38BDF8; transition:width 0.4s ease;"></div>
+          </div>
+        </div>
+
+        <!-- ON-DEVICE HARDWARE-ACCELERATED FORECASTING ENGINE -->
+        <div style="background:linear-gradient(145deg, #1E293B, #0F172A); border:1px solid #10B981; border-radius:14px; padding:14px; margin-bottom:16px; box-shadow:0 8px 24px rgba(0,0,0,0.35);">
+          <!-- HARDWARE BADGE -->
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:10px; margin-bottom:12px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:1.4rem;">⚡</span>
+              <div>
+                <div style="font-weight:800; font-size:0.9rem; color:var(--accent);">Cihaz İşlemci Gücüyle Tahmin Algoritması</div>
+                <div id="forecast-hw-badge" style="font-size:0.75rem; color:var(--text-muted);">
+                  İstemci Donanımı: <span id="hw-core-count" style="color:var(--accent); font-weight:700;">Çok Çekirdekli</span> • <span id="hw-calc-time" style="color:#38BDF8;">Hesaplanıyor...</span>
+                </div>
+              </div>
+            </div>
+            <button class="btn" style="width:auto; padding:6px 12px; font-size:0.75rem; background:rgba(16,185,129,0.2); color:var(--accent); border:1px solid var(--accent);" onclick="loadForecastData()">
+              🔄 Yeniden Simüle Et
+            </button>
+          </div>
+
+          <!-- SECTION A: HANGİ GÜNLER YOĞUN OLACAK? -->
+          <div style="margin-bottom:16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <h4 style="margin:0; font-size:0.9rem; color:var(--text); display:flex; align-items:center; gap:6px;">
+                <span>📅 Hangi Günler Yoğun Olacak? (Trafik & Ciro Yoğunluğu)</span>
+              </h4>
+            </div>
+
+            <!-- Peak Day Highlight Banner -->
+            <div id="peak-day-banner" style="background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.4); border-radius:10px; padding:10px 12px; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between;">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:1.3rem;">🔥</span>
+                <div>
+                  <div style="font-size:0.85rem; font-weight:800; color:#F87171;">Haftanın En Yoğun Günü: <span id="forecast-peak-day" style="color:#fff;">Cumartesi</span></div>
+                  <div id="forecast-weekend-lift" style="font-size:0.75rem; color:var(--text-muted);">Hafta sonu ciro artışı: +%0 bekleniyor</div>
+                </div>
+              </div>
+              <div style="text-align:right;">
+                <span id="forecast-quiet-day-badge" style="font-size:0.75rem; background:rgba(56,189,248,0.15); color:#38BDF8; padding:3px 8px; border-radius:12px; border:1px solid rgba(56,189,248,0.3);">En Sakin: Çarşamba</span>
+              </div>
+            </div>
+
+            <!-- 7-Day Intensity Bar Graph -->
+            <div id="weekly-intensity-bars" style="display:grid; grid-template-columns:repeat(7, 1fr); gap:6px; margin-bottom:14px; text-align:center;">
+              <!-- Days render dynamically here -->
+            </div>
+
+            <!-- Upcoming 7 Days Projection -->
+            <div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); margin-bottom:6px;">Önümüzdeki 7 Günlük Simülasyon Tahmini</div>
+            <div id="upcoming-days-list" style="display:flex; flex-direction:column; gap:6px; max-height:220px; overflow-y:auto; padding-right:4px;">
+              <!-- Upcoming day cards render here -->
+            </div>
+          </div>
+
+          <!-- SECTION B: HANGİ ÜRÜNLER ÇOK SATACAK? (TALEP HIZI & KRİTİK TEDARİK) -->
+          <div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <h4 style="margin:0; font-size:0.9rem; color:var(--text); display:flex; align-items:center; gap:6px;">
+                <span>📦 Hangi Ürünler Çok Satacak? (Talep Hızı & Tedarik Alarmları)</span>
+              </h4>
+            </div>
+
+            <!-- Stockout Alerts Box (if any) -->
+            <div id="stockout-alerts-box" style="display:none; margin-bottom:12px;">
+              <div style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.4); border-radius:10px; padding:10px; margin-bottom:8px;">
+                <div style="font-weight:700; font-size:0.85rem; color:var(--warning); display:flex; align-items:center; gap:6px;">
+                  <span>⚠️ Acil Tedarik Gereken Ürünler (7 Gün İçinde Bitecekler)</span>
+                </div>
+                <div id="stockout-alerts-list" style="margin-top:6px; display:flex; flex-direction:column; gap:6px;">
+                  <!-- Stockout alert items -->
+                </div>
+              </div>
+            </div>
+
+            <!-- Top Predicted Products List -->
+            <div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); margin-bottom:6px;">En Çok Satması Beklenen Lokomotif Ürünler (Gelecek 7 Gün)</div>
+            <div id="top-demand-products-list" style="display:flex; flex-direction:column; gap:6px;">
+              <!-- Products render here -->
+            </div>
           </div>
         </div>
 
@@ -764,7 +949,10 @@
 
       if (tabId === 'pos') loadPOSProductPicker();
       if (tabId === 'stock') loadProducts();
-      if (tabId === 'reports') loadSalesHistory();
+      if (tabId === 'reports') {
+        loadSalesHistory();
+        loadForecastData();
+      }
     }
 
     function showToast(msg) {
@@ -2101,6 +2289,11 @@
         }
 
         container.innerHTML = sales.map(s => {
+          const isNet = (s.channel === 'internet');
+          const chBadge = isNet
+            ? `<span style="font-size:0.7rem; background:rgba(56,189,248,0.18); color:#38BDF8; border:1px solid rgba(56,189,248,0.35); padding:2px 8px; border-radius:10px; font-weight:700; margin-left:6px;">🌐 İnternet</span>`
+            : `<span style="font-size:0.7rem; background:rgba(16,185,129,0.15); color:var(--accent); border:1px solid rgba(16,185,129,0.3); padding:2px 8px; border-radius:10px; font-weight:700; margin-left:6px;">🏬 Mağaza</span>`;
+
           const itemDetails = (s.items || []).map(i => `
             <div style="font-size:0.8rem; color:var(--text-muted); display:flex; justify-content:space-between; margin-top:2px;">
               <span>• ${i.product_name} (${i.quantity} adet x ${i.unit_price.toFixed(2)} ₺)</span>
@@ -2112,8 +2305,11 @@
             <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:10px;">
               <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); padding-bottom:8px; margin-bottom:8px;">
                 <div>
-                  <div style="font-weight:700; font-size:0.9rem; color:var(--text);">📅 ${s.sold_at}</div>
-                  <div style="font-size:0.75rem; color:var(--text-muted);">${s.item_count} adet ürün | ${s.note || 'POS Satış'}</div>
+                  <div style="font-weight:700; font-size:0.9rem; color:var(--text); display:flex; align-items:center;">
+                    <span>📅 ${s.sold_at}</span>
+                    ${chBadge}
+                  </div>
+                  <div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">${s.item_count} adet ürün | ${s.note || 'Satış'}</div>
                 </div>
                 <div style="text-align:right;">
                   <div style="font-size:1.1rem; font-weight:800; color:var(--accent);">${s.total_amount.toFixed(2)} ₺</div>
@@ -2152,6 +2348,36 @@
           netEl.style.color = net >= 0 ? '#38BDF8' : 'var(--danger)';
 
           document.getElementById('stat-total-items').innerText = (a.total_items_sold || 0) + ' adet';
+
+          // Channel Breakdown Display
+          if (a.channel_stats) {
+            const m = a.channel_stats.magaza || { revenue: 0, items: 0, transactions: 0 };
+            const n = a.channel_stats.internet || { revenue: 0, items: 0, transactions: 0 };
+            const tot = (m.revenue + n.revenue) || 1.0;
+            const mShare = Math.round((m.revenue / tot) * 100);
+            const nShare = Math.max(0, 100 - mShare);
+
+            const sRevEl = document.getElementById('ch-store-revenue');
+            if (sRevEl) sRevEl.innerText = m.revenue.toFixed(2) + ' ₺';
+            const sDetEl = document.getElementById('ch-store-details');
+            if (sDetEl) sDetEl.innerText = `${m.items} adet • ${m.transactions} fiş`;
+            const sShareEl = document.getElementById('ch-store-share');
+            if (sShareEl) sShareEl.innerText = `%${mShare}`;
+
+            const nRevEl = document.getElementById('ch-net-revenue');
+            if (nRevEl) nRevEl.innerText = n.revenue.toFixed(2) + ' ₺';
+            const nDetEl = document.getElementById('ch-net-details');
+            if (nDetEl) nDetEl.innerText = `${n.items} adet • ${n.transactions} sipariş`;
+            const nShareEl = document.getElementById('ch-net-share');
+            if (nShareEl) nShareEl.innerText = `%${nShare}`;
+
+            const sBar = document.getElementById('ch-bar-store');
+            const nBar = document.getElementById('ch-bar-net');
+            if (sBar && nBar) {
+              sBar.style.width = mShare + '%';
+              nBar.style.width = nShare + '%';
+            }
+          }
         }
         if (json.ok && json.store_hours) {
           const h = json.store_hours;
@@ -2204,8 +2430,261 @@
     }
 
     // ════════════════════════════════════════════════════════════════════
-    // KURUMSAL ÜYELİK VE BENE HATIRLA OTURUM YÖNETİMİ
+    // CİHAZ GÜCÜNÜ KULLANAN TAHMİN ALGORİTMASI (FORECAST ENGINE)
     // ════════════════════════════════════════════════════════════════════
+    let cachedForecastData = null;
+
+    async function loadForecastData() {
+      const coreCountEl = document.getElementById('hw-core-count');
+      const calcTimeEl = document.getElementById('hw-calc-time');
+
+      const clientCores = navigator.hardwareConcurrency || 4;
+      if (coreCountEl) coreCountEl.innerText = `${clientCores} Çekirdek Aktif`;
+
+      const tStart = performance.now();
+
+      try {
+        const res = await fetchWithAuth('/api/sales/forecast');
+        const json = await res.json();
+        const clientElapsedMs = Math.round(performance.now() - tStart);
+
+        if (!json.ok) return;
+        cachedForecastData = json;
+
+        // Donanım rozeti güncelle
+        if (calcTimeEl) {
+          const srvMs = json.telemetry ? json.telemetry.simulation_time_ms : 20;
+          calcTimeEl.innerText = `İstemci: ${clientElapsedMs}ms | Motor: ${srvMs}ms (${json.telemetry.cpu_cores} Çekirdek - 5.000 Monte Carlo)`;
+        }
+
+        // 1. GÜNLÜK YOĞUNLUK GRAFİĞİ & 7 GÜNLÜK TAHMİN
+        const busy = json.busy_days;
+        if (busy) {
+          const peakEl = document.getElementById('forecast-peak-day');
+          if (peakEl) peakEl.innerText = busy.peak_day || 'Cumartesi';
+
+          const liftEl = document.getElementById('forecast-weekend-lift');
+          if (liftEl) {
+            liftEl.innerText = `Hafta sonu ciro artışı: +%${busy.weekend_lift_pct || 0} bekleniyor`;
+          }
+
+          const quietEl = document.getElementById('forecast-quiet-day-badge');
+          if (quietEl) {
+            quietEl.innerText = `En Sakin: ${busy.quiet_day || 'Çarşamba'}`;
+          }
+
+          // 7 Gün Çubukları
+          const barsContainer = document.getElementById('weekly-intensity-bars');
+          if (barsContainer && busy.weekly_profile) {
+            barsContainer.innerHTML = busy.weekly_profile.map(d => {
+              let barColor = '#10B981';
+              if (d.intensity_pct >= 85) barColor = '#EF4444';
+              else if (d.intensity_pct >= 65) barColor = '#F59E0B';
+              else if (d.intensity_pct >= 45) barColor = '#38BDF8';
+
+              const shortName = d.day_name.substring(0, 3);
+              return `
+                <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:6px 2px; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:105px;">
+                  <span style="font-size:0.65rem; font-weight:800; color:${barColor}; margin-bottom:4px;">%${d.intensity_pct}</span>
+                  <div style="width:70%; max-width:18px; height:${Math.max(8, d.intensity_pct * 0.55)}px; background:${barColor}; border-radius:4px;"></div>
+                  <span style="font-size:0.65rem; color:var(--text); font-weight:700; margin-top:6px;">${shortName}</span>
+                </div>
+              `;
+            }).join('');
+          }
+
+          // Gelecek 7 Gün Listesi
+          const upcomingList = document.getElementById('upcoming-days-list');
+          if (upcomingList && busy.upcoming_7_days) {
+            upcomingList.innerHTML = busy.upcoming_7_days.map(day => {
+              let badgeBg = 'rgba(16,185,129,0.15)';
+              let badgeColor = '#10B981';
+              if (day.intensity_pct >= 85) {
+                badgeBg = 'rgba(239,68,68,0.2)';
+                badgeColor = '#EF4444';
+              } else if (day.intensity_pct >= 65) {
+                badgeBg = 'rgba(245,158,11,0.2)';
+                badgeColor = '#F59E0B';
+              }
+
+              const r = day.predicted_revenue_range || {};
+              return `
+                <div style="background:rgba(15,23,42,0.8); border:1px solid var(--border); border-radius:8px; padding:8px 10px; display:flex; justify-content:space-between; align-items:center;">
+                  <div>
+                    <div style="display:flex; align-items:center; gap:6px;">
+                      <span style="font-weight:700; font-size:0.8rem; color:var(--text);">${day.day_name}</span>
+                      <span style="font-size:0.7rem; color:var(--text-muted);">(${day.date.slice(5)})</span>
+                      <span style="font-size:0.65rem; padding:2px 6px; border-radius:6px; background:${badgeBg}; color:${badgeColor}; font-weight:700;">%${day.intensity_pct} ${day.level}</span>
+                    </div>
+                    <div style="font-size:0.7rem; color:var(--text-muted); margin-top:2px;">${day.suggestion}</div>
+                  </div>
+                  <div style="text-align:right;">
+                    <div style="font-size:0.85rem; font-weight:800; color:var(--accent);">~${r.expected_p50 ? r.expected_p50.toFixed(0) : '0'} ₺</div>
+                    <div style="font-size:0.65rem; color:var(--text-muted);">Min: ${r.pessimistic_p10 ? r.pessimistic_p10.toFixed(0) : '0'} | Zirve: ${r.surge_p90 ? r.surge_p90.toFixed(0) : '0'} ₺</div>
+                  </div>
+                </div>
+              `;
+            }).join('');
+          }
+        }
+
+        // 2. ÇOK SATACAK ÜRÜNLER & STOK TÜKENME ALARMLARI
+        const pd = json.product_demand;
+        if (pd) {
+          // Tedarik Alarmları
+          const alertBox = document.getElementById('stockout-alerts-box');
+          const alertList = document.getElementById('stockout-alerts-list');
+          if (alertBox && alertList) {
+            if (pd.stockout_alerts && pd.stockout_alerts.length > 0) {
+              alertBox.style.display = 'block';
+              alertList.innerHTML = pd.stockout_alerts.map(p => `
+                <div style="background:rgba(245,158,11,0.1); border-left:3px solid var(--warning); padding:6px 8px; border-radius:6px; font-size:0.75rem; display:flex; justify-content:space-between; align-items:center;">
+                  <div>
+                    <span style="font-weight:700; color:var(--text);">${p.name}</span>
+                    <span style="color:var(--warning); font-weight:600; margin-left:6px;">⚠️ ${p.days_until_stockout} gün içinde bitecek!</span>
+                  </div>
+                  <div style="text-align:right;">
+                    <span style="color:var(--text-muted);">Stok: <b>${p.stock}</b></span> • 
+                    <span style="color:#38BDF8; font-weight:700;">Önerilen Sipariş: +${p.recommended_reorder} adet</span>
+                  </div>
+                </div>
+              `).join('');
+            } else {
+              alertBox.style.display = 'none';
+            }
+          }
+
+          // En çok satacak lokomotif ürünler
+          const topList = document.getElementById('top-demand-products-list');
+          if (topList && pd.top_predicted_products) {
+            topList.innerHTML = pd.top_predicted_products.map((p, idx) => `
+              <div style="background:rgba(15,23,42,0.8); border:1px solid var(--border); border-radius:8px; padding:8px 10px; display:flex; justify-content:space-between; align-items:center;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <span style="font-size:0.9rem; font-weight:800; color:var(--accent); width:18px;">${idx + 1}.</span>
+                  <div>
+                    <div style="font-weight:700; font-size:0.8rem; color:var(--text);">${p.name}</div>
+                    <div style="font-size:0.7rem; color:var(--text-muted);">
+                      ${p.category} • Mevcut Stok: <b style="color:${p.stock <= 5 ? 'var(--danger)' : 'var(--text)'};">${p.stock} adet</b> • Tüketim Hızı: <b>${p.daily_velocity} adet/gün</b>
+                    </div>
+                  </div>
+                </div>
+                <div style="text-align:right;">
+                  <div style="font-size:0.85rem; font-weight:800; color:#38BDF8;">+${p.predicted_7d} adet</div>
+                  <div style="font-size:0.65rem; color:var(--accent); font-weight:600;">7 Günlük Tahmin</div>
+                </div>
+              </div>
+            `).join('');
+          }
+        }
+
+      } catch (err) {
+        console.warn("Tahmin yükleme uyarısı:", err);
+      }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // İNTERNET SATIŞI GİRİŞİ (ONLINE SALES MANAGEMENT)
+    // ════════════════════════════════════════════════════════════════════
+    let onlineProductsCache = [];
+
+    async function openOnlineSaleModal() {
+      const modal = document.getElementById('online-sale-modal-overlay');
+      const select = document.getElementById('online-sale-product-select');
+      const hint = document.getElementById('online-sale-stock-hint');
+      const qtyInput = document.getElementById('online-sale-qty');
+      const priceInput = document.getElementById('online-sale-price');
+
+      if (modal) modal.style.display = 'flex';
+      qtyInput.value = 1;
+      if (hint) hint.innerText = '';
+
+      try {
+        const res = await fetchWithAuth('/api/products');
+        const prods = await res.json();
+        onlineProductsCache = prods || [];
+
+        select.innerHTML = '<option value="">-- Satılan Ürünü Seçin --</option>' +
+          onlineProductsCache.map(p => `
+            <option value="${p.id}" data-price="${p.sale_price}" data-stock="${p.stock_quantity}">
+              ${p.name} (Stok: ${p.stock_quantity} adet - ${p.sale_price.toFixed(2)} ₺)
+            </option>
+          `).join('');
+      } catch (e) {}
+    }
+
+    function closeOnlineSaleModal() {
+      const modal = document.getElementById('online-sale-modal-overlay');
+      if (modal) modal.style.display = 'none';
+    }
+
+    function handleOnlineProductSelectChange(el) {
+      const opt = el.options[el.selectedIndex];
+      const hint = document.getElementById('online-sale-stock-hint');
+      const priceInput = document.getElementById('online-sale-price');
+
+      if (!opt || !opt.value) {
+        if (hint) hint.innerText = '';
+        return;
+      }
+
+      const stock = parseInt(opt.getAttribute('data-stock') || '0');
+      const price = parseFloat(opt.getAttribute('data-price') || '0');
+
+      priceInput.value = price.toFixed(2);
+      if (hint) {
+        hint.innerHTML = `Mevcut Stok: <b style="color:${stock <= 3 ? 'var(--danger)' : '#38BDF8'};">${stock} adet</b>`;
+      }
+    }
+
+    async function handleOnlineSaleSubmit(e) {
+      e.preventDefault();
+      const select = document.getElementById('online-sale-product-select');
+      const qtyInput = document.getElementById('online-sale-qty');
+      const priceInput = document.getElementById('online-sale-price');
+      const platformSelect = document.getElementById('online-sale-platform');
+      const noteInput = document.getElementById('online-sale-note');
+
+      const productId = select.value;
+      if (!productId) {
+        showToast("⚠️ Lütfen satılan ürünü seçin!");
+        return;
+      }
+
+      const qty = parseInt(qtyInput.value);
+      const unitPrice = parseFloat(priceInput.value);
+      const platform = platformSelect.value;
+      const note = noteInput.value.trim();
+
+      try {
+        const res = await fetchWithAuth('/api/sales/online', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            product_id: parseInt(productId),
+            quantity: qty,
+            unit_price: unitPrice,
+            platform: platform + (note ? ' - ' + note : ''),
+          })
+        });
+        const json = await res.json();
+
+        if (json.ok) {
+          playBeep();
+          showToast(`✅ ${json.message}`);
+          closeOnlineSaleModal();
+          loadProducts();
+          loadPOSProductPicker();
+          loadSalesHistory();
+          loadSalesAnalytics();
+          loadForecastData();
+          triggerManualSync();
+        } else {
+          showToast(`❌ ${json.message || 'Satış kaydedilemedi!'}`);
+        }
+      } catch (err) {
+        showToast("⚠️ Sunucu bağlantı hatası!");
+      }
+    }
     function switchAuthTab(tab) {
       const loginForm = document.getElementById('auth-login-form');
       const regForm = document.getElementById('auth-register-form');

@@ -16,16 +16,19 @@ class DashboardView(ctk.CTkFrame):
 
         cards_frame = ctk.CTkFrame(self, fg_color="transparent")
         cards_frame.pack(fill="x", padx=8)
-        cards_frame.grid_columnconfigure((0, 1, 2), weight=1)
+        cards_frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
 
         self.card_total = StatCard(cards_frame, "Toplam Ürün", accent=ACCENT)
-        self.card_total.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self.card_total.grid(row=0, column=0, sticky="ew", padx=(0, 6))
 
         self.card_critical = StatCard(cards_frame, "Kritik Stok", accent=WARNING)
-        self.card_critical.grid(row=0, column=1, sticky="ew", padx=4)
+        self.card_critical.grid(row=0, column=1, sticky="ew", padx=3)
 
         self.card_sales = StatCard(cards_frame, "Bugünkü Satış", accent=SUCCESS)
-        self.card_sales.grid(row=0, column=2, sticky="ew", padx=(8, 0))
+        self.card_sales.grid(row=0, column=2, sticky="ew", padx=3)
+
+        self.card_forecast = StatCard(cards_frame, "En Yoğun Gün (AI)", accent="#8B5CF6")
+        self.card_forecast.grid(row=0, column=3, sticky="ew", padx=(6, 0))
 
         lists_frame = ctk.CTkFrame(self, fg_color="transparent")
         lists_frame.pack(fill="both", expand=True, padx=8, pady=(24, 8))
@@ -57,6 +60,14 @@ class DashboardView(ctk.CTkFrame):
         self.card_total.set_value(str(stats.total_products))
         self.card_critical.set_value(str(stats.critical_stock_count))
         self.card_sales.set_value(str(stats.today_sales_count))
+
+        try:
+            from app.services.forecast_service import ForecastService
+            fc = ForecastService().generate_comprehensive_forecast()
+            busiest = fc.get("busy_days", {}).get("peak_day", "-")
+            self.card_forecast.set_value(busiest)
+        except Exception:
+            self.card_forecast.set_value("-")
 
         for widget in self.top_list.winfo_children():
             widget.destroy()

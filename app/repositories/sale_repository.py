@@ -9,14 +9,15 @@ class SaleRepository:
     def __init__(self, db: Optional[Database] = None) -> None:
         self.db = db or Database()
 
-    def create_sale(self, cart_items: List[CartItem], note: Optional[str] = None) -> Sale:
+    def create_sale(self, cart_items: List[CartItem], note: Optional[str] = None, channel: str = "magaza") -> Sale:
         total_amount = sum(item.subtotal for item in cart_items)
         item_count = sum(item.quantity for item in cart_items)
+        ch = (channel or "magaza").strip().lower()
 
         with self.db.get_connection() as conn:
             cursor = conn.execute(
-                "INSERT INTO sales (total_amount, item_count, note) VALUES (?, ?, ?)",
-                (total_amount, item_count, note),
+                "INSERT INTO sales (total_amount, item_count, note, channel) VALUES (?, ?, ?, ?)",
+                (total_amount, item_count, note, ch),
             )
             sale_id = cursor.lastrowid
 

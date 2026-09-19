@@ -70,6 +70,16 @@ def run_migrations() -> None:
                 except Exception:
                     pass
 
+            if "channel" not in sales_cols:
+                try:
+                    conn.execute("ALTER TABLE sales ADD COLUMN channel TEXT NOT NULL DEFAULT 'magaza'")
+                except Exception:
+                    pass
+            try:
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_sales_channel ON sales(channel)")
+            except Exception:
+                pass
+
             # Ensure users table exists in existing database
             conn.execute(
                 """

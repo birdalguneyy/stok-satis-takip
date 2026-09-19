@@ -60,11 +60,13 @@ CREATE TABLE IF NOT EXISTS sales (
     item_count      INTEGER NOT NULL CHECK (item_count > 0),
     sold_at         TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     note            TEXT,
+    channel         TEXT NOT NULL DEFAULT 'magaza',
     synced_to_cloud INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_sales_user_id ON sales(user_id);
 CREATE INDEX IF NOT EXISTS idx_sales_sold_at ON sales(sold_at);
+CREATE INDEX IF NOT EXISTS idx_sales_channel ON sales(channel);
 
 CREATE TABLE IF NOT EXISTS sale_items (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,

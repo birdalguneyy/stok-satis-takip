@@ -115,6 +115,16 @@ class SalesView(ctk.CTkFrame):
         )
         self.total_label.pack(side="left")
 
+        self.channel_selector = ctk.CTkSegmentedButton(
+            footer,
+            values=["🏬 Mağaza Satışı", "🌐 İnternet Satışı"],
+            height=36,
+            selected_color="#0284C7",
+            selected_hover_color="#0369A1",
+        )
+        self.channel_selector.set("🏬 Mağaza Satışı")
+        self.channel_selector.pack(side="left", padx=20)
+
         ctk.CTkButton(
             footer,
             text="Satışı Tamamla (Enter)",
@@ -283,7 +293,9 @@ class SalesView(ctk.CTkFrame):
         self.refresh()
 
     def _complete_sale(self) -> None:
-        ok, message = self.sale_service.complete_sale()
+        raw_val = self.channel_selector.get() if hasattr(self, "channel_selector") else ""
+        channel = "internet" if "İnternet" in str(raw_val) else "magaza"
+        ok, message = self.sale_service.complete_sale(channel=channel)
         level = "success" if ok else "error"
         self.on_toast(message, level)
         if ok:

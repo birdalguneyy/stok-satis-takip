@@ -9,15 +9,18 @@ class Sale:
     item_count: int
     sold_at: Optional[str] = None
     note: Optional[str] = None
+    channel: str = "magaza"
 
     @classmethod
     def from_row(cls, row) -> "Sale":
+        keys = row.keys()
         return cls(
             id=row["id"],
             total_amount=row["total_amount"],
             item_count=row["item_count"],
             sold_at=row["sold_at"],
             note=row["note"],
+            channel=row["channel"] if "channel" in keys else "magaza",
         )
 
 

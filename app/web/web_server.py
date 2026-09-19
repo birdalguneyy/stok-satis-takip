@@ -12,6 +12,7 @@ from flask import Flask, jsonify, request, send_from_directory
 from app.config import DATA_DIR
 from app.database.cloud_db import CloudDatabase
 from app.services.ai_package_service import AIPackageService
+from app.services.forecast_service import ForecastService
 from app.utils.camera import decode_barcode_from_frame
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,7 @@ UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 app = Flask(__name__, static_folder=str(STATIC_DIR), template_folder=str(STATIC_DIR))
 cloud_db = CloudDatabase()
 ai_service = AIPackageService()
+forecast_service = ForecastService(cloud_db)
 
 
 def get_local_ip() -> str:
@@ -404,13 +406,91 @@ def record_sale():
     data = request.json or {}
     items = data.get("items", [])
     note = data.get("note", "Mobil Satış")
+    channel = data.get("channel", "magaza")
     if not items:
         return jsonify({"ok": False, "message": "Sepet boş!"}), 400
 
-    ok, msg = cloud_db.add_sale(items, note=note, user_id=user_id)
+    ok, msg = cloud_db.add_sale(items, note=note, user_id=user_id, channel=channel)
     if ok:
         notify_data_change(user_id)
     return jsonify({"ok": ok, "message": msg})
+
+
+@app.route("/api/sales/online", methods=["POST"])
+def record_online_sale():
+    """İnternetten satılan ürünün adet bilgisini alıp doğrudan stoktan düşer ve satış kaydeder."""
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
+
+    data = request.json or {}
+    product_id = data.get("product_id")
+    barcode = str(data.get("barcode", "")).strip()
+
+    try:
+        qty = int(data.get("quantity", 1))
+    except (ValueError, TypeError):
+        qty = 1
+
+    if qty <= 0:
+        return jsonify({"ok": False, "message": "Geçersiz satış adedi!"}), 400
+
+    prod = None
+    if product_id:
+        prods = cloud_db.get_products(user_id=user_id)
+        prod = next((p for p in prods if p["id"] == int(product_id)), None)
+    elif barcode:
+        prod = cloud_db.get_product_by_barcode(barcode, user_id=user_id)
+
+    if not prod:
+        return jsonify({"ok": False, "message": "Satışı yapılacak ürün bulunamadı!"}), 404
+
+    current_stock = int(prod.get("stock_quantity", 0))
+    if current_stock < qty:
+        return jsonify({
+            "ok": False,
+            "message": f"Yetersiz stok! Mevcut stok: {current_stock} adet, girilen satış: {qty} adet."
+        }), 400
+
+    unit_price = float(data.get("unit_price") or prod.get("sale_price", 0.0))
+    platform = (data.get("platform") or data.get("note") or "İnternet Satışı").strip()
+
+    cart_items = [{
+        "product_id": prod["id"],
+        "product_name": prod["name"],
+        "barcode": prod["barcode"],
+        "unit_price": unit_price,
+        "quantity": qty,
+        "subtotal": round(unit_price * qty, 2),
+    }]
+
+    ok, msg = cloud_db.add_sale(
+        cart_items,
+        note=f"🌐 {platform}",
+        user_id=user_id,
+        channel="internet",
+    )
+    if ok:
+        notify_data_change(user_id)
+    return jsonify({
+        "ok": ok,
+        "message": f"🌐 {qty} adet '{prod['name']}' internet satışı başarıyla kaydedildi." if ok else msg,
+        "product_name": prod["name"],
+        "remaining_stock": max(0, current_stock - qty),
+    })
+
+
+@app.route("/api/sales/forecast", methods=["GET"])
+def get_sales_forecast():
+    """Cihazın donanım gücünden (çok çekirdekli CPU) yararlanarak
+    yoğun günler ve talep tahminlerini üretir.
+    """
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
+
+    forecast = forecast_service.generate_comprehensive_forecast(user_id=user_id)
+    return jsonify(forecast)
 
 
 @app.route("/api/sales/<int:sale_id>", methods=["DELETE"])

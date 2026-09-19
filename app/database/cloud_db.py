@@ -264,8 +264,8 @@ class CloudDatabase:
                             conn.execute(
                                 """
                                 INSERT OR REPLACE INTO sales (
-                                    id, user_id, total_amount, item_count, sold_at, note, synced_to_cloud
-                                ) VALUES (?, ?, ?, ?, ?, ?, 1)
+                                    id, user_id, total_amount, item_count, sold_at, note, channel, synced_to_cloud
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
                                 """,
                                 (
                                     sid,
@@ -274,6 +274,7 @@ class CloudDatabase:
                                     int(d.get("item_count", 0)),
                                     d.get("sold_at", now),
                                     d.get("note", "Satış"),
+                                    d.get("channel", "magaza"),
                                 ),
                             )
                             # Sale items
@@ -793,19 +794,23 @@ class CloudDatabase:
         cart_items: List[Dict[str, Any]],
         note: str = "Mobil/PC Satış",
         user_id: Optional[int] = None,
+        channel: str = "magaza",
     ) -> tuple[bool, str]:
         if not cart_items:
             return False, "Sepet boş!"
 
         uid = user_id or 1
+        ch = (channel or "magaza").strip().lower()
+        if ch not in ("magaza", "internet"):
+            ch = "magaza"
         total_amount = sum(item["subtotal"] for item in cart_items)
         item_count = sum(item["quantity"] for item in cart_items)
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         with self.db.get_connection() as conn:
             cursor = conn.execute(
-                "INSERT INTO sales (user_id, total_amount, item_count, sold_at, note) VALUES (?, ?, ?, ?, ?)",
-                (uid, total_amount, item_count, now, note),
+                "INSERT INTO sales (user_id, total_amount, item_count, sold_at, note, channel) VALUES (?, ?, ?, ?, ?, ?)",
+                (uid, total_amount, item_count, now, note, ch),
             )
             sale_id = cursor.lastrowid
 
@@ -846,6 +851,7 @@ class CloudDatabase:
                     "item_count": item_count,
                     "sold_at": now,
                     "note": note,
+                    "channel": ch,
                     "items": cart_items,
                     "synced_to_cloud": 1,
                 })
@@ -1001,6 +1007,35 @@ class CloudDatabase:
             total_exp = exp_row["total_exp"] or 0.0 if exp_row else 0.0
             net_profit = total_rev - total_exp
 
+            # Channel Breakdown (Mağaza vs İnternet)
+            ch_query = """
+                SELECT COALESCE(channel, 'magaza') as channel,
+                       COUNT(*) as tx_count,
+                       SUM(total_amount) as revenue,
+                       SUM(item_count) as items
+                FROM sales
+                WHERE user_id = ?
+            """
+            ch_params: list = [uid]
+            if start_date:
+                ch_query += " AND sold_at >= ?"
+                ch_params.append(start_date + " 00:00:00")
+            if end_date:
+                ch_query += " AND sold_at <= ?"
+                ch_params.append(end_date + " 23:59:59")
+            ch_query += " GROUP BY COALESCE(channel, 'magaza')"
+            ch_rows = conn.execute(ch_query, ch_params).fetchall()
+
+            channel_stats = {
+                "magaza": {"revenue": 0.0, "items": 0, "transactions": 0},
+                "internet": {"revenue": 0.0, "items": 0, "transactions": 0},
+            }
+            for row in ch_rows:
+                k = row["channel"] if row["channel"] in channel_stats else "magaza"
+                channel_stats[k]["revenue"] = round(float(row["revenue"] or 0.0), 2)
+                channel_stats[k]["items"] = int(row["items"] or 0)
+                channel_stats[k]["transactions"] = int(row["tx_count"] or 0)
+
             return {
                 "total_revenue": round(total_rev, 2),
                 "total_items_sold": total_items,
@@ -1010,6 +1045,7 @@ class CloudDatabase:
                 "net_profit": round(net_profit, 2),
                 "top_products": top_products,
                 "low_stock_items": low_stock_items,
+                "channel_stats": channel_stats,
             }
 
     # ════════════════════════════════════════════════════════════════════

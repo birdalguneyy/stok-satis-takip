@@ -67,12 +67,12 @@ class SaleService:
         item.quantity = quantity
         return True, "Miktar güncellendi"
 
-    def complete_sale(self) -> Tuple[bool, str]:
+    def complete_sale(self, note: Optional[str] = None, channel: str = "magaza") -> Tuple[bool, str]:
         if not self._cart:
             return False, "Sepet boş"
 
         try:
-            self.sale_repo.create_sale(self.cart_items)
+            self.sale_repo.create_sale(self.cart_items, note=note, channel=channel)
         except ValueError as exc:
             return False, str(exc)
 

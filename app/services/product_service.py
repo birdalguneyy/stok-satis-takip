@@ -47,13 +47,13 @@ class ProductService:
         barcode: str,
         critical_stock_level: int = DEFAULT_CRITICAL_STOCK,
         product_id: Optional[int] = None,
+        image_path: Optional[str] = None,
     ) -> Tuple[bool, str, Optional[Product]]:
         res = validate_product_fields(
             name, category_name, purchase_price, sale_price, stock_quantity, barcode
         )
         if not res.is_valid:
             return False, res.message or "Geçersiz veri", None
-
 
         category = self.category_repo.get_or_create(category_name)
 
@@ -64,6 +64,15 @@ class ProductService:
             duplicate = self.product_repo.get_by_barcode(barcode)
             if duplicate and duplicate.id != product_id:
                 return False, "Bu barkod numarası zaten kayıtlı", None
+
+            # Fotoğraf koruma:
+            if image_path == "__REMOVE__":
+                final_img = ""
+            elif image_path is not None:
+                final_img = image_path
+            else:
+                final_img = existing.image_path or ""
+
             product = Product(
                 id=product_id,
                 category_id=category.id,
@@ -73,6 +82,7 @@ class ProductService:
                 sale_price=sale_price,
                 stock_quantity=stock_quantity,
                 critical_stock_level=critical_stock_level,
+                image_path=final_img,
             )
             saved = self.product_repo.update(product)
             return True, "Ürün güncellendi", saved
@@ -89,6 +99,7 @@ class ProductService:
             sale_price=sale_price,
             stock_quantity=stock_quantity,
             critical_stock_level=critical_stock_level,
+            image_path=image_path or "",
         )
         saved = self.product_repo.create(product)
         return True, "Ürün eklendi", saved

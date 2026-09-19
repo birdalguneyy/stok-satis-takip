@@ -644,6 +644,32 @@ class CloudDatabase:
         with self.db.get_connection() as conn:
             if product_id:
                 # Update existing product for this user
+                existing = conn.execute(
+                    "SELECT id, image_path, barcode FROM products WHERE id = ? AND user_id = ?",
+                    (product_id, uid)
+                ).fetchone()
+
+                if not existing:
+                    return False, "Düzenlenecek ürün bulunamadı!", None
+
+                # Check duplicate barcode for ANOTHER active product
+                dup = conn.execute(
+                    "SELECT id FROM products WHERE barcode = ? AND user_id = ? AND id != ? AND is_active = 1",
+                    (barcode, uid, product_id)
+                ).fetchone()
+                if dup:
+                    return False, f"'{barcode}' barkodlu başka bir ürününüz zaten mevcut!", None
+
+                # Fotoğraf koruma mantığı:
+                # Eğer image_path verilmemişse (None) mevcut fotoğraf korunur.
+                # Eğer '__REMOVE__' verilmişse fotoğraf temizlenir.
+                if image_path == "__REMOVE__":
+                    final_image_path = ""
+                elif image_path is not None:
+                    final_image_path = image_path
+                else:
+                    final_image_path = existing["image_path"] or ""
+
                 conn.execute(
                     """
                     UPDATE products
@@ -660,7 +686,7 @@ class CloudDatabase:
                         sale_price,
                         stock_quantity,
                         critical_stock_level,
-                        image_path or "",
+                        final_image_path,
                         now,
                         product_id,
                         uid,
@@ -669,6 +695,7 @@ class CloudDatabase:
                 pid = product_id
                 msg = f"'{name}' ürünü başarıyla güncellendi."
             else:
+                final_image_path = image_path or ""
                 # Check duplicate barcode for this user
                 existing = conn.execute(
                     "SELECT id FROM products WHERE barcode = ? AND user_id = ? AND is_active = 1",
@@ -694,7 +721,7 @@ class CloudDatabase:
                         sale_price,
                         stock_quantity,
                         critical_stock_level,
-                        image_path or "",
+                        final_image_path,
                         now,
                         now,
                     ),
@@ -713,7 +740,7 @@ class CloudDatabase:
             "sale_price": sale_price,
             "stock_quantity": stock_quantity,
             "critical_stock_level": critical_stock_level,
-            "image_path": image_path or "",
+            "image_path": final_image_path,
             "is_active": 1,
             "created_at": now,
             "updated_at": now,
@@ -734,6 +761,83 @@ class CloudDatabase:
 
         prod_data["synced_to_cloud"] = synced
         return True, msg, prod_data
+
+    def update_product_image(
+        self, product_id: int, image_path: str, user_id: Optional[int] = None
+    ) -> tuple[bool, str, Optional[str]]:
+        """Bir ürünün fotoğrafını anında günceller veya temizler ve Firestore'a senkronize eder."""
+        uid = user_id or 1
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        clean_img = "" if image_path == "__REMOVE__" else (image_path or "")
+
+        with self.db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT id, name FROM products WHERE id = ? AND user_id = ? AND is_active = 1",
+                (product_id, uid)
+            ).fetchone()
+            if not row:
+                return False, "Fotoğrafı güncellenecek ürün bulunamadı!", None
+
+            conn.execute(
+                "UPDATE products SET image_path = ?, synced_to_cloud = 0, updated_at = ? WHERE id = ? AND user_id = ?",
+                (clean_img, now, product_id, uid)
+            )
+
+        if self.firestore_db:
+            try:
+                doc_id = f"u{uid}_p{product_id}"
+                self.firestore_db.collection("products").document(doc_id).update({
+                    "image_path": clean_img,
+                    "updated_at": now,
+                    "synced_to_cloud": 1
+                })
+                with self.db.get_connection() as conn:
+                    conn.execute("UPDATE products SET synced_to_cloud = 1 WHERE id = ?", (product_id,))
+            except Exception as e:
+                logger.warning(f"Firestore ürün görsel güncelleme uyarısı: {e}")
+
+        msg = "Ürün görseli başarıyla kaldırıldı." if not clean_img else f"'{row['name']}' ürün fotoğrafı başarıyla güncellendi."
+        return True, msg, clean_img
+
+    def update_product_price(
+        self, product_id: int, sale_price: float, purchase_price: Optional[float] = None, user_id: Optional[int] = None
+    ) -> tuple[bool, str]:
+        """Bir ürünün satış veya alış fiyatını anında günceller ve Firestore'a senkronize eder."""
+        if sale_price < 0:
+            return False, "Satış fiyatı negatif olamaz!"
+
+        uid = user_id or 1
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        with self.db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT id, name, purchase_price FROM products WHERE id = ? AND user_id = ? AND is_active = 1",
+                (product_id, uid)
+            ).fetchone()
+            if not row:
+                return False, "Fiyatı güncellenecek ürün bulunamadı!"
+
+            p_price = purchase_price if purchase_price is not None else float(row["purchase_price"])
+            conn.execute(
+                "UPDATE products SET sale_price = ?, purchase_price = ?, synced_to_cloud = 0, updated_at = ? WHERE id = ? AND user_id = ?",
+                (sale_price, p_price, now, product_id, uid)
+            )
+
+        if self.firestore_db:
+            try:
+                doc_id = f"u{uid}_p{product_id}"
+                self.firestore_db.collection("products").document(doc_id).update({
+                    "sale_price": sale_price,
+                    "purchase_price": p_price,
+                    "updated_at": now,
+                    "synced_to_cloud": 1
+                })
+                with self.db.get_connection() as conn:
+                    conn.execute("UPDATE products SET synced_to_cloud = 1 WHERE id = ?", (product_id,))
+            except Exception as e:
+                logger.warning(f"Firestore fiyat güncelleme uyarısı: {e}")
+
+        return True, f"'{row['name']}' ürününün yeni satış fiyatı {sale_price:.2f} ₺ olarak güncellendi."
 
     def delete_product(self, product_id: int, user_id: Optional[int] = None) -> tuple[bool, str]:
         uid = user_id or 1

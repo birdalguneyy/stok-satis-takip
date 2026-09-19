@@ -107,6 +107,39 @@ class ProductsView(ctk.CTkFrame):
         self.sale_var = ctk.StringVar(value="0")
         self.stock_var = ctk.StringVar(value="0")
         self.critical_var = ctk.StringVar(value="5")
+        self.image_path_var = ctk.StringVar(value="")
+
+        # Fotoğraf Bölümü
+        img_frame = ctk.CTkFrame(form, fg_color=("gray85", "gray20"), corner_radius=10)
+        img_frame.pack(fill="x", padx=16, pady=(0, 6))
+
+        self.img_label = ctk.CTkLabel(img_frame, text="📷 Resim Yok", font=FONT_SMALL, text_color="gray", width=60, height=60)
+        self.img_label.pack(side="left", padx=8, pady=4)
+
+        img_btn_col = ctk.CTkFrame(img_frame, fg_color="transparent")
+        img_btn_col.pack(side="left", fill="both", expand=True, padx=4, pady=4)
+
+        ctk.CTkButton(
+            img_btn_col,
+            text="📷 Fotoğraf Seç",
+            font=FONT_SMALL,
+            height=26,
+            fg_color="#0284C7",
+            hover_color="#0369A1",
+            command=self._pick_image,
+        ).pack(fill="x", pady=2)
+
+        self.remove_img_btn = ctk.CTkButton(
+            img_btn_col,
+            text="🗑️ Fotoğrafı Kaldır",
+            font=FONT_SMALL,
+            height=22,
+            fg_color="transparent",
+            text_color=ERROR,
+            hover_color=("gray75", "gray30"),
+            command=self._remove_image,
+        )
+        self.remove_img_btn.pack(fill="x", pady=2)
 
         self._add_field(form, "name", "Ürün Adı *", self.name_var)
         
@@ -188,6 +221,60 @@ class ProductsView(ctk.CTkFrame):
         self.sale_var.set(str(item.sale_price))
         self.stock_var.set(str(item.stock_quantity))
         self.critical_var.set(str(item.critical_stock_level))
+        self.image_path_var.set(item.image_path or "")
+        self._update_img_preview()
+
+    def _pick_image(self) -> None:
+        from tkinter import filedialog
+        path = filedialog.askopenfilename(
+            title="Ürün Fotoğrafı Seç",
+            filetypes=[("Resim Dosyaları", "*.jpg *.jpeg *.png *.webp *.bmp *.gif")],
+        )
+        if not path:
+            return
+        try:
+            import io, base64
+            from PIL import Image, ImageOps
+            pil_img = Image.open(path)
+            pil_img = ImageOps.exif_transpose(pil_img).convert("RGB")
+            pil_img.thumbnail((350, 350), Image.LANCZOS)
+            buf = io.BytesIO()
+            pil_img.save(buf, format="JPEG", quality=75, optimize=True)
+            b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+            data_uri = f"data:image/jpeg;base64,{b64}"
+            self.image_path_var.set(data_uri)
+            self._update_img_preview(pil_img)
+            self.on_toast("Fotoğraf seçildi", "info")
+        except Exception as e:
+            self.on_toast(f"Resim yüklenemedi: {e}", "error")
+
+    def _remove_image(self) -> None:
+        self.image_path_var.set("__REMOVE__")
+        self.img_label.configure(image=None, text="📷 Resim Yok")
+        self.on_toast("Fotoğraf kaldırıldı", "info")
+
+    def _update_img_preview(self, pil_img=None) -> None:
+        if pil_img is None:
+            raw = self.image_path_var.get()
+            if raw and raw.startswith("data:image"):
+                try:
+                    import io, base64
+                    from PIL import Image
+                    b64_data = raw.split(",", 1)[1]
+                    pil_img = Image.open(io.BytesIO(base64.b64decode(b64_data)))
+                except Exception:
+                    pil_img = None
+
+        if pil_img:
+            try:
+                thumb = pil_img.copy()
+                thumb.thumbnail((56, 56))
+                ctk_img = ctk.CTkImage(light_image=thumb, dark_image=thumb, size=(thumb.width, thumb.height))
+                self.img_label.configure(image=ctk_img, text="")
+            except Exception:
+                self.img_label.configure(image=None, text="📷 Resim Var")
+        else:
+            self.img_label.configure(image=None, text="📷 Resim Yok")
 
     def _parse_float(self, value: str) -> float:
         return float(value.replace(",", ".").strip())
@@ -247,6 +334,7 @@ class ProductsView(ctk.CTkFrame):
             ):
                 return
 
+        img_val = self.image_path_var.get() or None
         ok, message, _ = self.product_service.save_product(
             name=self.name_var.get(),
             category_name=self.category_var.get(),
@@ -256,6 +344,7 @@ class ProductsView(ctk.CTkFrame):
             barcode=self.barcode_var.get(),
             critical_stock_level=crit_qty,
             product_id=self._selected_id,
+            image_path=img_val,
         )
 
         if not ok:
@@ -265,9 +354,45 @@ class ProductsView(ctk.CTkFrame):
             self.on_toast(message, "error")
             return
 
+        # Firebase Cloud veritabanı senkronizasyonu
+        try:
+            from app.database.cloud_db import CloudDatabase
+            cdb = CloudDatabase()
+            cdb.save_product(
+                name=self.name_var.get(),
+                barcode=self.barcode_var.get(),
+                category_name=self.category_var.get(),
+                purchase_price=p_price,
+                sale_price=s_price,
+                stock_quantity=stock_qty,
+                critical_stock_level=crit_qty,
+                image_path=img_val,
+                product_id=self._selected_id,
+            )
+        except Exception:
+            pass
+
         self.on_toast(message, "success")
         self._clear_form()
         self._refresh_categories()
+        self.refresh()
+
+    def _clear_form(self) -> None:
+        self._selected_id = None
+        self.form_title.configure(text="Yeni Ürün")
+        self.form_error_label.configure(text="")
+        for key in self.entries:
+            self._reset_field_style(key)
+        self.name_var.set("")
+        self.category_var.set("")
+        self.barcode_var.set("")
+        self.purchase_var.set("0")
+        self.sale_var.set("0")
+        self.stock_var.set("0")
+        self.critical_var.set("5")
+        self.image_path_var.set("")
+        self._update_img_preview()
+        self.table.set_selected_row(None)
 
     def _highlight_invalid(self, key: str, message: str) -> None:
         self.form_error_label.configure(text=f"⚠️ {message}")
@@ -293,21 +418,6 @@ class ProductsView(ctk.CTkFrame):
         if ok:
             self._clear_form()
             self.refresh()
-
-    def _clear_form(self) -> None:
-        self._selected_id = None
-        self.form_title.configure(text="Yeni Ürün")
-        self.form_error_label.configure(text="")
-        for key in self.entries:
-            self._reset_field_style(key)
-        self.name_var.set("")
-        self.category_var.set("")
-        self.barcode_var.set("")
-        self.purchase_var.set("0")
-        self.sale_var.set("0")
-        self.stock_var.set("0")
-        self.critical_var.set("5")
-        self.table.set_selected_row(None)
 
     def _refresh_categories(self) -> None:
         self.category_combo.configure(values=self._category_names())

@@ -300,7 +300,8 @@ def save_product():
     stock_quantity = int(data.get("stock_quantity", 0))
     critical_stock = int(data.get("critical_stock_level", 5))
     image_path = data.get("image_path")
-    product_id = data.get("id")
+    raw_id = data.get("id") or data.get("product_id")
+    product_id = int(raw_id) if raw_id else None
 
     if not name or not barcode:
         return jsonify({"ok": False, "message": "Ürün adı ve barkod zorunludur!"}), 400
@@ -320,6 +321,126 @@ def save_product():
     if ok:
         notify_data_change(user_id)
     return jsonify({"ok": ok, "message": msg, "product": prod})
+
+
+@app.route("/api/products/<int:product_id>", methods=["PUT", "POST"])
+def update_product_route(product_id: int):
+    """Mevcut bir ürünün tüm bilgilerini veya seçili alanlarını günceller."""
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
+
+    data = request.json or {}
+    prods = cloud_db.get_products(user_id=user_id)
+    curr = next((p for p in prods if p["id"] == product_id), None)
+    if not curr:
+        return jsonify({"ok": False, "message": "Düzenlenecek ürün bulunamadı!"}), 404
+
+    name = str(data.get("name") if data.get("name") is not None else curr.get("name", "")).strip()
+    barcode = str(data.get("barcode") if data.get("barcode") is not None else curr.get("barcode", "")).strip()
+    category = str(data.get("category") if data.get("category") is not None else (curr.get("category_name") or "Genel")).strip()
+    
+    try:
+        purchase_price = float(data.get("purchase_price") if data.get("purchase_price") is not None else curr.get("purchase_price", 0.0))
+        sale_price = float(data.get("sale_price") if data.get("sale_price") is not None else curr.get("sale_price", 0.0))
+        stock_quantity = int(data.get("stock_quantity") if data.get("stock_quantity") is not None else curr.get("stock_quantity", 0))
+        critical_stock = int(data.get("critical_stock_level") if data.get("critical_stock_level") is not None else curr.get("critical_stock_level", 5))
+    except (ValueError, TypeError) as e:
+        return jsonify({"ok": False, "message": f"Geçersiz sayısal değer: {e}"}), 400
+
+    image_path = data.get("image_path")  # None ise mevcut korunur, '__REMOVE__' ise silinir
+
+    ok, msg, prod = cloud_db.save_product(
+        name=name,
+        barcode=barcode,
+        category_name=category,
+        purchase_price=purchase_price,
+        sale_price=sale_price,
+        stock_quantity=stock_quantity,
+        critical_stock_level=critical_stock,
+        image_path=image_path,
+        product_id=product_id,
+        user_id=user_id,
+    )
+    if ok:
+        notify_data_change(user_id)
+    return jsonify({"ok": ok, "message": msg, "product": prod})
+
+
+@app.route("/api/products/<int:product_id>/image", methods=["POST"])
+def upload_product_image_route(product_id: int):
+    """Bir ürüne mobil kameradan veya galeriden yeni fotoğraf yükler / değiştirir."""
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
+
+    image_path_str = ""
+    if "file" in request.files:
+        file = request.files["file"]
+        if file.filename:
+            image_bytes = file.read()
+            try:
+                from PIL import Image, ImageOps
+                import io, base64
+                pil_img = Image.open(io.BytesIO(image_bytes))
+                pil_img = ImageOps.exif_transpose(pil_img).convert("RGB")
+                pil_img.thumbnail((400, 400), Image.LANCZOS)
+                buf = io.BytesIO()
+                pil_img.save(buf, format="JPEG", quality=75, optimize=True)
+                b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+                image_path_str = f"data:image/jpeg;base64,{b64}"
+            except Exception as e:
+                return jsonify({"ok": False, "message": f"Resim işlenemedi: {e}"}), 400
+    elif request.is_json:
+        data = request.json or {}
+        image_path_str = data.get("image_path", "").strip()
+
+    if not image_path_str:
+        return jsonify({"ok": False, "message": "Yüklenecek resim bulunamadı!"}), 400
+
+    ok, msg, clean_img = cloud_db.update_product_image(product_id, image_path_str, user_id=user_id)
+    if ok:
+        notify_data_change(user_id)
+    return jsonify({"ok": ok, "message": msg, "image_path": clean_img})
+
+
+@app.route("/api/products/<int:product_id>/image", methods=["DELETE"])
+def delete_product_image_route(product_id: int):
+    """Bir ürünün fotoğrafını kaldırır."""
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
+
+    ok, msg, clean_img = cloud_db.update_product_image(product_id, "__REMOVE__", user_id=user_id)
+    if ok:
+        notify_data_change(user_id)
+    return jsonify({"ok": ok, "message": msg})
+
+
+@app.route("/api/products/<int:product_id>/price", methods=["POST"])
+def update_product_price_route(product_id: int):
+    """Ürünün satış fiyatını hızlıca günceller."""
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
+
+    data = request.json or {}
+    try:
+        sale_price = float(data.get("sale_price", 0))
+    except (ValueError, TypeError):
+        return jsonify({"ok": False, "message": "Geçersiz satış fiyatı!"}), 400
+
+    purchase_price = data.get("purchase_price")
+    if purchase_price is not None:
+        try:
+            purchase_price = float(purchase_price)
+        except (ValueError, TypeError):
+            purchase_price = None
+
+    ok, msg = cloud_db.update_product_price(product_id, sale_price, purchase_price=purchase_price, user_id=user_id)
+    if ok:
+        notify_data_change(user_id)
+    return jsonify({"ok": ok, "message": msg})
 
 
 @app.route("/api/products/<int:product_id>", methods=["DELETE"])

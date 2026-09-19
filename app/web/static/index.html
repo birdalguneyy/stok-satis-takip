@@ -85,9 +85,12 @@
       background: none;
       border: none;
       cursor: pointer;
-      width: 33%;
+      flex: 1;
+      min-width: 0;
+      padding: 4px 2px;
     }
 
+    .nav-item * { pointer-events: none; }
     .nav-item.active { color: var(--accent); font-weight: 600; }
     .nav-item span.icon { font-size: 1.3rem; }
 
@@ -129,6 +132,8 @@
       color: var(--text);
       box-shadow: 0 2px 10px rgba(16,185,129,0.2);
     }
+    .reports-subnav-btn * { pointer-events: none; }
+    .date-pill * { pointer-events: none; }
 
     /* Easy Date Selector Pills */
     .date-filter-box {
@@ -1248,19 +1253,33 @@
     document.addEventListener('touchstart', initAudio, { once: true });
 
     function switchTab(tabId, btnEl) {
-      stopMobileBarcodeScanner();
+      try {
+        stopMobileBarcodeScanner();
+      } catch(e) {}
+
       document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
       document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
       
-      document.getElementById('tab-' + tabId).classList.add('active');
-      if (btnEl) btnEl.classList.add('active');
+      const tabEl = document.getElementById('tab-' + tabId);
+      if (tabEl) tabEl.classList.add('active');
 
-      if (tabId === 'pos') loadPOSProductPicker();
-      if (tabId === 'stock') loadProducts();
-      if (tabId === 'reports') {
-        loadSalesHistory();
-        loadSalesAnalytics();
-        loadForecastData();
+      if (btnEl) {
+        btnEl.classList.add('active');
+      } else {
+        const foundBtn = document.querySelector(`.nav-item[onclick*="'${tabId}'"]`);
+        if (foundBtn) foundBtn.classList.add('active');
+      }
+
+      window.scrollTo(0, 0);
+
+      try {
+        if (tabId === 'pos') loadPOSProductPicker();
+        if (tabId === 'stock') loadProducts();
+        if (tabId === 'reports') {
+          switchReportsSubTab(currentReportsSubTab || 'sales-list');
+        }
+      } catch(err) {
+        console.error('Error during tab switch:', err);
       }
     }
 
@@ -2849,13 +2868,17 @@
       const target = document.getElementById('subtab-' + subTabName);
       if (target) target.style.display = 'block';
 
-      if (subTabName === 'sales-list') {
-        loadSalesHistory();
-      } else if (subTabName === 'revenue-periodic') {
-        loadSalesAnalytics();
-        loadExpenses();
-      } else if (subTabName === 'forecasts') {
-        loadForecastData();
+      try {
+        if (subTabName === 'sales-list') {
+          loadSalesHistory();
+        } else if (subTabName === 'revenue-periodic') {
+          loadSalesAnalytics();
+          loadExpenses();
+        } else if (subTabName === 'forecasts') {
+          loadForecastData();
+        }
+      } catch(err) {
+        console.error('Subtab loader error:', err);
       }
     }
 

@@ -157,6 +157,9 @@ class ReportsView(ctk.CTkFrame):
         elif self._current_subtab == "ai":
             self._refresh_ai()
 
+    def refresh(self) -> None:
+        self.on_show()
+
     # ════════════════════════════════════════════════════════════════
     # SUBTAB 2: AYLIK & HAFTALIK CİRO
     # ════════════════════════════════════════════════════════════════

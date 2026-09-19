@@ -526,7 +526,7 @@ class HistoryView(ctk.CTkFrame):
             parent,
             fg_color=("#E0F2FE", "#1E293B") if is_selected else ("gray95", "gray16"),
             border_width=1 if is_selected else 0,
-            border_color=ACCENT if is_selected else "transparent",
+            border_color=ACCENT if is_selected else ("gray80", "gray25"),
             corner_radius=8,
         )
         card.pack(fill="x", pady=3, padx=2)
@@ -546,7 +546,7 @@ class HistoryView(ctk.CTkFrame):
             card.configure(
                 fg_color=("#E0F2FE", "#1E293B") if cb_var.get() else ("gray95", "gray16"),
                 border_width=1 if cb_var.get() else 0,
-                border_color=ACCENT if cb_var.get() else "transparent",
+                border_color=ACCENT if cb_var.get() else ("gray80", "gray25"),
             )
 
         cb = ctk.CTkCheckBox(

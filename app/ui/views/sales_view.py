@@ -140,6 +140,15 @@ class SalesView(ctk.CTkFrame):
             command=self._reset_total_amount,
         )
 
+        self.customer_entry = ctk.CTkEntry(
+            footer,
+            placeholder_text="👤 Müşteri Adı (Opsiyonel)...",
+            font=FONT_BODY,
+            height=36,
+            width=180,
+        )
+        self.customer_entry.pack(side="left", padx=10)
+
         self.channel_selector = ctk.CTkSegmentedButton(
             footer,
             values=["🏬 Mağaza Satışı", "🌐 İnternet Satışı"],
@@ -148,7 +157,7 @@ class SalesView(ctk.CTkFrame):
             selected_hover_color="#0369A1",
         )
         self.channel_selector.set("🏬 Mağaza Satışı")
-        self.channel_selector.pack(side="left", padx=16)
+        self.channel_selector.pack(side="left", padx=10)
 
         ctk.CTkButton(
             footer,
@@ -438,10 +447,16 @@ class SalesView(ctk.CTkFrame):
     def _complete_sale(self) -> None:
         raw_val = self.channel_selector.get() if hasattr(self, "channel_selector") else ""
         channel = "internet" if "İnternet" in str(raw_val) else "magaza"
-        ok, message = self.sale_service.complete_sale(channel=channel)
+        cust_name = self.customer_entry.get().strip() if hasattr(self, "customer_entry") else ""
+        ok, message = self.sale_service.complete_sale(
+            channel=channel,
+            customer_name=cust_name or None,
+        )
         level = "success" if ok else "error"
         self.on_toast(message, level)
         if ok:
+            if hasattr(self, "customer_entry"):
+                self.customer_entry.delete(0, "end")
             self.on_sale_complete()
         self.refresh()
         self.barcode_entry.clear_and_focus()

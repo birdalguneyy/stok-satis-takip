@@ -642,6 +642,12 @@
           </select>
         </div>
 
+        <!-- MÜŞTERİ ADI GİRİŞİ (OPSİYONEL) -->
+        <div class="form-group" style="margin-top: 10px;">
+          <label style="color:var(--text-muted); font-size:0.8rem; font-weight:700;">👤 Müşteri Adı (Opsiyonel)</label>
+          <input type="text" id="pos-customer-name" placeholder="Müşteri veya firma adı yazın (Örn: Ahmet Yılmaz)..." style="width:100%; padding:10px 12px; background:#0F172A; border:1px solid var(--border); color:var(--text); border-radius:10px; font-size:0.9rem;">
+        </div>
+
         <div id="pos-cart-list" style="margin-top: 14px;">
           <!-- Cart items render here -->
         </div>
@@ -886,7 +892,47 @@
           </form>
         </div>
 
-        <h3 style="font-size:1rem; margin-bottom:8px;">📅 Seçilen Dönemdeki Satış Hareketleri</h3>
+        <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
+            <h3 style="font-size:1rem; margin:0; display:flex; align-items:center; gap:8px;">
+              <span>📅 Satış Hareketleri</span>
+              <span id="sales-total-badge" style="font-size:0.75rem; background:rgba(59,130,246,0.15); color:#60A5FA; padding:2px 8px; border-radius:12px; border:1px solid rgba(59,130,246,0.3);">0 Satış</span>
+            </h3>
+
+            <!-- TOPLU SEÇİM & SİLME BUTONLARI -->
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:0.8rem; font-weight:700; color:var(--text); background:rgba(255,255,255,0.05); padding:6px 10px; border-radius:8px; border:1px solid var(--border);">
+                <input type="checkbox" id="sales-select-all-cb" onchange="toggleSelectAllSales(this.checked)" style="width:16px; height:16px; cursor:pointer;">
+                <span>Tümünü Seç</span>
+              </label>
+
+              <span id="selected-sales-badge" style="font-size:0.75rem; color:var(--text-muted); font-weight:600;">0 seçildi</span>
+
+              <button type="button" class="btn btn-danger" id="bulk-delete-sales-btn" onclick="bulkDeleteSelectedSales()" disabled style="width:auto; padding:6px 12px; font-size:0.8rem; background:rgba(239,68,68,0.2); color:var(--danger); border:1px solid var(--danger); border-radius:8px; cursor:not-allowed; opacity:0.5; transition:all 0.2s;">
+                🗑️ Seçilenleri Sil (0)
+              </button>
+            </div>
+          </div>
+
+          <!-- GRUPLAMA VE ARAMA KONTROLLERİ -->
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <div style="flex:1; min-width:180px;">
+              <label style="font-size:0.72rem; color:var(--text-muted); font-weight:700; display:block; margin-bottom:4px;">📊 Gruplama Türü</label>
+              <select id="sales-group-by" onchange="renderSalesHistoryView()" style="width:100%; padding:8px 10px; background:var(--card); border:1px solid var(--border); color:var(--text); border-radius:8px; font-size:0.85rem; font-weight:600; cursor:pointer;">
+                <option value="none">📋 Düz Liste (Tarih Sıralı)</option>
+                <option value="customer" selected>👤 Müşteriye Göre Grupla</option>
+                <option value="date">📅 Tarihe / Güne Göre Grupla</option>
+                <option value="channel">🌐/🏬 Kanala Göre Grupla</option>
+              </select>
+            </div>
+
+            <div style="flex:1.2; min-width:200px;">
+              <label style="font-size:0.72rem; color:var(--text-muted); font-weight:700; display:block; margin-bottom:4px;">🔍 Müşteri / Not Filtresi</label>
+              <input type="text" id="sales-filter-input" placeholder="Müşteri adı veya not yazın..." oninput="handleSalesFilterInput(this.value)" style="width:100%; padding:8px 12px; font-size:0.85rem; background:var(--card); border:1px solid var(--border); border-radius:8px; color:var(--text);">
+            </div>
+          </div>
+        </div>
+
         <div id="sales-history-container">
           <!-- Sales history renders here -->
         </div>
@@ -2108,6 +2154,8 @@
       }
       const calcTotal = Math.round(posCart.reduce((sum, item) => sum + item.subtotal, 0) * 100) / 100;
       const finalTotal = posCustomTotal !== null ? posCustomTotal : calcTotal;
+      const custNameInput = document.getElementById('pos-customer-name');
+      const customerName = custNameInput ? custNameInput.value.trim() : '';
 
       const res = await fetchWithAuth('/api/sales', {
         method: 'POST',
@@ -2115,7 +2163,8 @@
         body: JSON.stringify({
           items: posCart,
           note: 'Mobil POS Satış',
-          total_amount: finalTotal
+          total_amount: finalTotal,
+          customer_name: customerName || null
         })
       });
       const json = await res.json();
@@ -2123,6 +2172,7 @@
       if (json.ok) {
         posCart = [];
         posCustomTotal = null;
+        if (custNameInput) custNameInput.value = '';
         renderPOSCart();
         loadProducts();
       }
@@ -2800,6 +2850,10 @@
     }
 
 
+    let _allSalesData = [];
+    let _selectedSaleIds = new Set();
+    let _salesFilterQuery = '';
+
     async function loadSalesHistory() {
       const container = document.getElementById('sales-history-container');
       if (!container) return;
@@ -2812,52 +2866,252 @@
       try {
         const res = await fetchWithAuth(url);
         const json = await res.json();
-        const sales = json.sales || [];
-
-        if (!sales.length) {
-          container.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:20px;">Seçilen tarih aralığında kaydedilmiş satış hareketi yok</div>';
-          loadSalesAnalytics();
-          return;
-        }
-
-        container.innerHTML = sales.map(s => {
-          const isNet = (s.channel === 'internet');
-          const chBadge = isNet
-            ? `<span style="font-size:0.7rem; background:rgba(56,189,248,0.18); color:#38BDF8; border:1px solid rgba(56,189,248,0.35); padding:2px 8px; border-radius:10px; font-weight:700; margin-left:6px;">🌐 İnternet</span>`
-            : `<span style="font-size:0.7rem; background:rgba(16,185,129,0.15); color:var(--accent); border:1px solid rgba(16,185,129,0.3); padding:2px 8px; border-radius:10px; font-weight:700; margin-left:6px;">🏬 Mağaza</span>`;
-
-          const itemDetails = (s.items || []).map(i => `
-            <div style="font-size:0.8rem; color:var(--text-muted); display:flex; justify-content:space-between; margin-top:2px;">
-              <span>• ${i.product_name} (${i.quantity} adet x ${i.unit_price.toFixed(2)} ₺)</span>
-              <span style="font-weight:600; color:var(--text);">${i.subtotal.toFixed(2)} ₺</span>
-            </div>
-          `).join('');
-
-          return `
-            <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:10px;">
-              <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); padding-bottom:8px; margin-bottom:8px;">
-                <div>
-                  <div style="font-weight:700; font-size:0.9rem; color:var(--text); display:flex; align-items:center;">
-                    <span>📅 ${s.sold_at}</span>
-                    ${chBadge}
-                  </div>
-                  <div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">${s.item_count} adet ürün | ${s.note || 'Satış'}</div>
-                </div>
-                <div style="text-align:right;">
-                  <div style="font-size:1.1rem; font-weight:800; color:var(--accent);">${s.total_amount.toFixed(2)} ₺</div>
-                  <button type="button" class="btn" style="width:auto; padding:4px 10px; font-size:0.75rem; margin-top:4px; background:rgba(239,68,68,0.15); color:var(--danger); border:1px solid rgba(239,68,68,0.35); border-radius:6px; cursor:pointer;" onclick="promptDeleteSale(${s.id}, '${s.sold_at}', ${s.total_amount})">🗑️ Satışı Sil</button>
-                </div>
-              </div>
-              ${itemDetails}
-            </div>
-          `;
-        }).join('');
+        _allSalesData = json.sales || [];
+        _selectedSaleIds.clear();
+        updateBulkDeleteButton();
+        renderSalesHistoryView();
       } catch (err) {
         container.innerHTML = '<div style="text-align:center; color:var(--danger); padding:20px;">Satış geçmişi yüklenemedi!</div>';
       }
 
       loadSalesAnalytics();
       loadExpenses();
+    }
+
+    function handleSalesFilterInput(val) {
+      _salesFilterQuery = (val || '').toLowerCase().trim();
+      renderSalesHistoryView();
+    }
+
+    function toggleSaleSelection(saleId, isChecked) {
+      const sid = parseInt(saleId);
+      if (isChecked) {
+        _selectedSaleIds.add(sid);
+      } else {
+        _selectedSaleIds.delete(sid);
+      }
+      const card = document.getElementById(`sale-card-${sid}`);
+      if (card) {
+        card.style.borderColor = isChecked ? 'var(--accent)' : 'var(--border)';
+      }
+      updateBulkDeleteButton();
+    }
+
+    function toggleSelectAllSales(isChecked) {
+      const filtered = getFilteredSales();
+      if (isChecked) {
+        filtered.forEach(s => _selectedSaleIds.add(s.id));
+      } else {
+        _selectedSaleIds.clear();
+      }
+      updateBulkDeleteButton();
+      renderSalesHistoryView();
+    }
+
+    function toggleSalesGroupSelection(ids) {
+      if (!ids || !ids.length) return;
+      const allSelected = ids.every(id => _selectedSaleIds.has(id));
+      if (allSelected) {
+        ids.forEach(id => _selectedSaleIds.delete(id));
+      } else {
+        ids.forEach(id => _selectedSaleIds.add(id));
+      }
+      updateBulkDeleteButton();
+      renderSalesHistoryView();
+    }
+
+    function updateBulkDeleteButton() {
+      const badge = document.getElementById('selected-sales-badge');
+      const btn = document.getElementById('bulk-delete-sales-btn');
+      const allCb = document.getElementById('sales-select-all-cb');
+
+      const count = _selectedSaleIds.size;
+      if (badge) badge.innerText = `${count} seçildi`;
+
+      if (btn) {
+        btn.innerText = `🗑️ Seçilenleri Sil (${count})`;
+        if (count > 0) {
+          btn.disabled = false;
+          btn.style.opacity = '1';
+          btn.style.cursor = 'pointer';
+          btn.style.pointerEvents = 'auto';
+        } else {
+          btn.disabled = true;
+          btn.style.opacity = '0.5';
+          btn.style.cursor = 'not-allowed';
+          btn.style.pointerEvents = 'none';
+        }
+      }
+
+      if (allCb) {
+        const filtered = getFilteredSales();
+        allCb.checked = (filtered.length > 0 && filtered.every(s => _selectedSaleIds.has(s.id)));
+      }
+    }
+
+    async function bulkDeleteSelectedSales() {
+      if (_selectedSaleIds.size === 0) return;
+      const selectedList = _allSalesData.filter(s => _selectedSaleIds.has(s.id));
+      const totalAmount = selectedList.reduce((sum, s) => sum + Number(s.total_amount || 0), 0);
+      const count = _selectedSaleIds.size;
+
+      const conf = confirm(`Seçilen ${count} adet satışı (Toplam: ${totalAmount.toFixed(2)} ₺) kalıcı olarak silmek istediğinizden emin misiniz?\n\nℹ️ Bu satışlardaki ürünlerin adetleri stoklarınıza otomatik olarak geri yüklenecektir.`);
+      if (!conf) return;
+
+      const btn = document.getElementById('bulk-delete-sales-btn');
+      if (btn) btn.innerText = "Siliniyor...";
+
+      try {
+        const res = await fetchWithAuth('/api/sales/bulk-delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sale_ids: Array.from(_selectedSaleIds),
+            restore_stock: true
+          })
+        });
+        const json = await res.json();
+        showToast(json.message || "Seçilen satışlar silindi.");
+        _selectedSaleIds.clear();
+        updateBulkDeleteButton();
+        loadSalesHistory();
+        loadProducts();
+        loadPOSProductPicker();
+        triggerManualSync();
+      } catch (err) {
+        showToast("❌ Toplu silme esnasında hata oluştu!");
+      }
+    }
+
+    function getFilteredSales() {
+      if (!_salesFilterQuery) return _allSalesData;
+      return _allSalesData.filter(s => {
+        const cName = (s.customer_name || '').toLowerCase();
+        const note = (s.note || '').toLowerCase();
+        const soldAt = (s.sold_at || '').toLowerCase();
+        const matchItem = (s.items || []).some(i => (i.product_name || '').toLowerCase().includes(_salesFilterQuery));
+        return cName.includes(_salesFilterQuery) || note.includes(_salesFilterQuery) || soldAt.includes(_salesFilterQuery) || matchItem;
+      });
+    }
+
+    function renderSaleCardHTML(s) {
+      const isSelected = _selectedSaleIds.has(s.id);
+      const isNet = (s.channel === 'internet');
+      const chBadge = isNet
+        ? `<span style="font-size:0.7rem; background:rgba(56,189,248,0.18); color:#38BDF8; border:1px solid rgba(56,189,248,0.35); padding:2px 8px; border-radius:10px; font-weight:700; margin-left:6px;">🌐 İnternet</span>`
+        : `<span style="font-size:0.7rem; background:rgba(16,185,129,0.15); color:var(--accent); border:1px solid rgba(16,185,129,0.3); padding:2px 8px; border-radius:10px; font-weight:700; margin-left:6px;">🏬 Mağaza</span>`;
+
+      const custBadge = (s.customer_name && s.customer_name.trim())
+        ? `<span style="font-size:0.72rem; background:rgba(99,102,241,0.18); color:#A5B4FC; border:1px solid rgba(99,102,241,0.35); padding:2px 8px; border-radius:10px; font-weight:700; margin-left:6px;">👤 ${s.customer_name}</span>`
+        : `<span style="font-size:0.72rem; background:rgba(148,163,184,0.1); color:var(--text-muted); border:1px solid rgba(148,163,184,0.2); padding:2px 6px; border-radius:10px;">👤 İsimsiz Müşteri</span>`;
+
+      const itemDetails = (s.items || []).map(i => `
+        <div style="font-size:0.8rem; color:var(--text-muted); display:flex; justify-content:space-between; margin-top:2px;">
+          <span>• ${i.product_name} (${i.quantity} adet x ${Number(i.unit_price).toFixed(2)} ₺)</span>
+          <span style="font-weight:600; color:var(--text);">${Number(i.subtotal).toFixed(2)} ₺</span>
+        </div>
+      `).join('');
+
+      return `
+        <div id="sale-card-${s.id}" style="background:#0F172A; border:${isSelected ? '2px solid var(--accent)' : '1px solid var(--border)'}; border-radius:12px; padding:12px; margin-bottom:10px; transition:border-color 0.2s;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:1px solid var(--border); padding-bottom:8px; margin-bottom:8px;">
+            <div style="display:flex; align-items:flex-start; gap:10px;">
+              <input type="checkbox" class="sale-select-cb" ${isSelected ? 'checked' : ''} onchange="toggleSaleSelection(${s.id}, this.checked)" style="width:18px; height:18px; cursor:pointer; margin-top:3px;">
+              <div>
+                <div style="font-weight:700; font-size:0.9rem; color:var(--text); display:flex; align-items:center; flex-wrap:wrap; gap:4px;">
+                  <span>📅 ${s.sold_at}</span>
+                  ${chBadge}
+                  ${custBadge}
+                </div>
+                <div style="font-size:0.75rem; color:var(--text-muted); margin-top:3px;">${s.item_count} adet ürün | ${s.note || 'Satış'}</div>
+              </div>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-size:1.15rem; font-weight:800; color:var(--accent);">${Number(s.total_amount).toFixed(2)} ₺</div>
+              <button type="button" class="btn" style="width:auto; padding:4px 10px; font-size:0.75rem; margin-top:4px; background:rgba(239,68,68,0.15); color:var(--danger); border:1px solid rgba(239,68,68,0.35); border-radius:6px; cursor:pointer;" onclick="promptDeleteSale(${s.id}, '${s.sold_at}', ${s.total_amount})">🗑️ Satışı Sil</button>
+            </div>
+          </div>
+          ${itemDetails}
+        </div>
+      `;
+    }
+
+    function renderSalesHistoryView() {
+      const container = document.getElementById('sales-history-container');
+      if (!container) return;
+
+      const filtered = getFilteredSales();
+      const totalBadge = document.getElementById('sales-total-badge');
+      if (totalBadge) totalBadge.innerText = `${filtered.length} Satış`;
+
+      if (!filtered.length) {
+        container.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:30px;">Aradığınız kriterlere uygun satış hareketi bulunamadı.</div>';
+        updateBulkDeleteButton();
+        return;
+      }
+
+      const groupByEl = document.getElementById('sales-group-by');
+      const groupBy = groupByEl ? groupByEl.value : 'none';
+
+      if (groupBy === 'none') {
+        container.innerHTML = filtered.map(renderSaleCardHTML).join('');
+        updateBulkDeleteButton();
+        return;
+      }
+
+      // Grouping logic
+      const groups = {};
+      filtered.forEach(s => {
+        let key = '';
+        let icon = '📁';
+        if (groupBy === 'customer') {
+          key = (s.customer_name && s.customer_name.trim()) ? s.customer_name.trim() : 'İsimsiz / Genel Müşteriler';
+          icon = '👤';
+        } else if (groupBy === 'date') {
+          key = (s.sold_at || '').split(' ')[0] || 'Tarihsiz';
+          icon = '📅';
+        } else if (groupBy === 'channel') {
+          key = (s.channel === 'internet') ? '🌐 İnternet Satışları' : '🏬 Mağaza Satışları';
+          icon = (s.channel === 'internet') ? '🌐' : '🏬';
+        }
+        if (!groups[key]) groups[key] = { key, icon, sales: [] };
+        groups[key].sales.push(s);
+      });
+
+      let html = '';
+      for (const [key, grp] of Object.entries(groups)) {
+        const grpSales = grp.sales;
+        const grpTotal = grpSales.reduce((sum, s) => sum + Number(s.total_amount || 0), 0);
+        const grpItems = grpSales.reduce((sum, s) => sum + Number(s.item_count || 0), 0);
+        const allGrpSelected = grpSales.every(s => _selectedSaleIds.has(s.id));
+        const idsJson = JSON.stringify(grpSales.map(s => s.id));
+
+        html += `
+          <div style="background:#1E293B; border:1px solid rgba(255,255,255,0.08); border-radius:14px; padding:14px; margin-bottom:14px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.06); padding-bottom:8px;">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:1.25rem;">${grp.icon}</span>
+                <div>
+                  <div style="font-weight:800; font-size:1rem; color:#F8FAFC;">${key}</div>
+                  <div style="font-size:0.75rem; color:var(--text-muted);">${grpSales.length} fiş / sipariş • ${grpItems} adet ürün</div>
+                </div>
+              </div>
+              <div style="display:flex; align-items:center; gap:10px;">
+                <div style="font-size:1.15rem; font-weight:800; color:var(--accent); text-align:right;">${grpTotal.toFixed(2)} ₺</div>
+                <button type="button" class="btn btn-secondary" style="padding:4px 10px; font-size:0.75rem;" onclick='toggleSalesGroupSelection(${idsJson})'>
+                  ${allGrpSelected ? '✓ Seçimi Bırak' : '➕ Gruptakileri Seç'}
+                </button>
+              </div>
+            </div>
+            <div>
+              ${grpSales.map(renderSaleCardHTML).join('')}
+            </div>
+          </div>
+        `;
+      }
+
+      container.innerHTML = html;
+      updateBulkDeleteButton();
     }
 
 

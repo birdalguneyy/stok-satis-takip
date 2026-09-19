@@ -80,6 +80,16 @@ def run_migrations() -> None:
             except Exception:
                 pass
 
+            if "customer_name" not in sales_cols:
+                try:
+                    conn.execute("ALTER TABLE sales ADD COLUMN customer_name TEXT")
+                except Exception:
+                    pass
+            try:
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_sales_customer_name ON sales(customer_name)")
+            except Exception:
+                pass
+
             # Ensure users table exists in existing database
             conn.execute(
                 """

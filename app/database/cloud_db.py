@@ -540,11 +540,29 @@ class CloudDatabase:
             logger.error(f"Senkronizasyon hatası: {exc}")
             return {"synced": False, "reason": str(exc), "pushed": pushed_count, "pulled": 0}
 
+    def _resolve_user_id(self, user_id: Optional[int] = None) -> Optional[int]:
+        if user_id is not None:
+            try:
+                with self.db.get_connection() as conn:
+                    row = conn.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
+                    if row:
+                        return user_id
+            except Exception:
+                return user_id
+        try:
+            with self.db.get_connection() as conn:
+                row = conn.execute("SELECT id FROM users ORDER BY id ASC LIMIT 1").fetchone()
+                if row:
+                    return row["id"]
+        except Exception:
+            pass
+        return None
+
     # ════════════════════════════════════════════════════════════════════
     # KATEGORİ İŞLEMLERİ (KULLANICIYA ÖZEL İZOLE)
     # ════════════════════════════════════════════════════════════════════
     def get_categories(self, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
-        uid = user_id or 1
+        uid = self._resolve_user_id(user_id) or 1
         with self.db.get_connection() as conn:
             rows = conn.execute(
                 "SELECT id, name FROM categories WHERE user_id = ? ORDER BY name ASC",
@@ -900,14 +918,17 @@ class CloudDatabase:
         user_id: Optional[int] = None,
         channel: str = "magaza",
         total_amount_override: Optional[float] = None,
+        customer_name: Optional[str] = None,
     ) -> tuple[bool, str]:
         if not cart_items:
             return False, "Sepet boş!"
 
-        uid = user_id or 1
+        uid = self._resolve_user_id(user_id)
         ch = (channel or "magaza").strip().lower()
         if ch not in ("magaza", "internet"):
             ch = "magaza"
+
+        cust_name = customer_name.strip() if customer_name and str(customer_name).strip() else None
 
         calculated_total = sum(float(item.get("subtotal", item.get("unit_price", 0) * item.get("quantity", 1))) for item in cart_items)
         if total_amount_override is not None:
@@ -923,8 +944,8 @@ class CloudDatabase:
 
         with self.db.get_connection() as conn:
             cursor = conn.execute(
-                "INSERT INTO sales (user_id, total_amount, item_count, sold_at, note, channel) VALUES (?, ?, ?, ?, ?, ?)",
-                (uid, total_amount, item_count, now, note, ch),
+                "INSERT INTO sales (user_id, total_amount, item_count, sold_at, note, channel, customer_name) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (uid, total_amount, item_count, now, note, ch, cust_name),
             )
             sale_id = cursor.lastrowid
 
@@ -966,6 +987,7 @@ class CloudDatabase:
                     "sold_at": now,
                     "note": note,
                     "channel": ch,
+                    "customer_name": cust_name,
                     "items": cart_items,
                     "synced_to_cloud": 1,
                 })
@@ -1031,15 +1053,76 @@ class CloudDatabase:
 
         return True, "Satış başarıyla silindi ve ürün stokları geri yüklendi."
 
-    def get_sales_history(
+    def delete_sales_bulk(
+        self,
+        sale_ids: List[int],
+        user_id: Optional[int] = None,
+        restore_stock: bool = True,
+    ) -> tuple[bool, str, int]:
+        """Birden fazla satışı tek işlemde siler ve istenirse satılan stokları depoya iade eder."""
+        if not sale_ids:
+            return False, "Silinecek satış seçilmedi!", 0
 
+        uid = self._resolve_user_id(user_id)
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cleaned_ids = [int(sid) for sid in sale_ids if sid]
+        if not cleaned_ids:
+            return False, "Geçersiz satış listesi!", 0
+
+        with self.db.get_connection() as conn:
+            placeholders = ",".join("?" for _ in cleaned_ids)
+            valid_sales = conn.execute(
+                f"SELECT id FROM sales WHERE id IN ({placeholders}) AND (user_id = ? OR user_id IS NULL)",
+                (*cleaned_ids, uid),
+            ).fetchall()
+            valid_ids = [r["id"] for r in valid_sales]
+
+            if not valid_ids:
+                return False, "Seçilen satışlar bulunamadı veya bu hesaba ait değil!", 0
+
+            if restore_stock:
+                v_placeholders = ",".join("?" for _ in valid_ids)
+                items = conn.execute(
+                    f"SELECT product_id, quantity FROM sale_items WHERE sale_id IN ({v_placeholders})",
+                    valid_ids,
+                ).fetchall()
+                for it in items:
+                    pid = it["product_id"]
+                    qty = it["quantity"]
+                    if pid:
+                        conn.execute(
+                            """
+                            UPDATE products
+                            SET stock_quantity = stock_quantity + ?, updated_at = ?
+                            WHERE id = ? AND (user_id = ? OR user_id IS NULL) AND is_active = 1
+                            """,
+                            (qty, now, pid, uid),
+                        )
+
+            v_placeholders = ",".join("?" for _ in valid_ids)
+            conn.execute(f"DELETE FROM sale_items WHERE sale_id IN ({v_placeholders})", valid_ids)
+            conn.execute(f"DELETE FROM sales WHERE id IN ({v_placeholders}) AND (user_id = ? OR user_id IS NULL)", (*valid_ids, uid))
+            deleted_count = len(valid_ids)
+
+        if self.firestore_db:
+            for sid in valid_ids:
+                try:
+                    self.firestore_db.collection("sales").document(f"u{uid}_s{sid}").delete()
+                    self.firestore_db.collection("sales").document(str(sid)).delete()
+                except Exception:
+                    pass
+
+        return True, f"{deleted_count} adet satış başarıyla silindi ve ürün stokları geri yüklendi.", deleted_count
+
+    def get_sales_history(
         self,
         user_id: Optional[int] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
+        customer_name: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        uid = user_id or 1
-        query = "SELECT * FROM sales WHERE user_id = ?"
+        uid = self._resolve_user_id(user_id)
+        query = "SELECT * FROM sales WHERE (user_id = ? OR user_id IS NULL)"
         params: list = [uid]
         if start_date:
             query += " AND sold_at >= ?"
@@ -1047,7 +1130,10 @@ class CloudDatabase:
         if end_date:
             query += " AND sold_at <= ?"
             params.append(end_date + " 23:59:59")
-        query += " ORDER BY id DESC LIMIT 200"
+        if customer_name and str(customer_name).strip():
+            query += " AND customer_name LIKE ?"
+            params.append(f"%{customer_name.strip()}%")
+        query += " ORDER BY id DESC LIMIT 500"
 
         sales = []
         with self.db.get_connection() as conn:

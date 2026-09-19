@@ -111,6 +111,7 @@ class SaleService:
         custom_total: Optional[float] = None,
         note: Optional[str] = None,
         channel: str = "magaza",
+        customer_name: Optional[str] = None,
     ) -> Tuple[bool, str]:
         if not self._cart:
             return False, "Sepet boş"
@@ -123,6 +124,7 @@ class SaleService:
                 note=note,
                 channel=channel,
                 total_amount_override=final_total,
+                customer_name=customer_name,
             )
         except ValueError as exc:
             return False, str(exc)
@@ -136,3 +138,17 @@ class SaleService:
         name = self._cart[product_id].product_name
         del self._cart[product_id]
         return True, f"{name} sepetten çıkarıldı"
+
+    def get_sales_history(
+        self,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        customer_name: Optional[str] = None,
+    ) -> List[dict]:
+        return self.sale_repo.get_sales_history(start_date, end_date, customer_name)
+
+    def delete_sale(self, sale_id: int, restore_stock: bool = True) -> Tuple[bool, str]:
+        return self.sale_repo.delete_sale(sale_id, restore_stock=restore_stock)
+
+    def delete_sales_bulk(self, sale_ids: List[int], restore_stock: bool = True) -> Tuple[bool, str, int]:
+        return self.sale_repo.delete_sales_bulk(sale_ids, restore_stock=restore_stock)

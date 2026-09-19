@@ -156,7 +156,8 @@ def get_current_user_id() -> int:
         user = cloud_db.verify_token(token)
         if user and user.get("id"):
             return user["id"]
-    return 1
+    resolved = cloud_db._resolve_user_id()
+    return resolved if resolved is not None else 1
 
 
 
@@ -529,6 +530,7 @@ def record_sale():
     note = data.get("note", "Mobil Satış")
     channel = data.get("channel", "magaza")
     total_amount = data.get("total_amount")
+    customer_name = data.get("customer_name")
     if not items:
         return jsonify({"ok": False, "message": "Sepet boş!"}), 400
 
@@ -545,6 +547,7 @@ def record_sale():
         user_id=user_id,
         channel=channel,
         total_amount_override=total_override,
+        customer_name=customer_name,
     )
     if ok:
         notify_data_change(user_id)
@@ -641,6 +644,24 @@ def delete_sale_route(sale_id):
     return jsonify({"ok": ok, "message": msg})
 
 
+@app.route("/api/sales/bulk-delete", methods=["POST"])
+def bulk_delete_sales_route():
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
+
+    data = request.json or {}
+    sale_ids = data.get("sale_ids", [])
+    restore_stock = bool(data.get("restore_stock", True))
+    if not sale_ids:
+        return jsonify({"ok": False, "message": "Silinecek satış seçilmedi!"}), 400
+
+    ok, msg, count = cloud_db.delete_sales_bulk(sale_ids, user_id=user_id, restore_stock=restore_stock)
+    if ok:
+        notify_data_change(user_id)
+    return jsonify({"ok": ok, "message": msg, "count": count})
+
+
 @app.route("/api/sales/history", methods=["GET"])
 def get_sales_history():
     user_id = get_current_user_id()
@@ -648,7 +669,13 @@ def get_sales_history():
         return jsonify({"ok": False, "authenticated": False, "sales": []}), 401
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
-    history = cloud_db.get_sales_history(user_id=user_id, start_date=start_date, end_date=end_date)
+    customer_name = request.args.get("customer_name")
+    history = cloud_db.get_sales_history(
+        user_id=user_id,
+        start_date=start_date,
+        end_date=end_date,
+        customer_name=customer_name,
+    )
     return jsonify({"ok": True, "sales": history})
 
 

@@ -10,6 +10,7 @@ class Sale:
     sold_at: Optional[str] = None
     note: Optional[str] = None
     channel: str = "magaza"
+    customer_name: Optional[str] = None
 
     @classmethod
     def from_row(cls, row) -> "Sale":
@@ -21,6 +22,7 @@ class Sale:
             sold_at=row["sold_at"],
             note=row["note"],
             channel=row["channel"] if "channel" in keys else "magaza",
+            customer_name=row["customer_name"] if "customer_name" in keys else None,
         )
 
 

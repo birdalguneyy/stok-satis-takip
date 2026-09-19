@@ -61,12 +61,14 @@ CREATE TABLE IF NOT EXISTS sales (
     sold_at         TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     note            TEXT,
     channel         TEXT NOT NULL DEFAULT 'magaza',
+    customer_name   TEXT,
     synced_to_cloud INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_sales_user_id ON sales(user_id);
 CREATE INDEX IF NOT EXISTS idx_sales_sold_at ON sales(sold_at);
 CREATE INDEX IF NOT EXISTS idx_sales_channel ON sales(channel);
+CREATE INDEX IF NOT EXISTS idx_sales_customer_name ON sales(customer_name);
 
 CREATE TABLE IF NOT EXISTS sale_items (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -8,6 +8,7 @@ from app.services.sale_service import SaleService
 from app.ui.components.sidebar import Sidebar
 from app.ui.components.toast import Toast
 from app.ui.views.dashboard_view import DashboardView
+from app.ui.views.history_view import HistoryView
 from app.ui.views.products_view import ProductsView
 from app.ui.views.sales_view import SalesView
 
@@ -92,6 +93,12 @@ class App(ctk.CTk):
             on_toast=self.show_toast,
             on_sale_complete=self._on_sale_complete,
         )
+        self.views["history"] = HistoryView(
+            self.content,
+            self.sale_service,
+            on_toast=self.show_toast,
+            on_stock_changed=self._on_stock_changed,
+        )
 
         for view in self.views.values():
             view.grid(row=0, column=0, sticky="nsew")
@@ -120,3 +127,14 @@ class App(ctk.CTk):
         dashboard = self.views.get("dashboard")
         if dashboard and hasattr(dashboard, "refresh"):
             dashboard.refresh()
+        history = self.views.get("history")
+        if history and hasattr(history, "refresh"):
+            history.refresh()
+
+    def _on_stock_changed(self) -> None:
+        dashboard = self.views.get("dashboard")
+        if dashboard and hasattr(dashboard, "refresh"):
+            dashboard.refresh()
+        products = self.views.get("products")
+        if products and hasattr(products, "refresh"):
+            products.refresh()

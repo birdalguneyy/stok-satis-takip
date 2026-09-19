@@ -8,6 +8,7 @@ NAV_ITEMS = [
     ("dashboard", "Gösterge Paneli"),
     ("products", "Stok Yönetimi"),
     ("sales", "Satış (POS)"),
+    ("history", "Satış Geçmişi"),
 ]
 
 

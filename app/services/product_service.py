@@ -37,6 +37,16 @@ class ProductService:
         results = self.product_repo.search(term)
         return results[0] if len(results) == 1 else None
 
+    def search_candidates(self, term: str, limit: int = 15) -> List[Product]:
+        """Arama terimine uyan tüm aday ürünleri döndürür."""
+        term = term.strip()
+        if not term:
+            return []
+        by_barcode = self.product_repo.get_by_barcode(term)
+        if by_barcode:
+            return [by_barcode]
+        return self.product_repo.search(term)[:limit]
+
     def save_product(
         self,
         name: str,

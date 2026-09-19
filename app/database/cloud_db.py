@@ -899,6 +899,7 @@ class CloudDatabase:
         note: str = "Mobil/PC Satış",
         user_id: Optional[int] = None,
         channel: str = "magaza",
+        total_amount_override: Optional[float] = None,
     ) -> tuple[bool, str]:
         if not cart_items:
             return False, "Sepet boş!"
@@ -907,8 +908,17 @@ class CloudDatabase:
         ch = (channel or "magaza").strip().lower()
         if ch not in ("magaza", "internet"):
             ch = "magaza"
-        total_amount = sum(item["subtotal"] for item in cart_items)
-        item_count = sum(item["quantity"] for item in cart_items)
+
+        calculated_total = sum(float(item.get("subtotal", item.get("unit_price", 0) * item.get("quantity", 1))) for item in cart_items)
+        if total_amount_override is not None:
+            try:
+                total_amount = round(float(total_amount_override), 2)
+            except (ValueError, TypeError):
+                total_amount = round(calculated_total, 2)
+        else:
+            total_amount = round(calculated_total, 2)
+
+        item_count = sum(int(item.get("quantity", 1)) for item in cart_items)
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         with self.db.get_connection() as conn:

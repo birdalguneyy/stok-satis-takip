@@ -624,12 +624,14 @@
           🌐 İnternet Satışı Gir (Adet & Platform)
         </button>
 
-        <div class="form-group">
-          <label>Manuel Barkod / Ürün Adı Ara</label>
+        <div class="form-group" style="position:relative;">
+          <label>Manuel Barkod / Ürün Adı Ara (Canlı Öneri)</label>
           <div style="display: flex; gap: 8px;">
-            <input type="text" id="pos-barcode-input" placeholder="Barkod veya isim yazıp Enter'a basın..." onkeypress="if(event.key==='Enter') handlePOSScan()">
+            <input type="text" id="pos-barcode-input" autocomplete="off" placeholder="Barkod okutun veya ürün adı yazın (Örn: Trendline)..." oninput="handlePOSSearchInput(this.value)" onkeydown="handlePOSInputKey(event)">
             <button class="btn" style="width: 80px;" onclick="handlePOSScan()">Ekle</button>
           </div>
+          <!-- CANLI ARAMA / ADAY ÜRÜN ÖNERİ LİSTESİ -->
+          <div id="pos-suggestions-dropdown" style="display:none; position:absolute; left:0; right:0; top:100%; z-index:9999; background:#0F172A; border:2px solid var(--accent); border-radius:12px; max-height:280px; overflow-y:auto; box-shadow:0 12px 30px rgba(0,0,0,0.85); margin-top:4px;"></div>
         </div>
 
         <!-- KATEGORİLİ ÜRÜN SEÇİCİ (BARKODSUZ SEÇİM) -->
@@ -644,10 +646,15 @@
           <!-- Cart items render here -->
         </div>
 
-        <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
+        <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
           <div>
-            <div style="font-size: 0.8rem; color: var(--text-muted);">Toplam Tutar</div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size: 0.8rem; color: var(--text-muted);">Toplam Tutar</span>
+              <button type="button" class="btn btn-secondary" onclick="editPOSTotalAmount()" style="padding:2px 8px; font-size:0.75rem; border-radius:6px; border:1px solid var(--accent); color:var(--accent);" title="Genel toplamı bu satış için manuel düzenle / indirim yap">✏️ Toplamı Düzenle</button>
+              <button type="button" id="pos-reset-total-btn" class="btn btn-secondary" onclick="resetPOSTotalAmount()" style="display:none; padding:2px 8px; font-size:0.75rem; border-radius:6px; border:1px solid var(--danger); color:var(--danger);" title="Hesaplanan orijinal toplama dön">↺ Sıfırla</button>
+            </div>
             <div id="pos-total-amount" style="font-size: 1.4rem; font-weight: 800; color: var(--accent);">0.00 ₺</div>
+            <div id="pos-calc-total-note" style="display:none; font-size:0.75rem; color:var(--text-muted); text-decoration:line-through;"></div>
           </div>
           <button class="btn" style="width: auto; padding: 12px 24px;" onclick="completePOSSale()">Satışı Tamamla</button>
         </div>
@@ -1906,56 +1913,129 @@
 
 
     // ════════════════════════════════════════════════════════════════════
-    // POS SATIŞ & SEPET ADET YÖNETİMİ
+    // POS SATIŞ, OTOMATİK ÖNERİ & GEÇİCİ FİYAT / TUTAR YÖNETİMİ
     // ════════════════════════════════════════════════════════════════════
-    async function handlePOSScan() {
-      const input = document.getElementById('pos-barcode-input');
-      const code = input.value.trim();
-      if (!code) return;
+    let posCart = [];
+    let posCustomTotal = null; // Manuel girilen özel sepet toplamı
+    let posSearchTimer = null;
+    let posActiveSuggestionIndex = -1;
 
-      const res = await fetchWithAuth('/api/products/barcode/' + encodeURIComponent(code));
-      if (res.ok) {
-        const data = await res.json();
-        const prod = data.product;
-        const existing = posCart.find(i => i.product_id === prod.id);
-        if (existing) {
-          existing.quantity += 1;
-          existing.subtotal = existing.quantity * existing.unit_price;
-        } else {
-          posCart.push({
-            product_id: prod.id,
-            product_name: prod.name,
-            barcode: prod.barcode,
-            unit_price: prod.sale_price,
-            quantity: 1,
-            subtotal: prod.sale_price
-          });
-        }
-        input.value = '';
-        playBeep();
-        renderPOSCart();
-        showToast("✅ " + prod.name + " sepete eklendi");
+    function addProductToPOSCart(prod) {
+      if (!prod) return;
+      const existing = posCart.find(i => i.product_id === prod.id);
+      if (existing) {
+        existing.quantity += 1;
+        existing.subtotal = Math.round(existing.quantity * existing.unit_price * 100) / 100;
       } else {
-        showToast("❌ " + code + " kodlu veya isimli ürün bulunamadı!");
+        const uPrice = Number(prod.sale_price) || 0;
+        posCart.push({
+          product_id: prod.id,
+          product_name: prod.name,
+          barcode: prod.barcode || '',
+          original_unit_price: uPrice,
+          unit_price: uPrice,
+          quantity: 1,
+          subtotal: uPrice
+        });
       }
+      playBeep();
+      renderPOSCart();
+      showToast("✅ " + prod.name + " sepete eklendi");
+    }
+
+    function editPOSItemPrice(index) {
+      const item = posCart[index];
+      if (!item) return;
+      const currentPrice = item.unit_price.toFixed(2);
+      const origPrice = (item.original_unit_price !== undefined ? item.original_unit_price : item.unit_price).toFixed(2);
+      const input = prompt(
+        `"${item.product_name}" için bu satışa özel birim satış fiyatını girin (TL):\n(Normal Liste Fiyatı: ${origPrice} ₺)`,
+        currentPrice
+      );
+      if (input === null) return;
+      const val = parseFloat(input.replace(',', '.').trim());
+      if (isNaN(val) || val < 0) {
+        showToast("❌ Geçersiz birim fiyat!");
+        return;
+      }
+      item.unit_price = Math.round(val * 100) / 100;
+      item.subtotal = Math.round(item.quantity * item.unit_price * 100) / 100;
+      showToast(`✏️ "${item.product_name}" birim fiyatı ${item.unit_price.toFixed(2)} ₺ yapıldı.`);
+      renderPOSCart();
+    }
+
+    function resetPOSItemPrice(index) {
+      const item = posCart[index];
+      if (!item) return;
+      item.unit_price = item.original_unit_price !== undefined ? item.original_unit_price : item.unit_price;
+      item.subtotal = Math.round(item.quantity * item.unit_price * 100) / 100;
+      showToast(`↺ "${item.product_name}" orijinal birim fiyatına (${item.unit_price.toFixed(2)} ₺) döndürüldü.`);
+      renderPOSCart();
+    }
+
+    function editPOSTotalAmount() {
+      if (posCart.length === 0) {
+        showToast("⚠️ Sepetiniz henüz boş!");
+        return;
+      }
+      const calcTotal = Math.round(posCart.reduce((sum, item) => sum + item.subtotal, 0) * 100) / 100;
+      const currentVal = (posCustomTotal !== null ? posCustomTotal : calcTotal).toFixed(2);
+      const input = prompt(
+        `Bu satış fişi için Genel Toplam Tutarı girin (İskonto / Yuvarlama):\n(Hesaplanan Normal Tutar: ${calcTotal.toFixed(2)} ₺)`,
+        currentVal
+      );
+      if (input === null) return;
+      const val = parseFloat(input.replace(',', '.').trim());
+      if (isNaN(val) || val < 0) {
+        showToast("❌ Geçersiz toplam tutar!");
+        return;
+      }
+      posCustomTotal = Math.round(val * 100) / 100;
+      showToast(`✏️ Genel toplam ${posCustomTotal.toFixed(2)} ₺ olarak belirlendi.`);
+      renderPOSCart();
+    }
+
+    function resetPOSTotalAmount() {
+      posCustomTotal = null;
+      renderPOSCart();
+      showToast("↺ Toplam tutar hesaplanan değere döndürüldü.");
     }
 
     function renderPOSCart() {
       const container = document.getElementById('pos-cart-list');
+      const resetBtn = document.getElementById('pos-reset-total-btn');
+      const noteEl = document.getElementById('pos-calc-total-note');
+
       if (posCart.length === 0) {
         container.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:20px;">Sepetiniz boş</div>';
         document.getElementById('pos-total-amount').innerText = '0.00 ₺';
+        posCustomTotal = null;
+        if (resetBtn) resetBtn.style.display = 'none';
+        if (noteEl) noteEl.style.display = 'none';
         return;
       }
 
-      let total = 0;
+      let calcTotal = 0;
       container.innerHTML = posCart.map((item, index) => {
-        total += item.subtotal;
+        calcTotal += item.subtotal;
+        const orig = item.original_unit_price !== undefined ? item.original_unit_price : item.unit_price;
+        const isCustomPrice = Math.abs(item.unit_price - orig) > 0.001;
+
         return `
           <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--border);">
             <div style="flex:1;">
               <div style="font-weight:600; font-size:0.95rem;">${item.product_name}</div>
-              <div style="font-size:0.75rem; color:var(--text-muted);">${item.unit_price.toFixed(2)} ₺ / adet (Kod: ${item.barcode})</div>
+              <div style="font-size:0.75rem; color:var(--text-muted); display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:2px;">
+                <span style="cursor:pointer; color:var(--text); text-decoration:underline dashed var(--accent);" onclick="editPOSItemPrice(${index})" title="Fiyatı bu satış için düzenle">
+                  <b>${item.unit_price.toFixed(2)} ₺</b> / adet ✏️
+                </span>
+                ${isCustomPrice ? `
+                  <span style="text-decoration:line-through; font-size:0.72rem; color:var(--text-muted);">${orig.toFixed(2)} ₺</span>
+                  <span style="background:#0284c7; color:#fff; padding:1px 6px; border-radius:4px; font-size:0.7rem; font-weight:700;">Özel Fiyat</span>
+                  <button type="button" onclick="resetPOSItemPrice(${index})" style="background:none; border:none; color:var(--danger); cursor:pointer; font-size:0.72rem; text-decoration:underline;">Sıfırla</button>
+                ` : ''}
+                <span>(Kod: ${item.barcode || 'Yok'})</span>
+              </div>
             </div>
             <div style="display:flex; align-items:center; gap:8px;">
               <div style="display:flex; align-items:center; background:#0F172A; border:1px solid var(--border); border-radius:8px; overflow:hidden;">
@@ -1963,14 +2043,28 @@
                 <input type="number" value="${item.quantity}" min="1" style="width:40px; text-align:center; padding:4px; border:none; background:none; color:var(--accent); font-weight:bold; outline:none;" onchange="setPOSCartQty(${index}, this.value)">
                 <button style="padding:6px 12px; background:var(--card-hover); border:none; color:var(--text); font-weight:bold; cursor:pointer;" onclick="updatePOSCartQty(${index}, 1)">+</button>
               </div>
-              <div style="font-weight:700; color:var(--accent); width:65px; text-align:right;">${item.subtotal.toFixed(2)} ₺</div>
-              <button style="background:none; border:none; color:var(--danger); cursor:pointer; font-size:1.1rem; padding:4px;" onclick="removeFromPOSCart(${index})">🗑️</button>
+              <div style="font-weight:700; color:var(--accent); width:70px; text-align:right;">${item.subtotal.toFixed(2)} ₺</div>
+              <button style="background:none; border:none; color:var(--danger); cursor:pointer; font-size:1.1rem; padding:4px;" onclick="removeFromPOSCart(${index})" title="Sepetten Çıkar">🗑️</button>
             </div>
           </div>
         `;
       }).join('');
 
-      document.getElementById('pos-total-amount').innerText = total.toFixed(2) + ' ₺';
+      calcTotal = Math.round(calcTotal * 100) / 100;
+      const displayTotal = posCustomTotal !== null ? posCustomTotal : calcTotal;
+
+      if (posCustomTotal !== null) {
+        document.getElementById('pos-total-amount').innerHTML = `${displayTotal.toFixed(2)} ₺ <span style="font-size:0.75rem; color:#F59E0B; vertical-align:middle; font-weight:600;">(Özel Tutar)</span>`;
+        if (resetBtn) resetBtn.style.display = 'inline-block';
+        if (noteEl) {
+          noteEl.style.display = 'block';
+          noteEl.innerText = `Hesaplanan Tutar: ${calcTotal.toFixed(2)} ₺`;
+        }
+      } else {
+        document.getElementById('pos-total-amount').innerText = `${displayTotal.toFixed(2)} ₺`;
+        if (resetBtn) resetBtn.style.display = 'none';
+        if (noteEl) noteEl.style.display = 'none';
+      }
     }
 
     function updatePOSCartQty(index, delta) {
@@ -1979,7 +2073,7 @@
         if (posCart[index].quantity <= 0) {
           posCart.splice(index, 1);
         } else {
-          posCart[index].subtotal = posCart[index].quantity * posCart[index].unit_price;
+          posCart[index].subtotal = Math.round(posCart[index].quantity * posCart[index].unit_price * 100) / 100;
         }
         playBeep();
         renderPOSCart();
@@ -1993,7 +2087,7 @@
           posCart.splice(index, 1);
         } else {
           posCart[index].quantity = q;
-          posCart[index].subtotal = posCart[index].quantity * posCart[index].unit_price;
+          posCart[index].subtotal = Math.round(posCart[index].quantity * posCart[index].unit_price * 100) / 100;
         }
         playBeep();
         renderPOSCart();
@@ -2008,20 +2102,212 @@
     }
 
     async function completePOSSale() {
-      if (posCart.length === 0) return;
+      if (posCart.length === 0) {
+        showToast("⚠️ Sepetiniz boş!");
+        return;
+      }
+      const calcTotal = Math.round(posCart.reduce((sum, item) => sum + item.subtotal, 0) * 100) / 100;
+      const finalTotal = posCustomTotal !== null ? posCustomTotal : calcTotal;
+
       const res = await fetchWithAuth('/api/sales', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: posCart, note: 'Mobil POS Satış' })
+        body: JSON.stringify({
+          items: posCart,
+          note: 'Mobil POS Satış',
+          total_amount: finalTotal
+        })
       });
       const json = await res.json();
       showToast(json.message);
       if (json.ok) {
         posCart = [];
+        posCustomTotal = null;
         renderPOSCart();
         loadProducts();
       }
     }
+
+    // ── CANLI ARAMA & ÖNERİ DROPDOWN MANTIĞI ──
+    function handlePOSSearchInput(val) {
+      clearTimeout(posSearchTimer);
+      const query = (val || '').trim();
+      const dropdown = document.getElementById('pos-suggestions-dropdown');
+      if (!dropdown) return;
+
+      if (query.length < 1) {
+        hidePOSSuggestions();
+        return;
+      }
+
+      posSearchTimer = setTimeout(async () => {
+        let candidates = [];
+        const qLower = query.toLowerCase();
+        const pool = (allProductsCache && allProductsCache.length > 0) ? allProductsCache : (_allProductsCache || []);
+
+        if (pool.length > 0) {
+          candidates = pool.filter(p =>
+            (p.name && p.name.toLowerCase().includes(qLower)) ||
+            (p.barcode && p.barcode.toLowerCase().includes(qLower)) ||
+            (p.category_name && p.category_name.toLowerCase().includes(qLower))
+          );
+        }
+
+        if (candidates.length === 0) {
+          try {
+            const res = await fetchWithAuth('/api/products?search=' + encodeURIComponent(query));
+            if (res.ok) candidates = await res.json();
+          } catch (e) {
+            console.error(e);
+          }
+        }
+
+        renderPOSSuggestions(candidates, query);
+      }, 120);
+    }
+
+    function renderPOSSuggestions(candidates, query) {
+      const dropdown = document.getElementById('pos-suggestions-dropdown');
+      if (!dropdown) return;
+
+      if (!candidates || candidates.length === 0) {
+        dropdown.innerHTML = `<div style="padding:12px 16px; color:#94A3B8; font-size:0.85rem; text-align:center;">"${query}" ile eşleşen ürün bulunamadı</div>`;
+        dropdown.style.display = 'block';
+        posActiveSuggestionIndex = -1;
+        return;
+      }
+
+      const shown = candidates.slice(0, 15);
+      posActiveSuggestionIndex = -1;
+
+      dropdown.innerHTML = shown.map((p, idx) => `
+        <div id="pos-sug-${idx}" class="pos-sug-item" onclick="selectPOSCandidate(${p.id})" style="padding:10px 14px; border-bottom:1px solid #1E293B; cursor:pointer; display:flex; justify-content:space-between; align-items:center; transition:background 0.15s ease;" onmouseover="setPOSActiveSuggestion(${idx})" onmouseout="setPOSActiveSuggestion(-1)">
+          <div>
+            <div style="font-weight:700; font-size:0.92rem; color:#F8FAFC;">${p.name}</div>
+            <div style="font-size:0.75rem; color:#94A3B8; margin-top:2px;">
+              Barkod: <span style="color:#E2E8F0;">${p.barcode || 'Barkodsuz'}</span> | 
+              Stok: <b style="color:${p.stock_quantity > 3 ? '#10B981' : (p.stock_quantity > 0 ? '#F59E0B' : '#EF4444')}">${p.stock_quantity} Adet</b> | 
+              Kategori: ${p.category_name || 'Genel'}
+            </div>
+          </div>
+          <div style="text-align:right; margin-left:12px;">
+            <div style="font-weight:800; color:var(--accent); font-size:1rem;">${Number(p.sale_price).toFixed(2)} ₺</div>
+            <span style="font-size:0.72rem; color:#60A5FA; background:rgba(96,165,250,0.1); padding:2px 6px; border-radius:4px; font-weight:600;">➕ Seç</span>
+          </div>
+        </div>
+      `).join('');
+
+      dropdown.style.display = 'block';
+    }
+
+    function setPOSActiveSuggestion(idx) {
+      const items = document.querySelectorAll('.pos-sug-item');
+      items.forEach((el, i) => {
+        if (i === idx) {
+          el.style.background = 'rgba(59, 130, 246, 0.22)';
+        } else {
+          el.style.background = 'transparent';
+        }
+      });
+      posActiveSuggestionIndex = idx;
+    }
+
+    function selectPOSCandidate(productId) {
+      const pool = (allProductsCache && allProductsCache.length > 0) ? allProductsCache : (_allProductsCache || []);
+      let prod = pool.find(p => p.id === productId);
+      if (prod) {
+        addProductToPOSCart(prod);
+      }
+      const input = document.getElementById('pos-barcode-input');
+      if (input) input.value = '';
+      hidePOSSuggestions();
+    }
+
+    function hidePOSSuggestions() {
+      const dropdown = document.getElementById('pos-suggestions-dropdown');
+      if (dropdown) {
+        dropdown.style.display = 'none';
+        dropdown.innerHTML = '';
+      }
+      posActiveSuggestionIndex = -1;
+    }
+
+    function handlePOSInputKey(e) {
+      const dropdown = document.getElementById('pos-suggestions-dropdown');
+      const isDropdownOpen = dropdown && dropdown.style.display === 'block';
+      const items = dropdown ? dropdown.querySelectorAll('.pos-sug-item') : [];
+
+      if (e.key === 'ArrowDown') {
+        if (!isDropdownOpen || items.length === 0) return;
+        e.preventDefault();
+        posActiveSuggestionIndex = (posActiveSuggestionIndex + 1) % items.length;
+        setPOSActiveSuggestion(posActiveSuggestionIndex);
+        items[posActiveSuggestionIndex].scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'ArrowUp') {
+        if (!isDropdownOpen || items.length === 0) return;
+        e.preventDefault();
+        posActiveSuggestionIndex = (posActiveSuggestionIndex - 1 + items.length) % items.length;
+        setPOSActiveSuggestion(posActiveSuggestionIndex);
+        items[posActiveSuggestionIndex].scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (isDropdownOpen && posActiveSuggestionIndex >= 0 && items[posActiveSuggestionIndex]) {
+          items[posActiveSuggestionIndex].click();
+        } else {
+          handlePOSScan();
+        }
+      } else if (e.key === 'Escape') {
+        hidePOSSuggestions();
+      }
+    }
+
+    async function handlePOSScan() {
+      const input = document.getElementById('pos-barcode-input');
+      const code = (input ? input.value : '').trim();
+      if (!code) return;
+
+      hidePOSSuggestions();
+
+      const pool = (allProductsCache && allProductsCache.length > 0) ? allProductsCache : (_allProductsCache || []);
+
+      // 1. Exact barcode check
+      let exactProd = pool.find(p => p.barcode && p.barcode.trim() === code);
+      if (exactProd) {
+        addProductToPOSCart(exactProd);
+        input.value = '';
+        return;
+      }
+
+      // 2. Fetch barcode endpoint
+      const res = await fetchWithAuth('/api/products/barcode/' + encodeURIComponent(code));
+      if (res.ok) {
+        const data = await res.json();
+        const prod = data.product;
+        addProductToPOSCart(prod);
+        input.value = '';
+      } else {
+        // 3. Fallback to candidate matching
+        const qLower = code.toLowerCase();
+        const candidates = pool.filter(p => p.name && p.name.toLowerCase().includes(qLower));
+        if (candidates.length === 1) {
+          addProductToPOSCart(candidates[0]);
+          input.value = '';
+        } else if (candidates.length > 1) {
+          renderPOSSuggestions(candidates, code);
+          showToast(`ℹ️ "${code}" ile eşleşen ${candidates.length} ürün bulundu, lütfen listeden seçin.`);
+        } else {
+          showToast("❌ " + code + " kodlu veya isimli ürün bulunamadı!");
+        }
+      }
+    }
+
+    document.addEventListener('click', function(event) {
+      const dropdown = document.getElementById('pos-suggestions-dropdown');
+      const input = document.getElementById('pos-barcode-input');
+      if (dropdown && !dropdown.contains(event.target) && event.target !== input) {
+        hidePOSSuggestions();
+      }
+    });
 
     let _allProductsCache = [];
 
@@ -2029,6 +2315,7 @@
       const res = await fetchWithAuth('/api/products?search=' + encodeURIComponent(search));
       const products = await res.json();
       _allProductsCache = products || [];
+      if (!search) allProductsCache = _allProductsCache;
       const container = document.getElementById('product-list-container');
       
       if (!products.length) {
@@ -2288,25 +2575,10 @@
       const pid = parseInt(selectEl.value);
       if (!pid) return;
 
-      const prod = allProductsCache.find(p => p.id === pid);
+      const pool = (allProductsCache && allProductsCache.length > 0) ? allProductsCache : (_allProductsCache || []);
+      const prod = pool.find(p => p.id === pid);
       if (prod) {
-        const existing = posCart.find(i => i.product_id === prod.id);
-        if (existing) {
-          existing.quantity += 1;
-          existing.subtotal = existing.quantity * existing.unit_price;
-        } else {
-          posCart.push({
-            product_id: prod.id,
-            product_name: prod.name,
-            barcode: prod.barcode,
-            unit_price: prod.sale_price,
-            quantity: 1,
-            subtotal: prod.sale_price
-          });
-        }
-        playBeep();
-        renderPOSCart();
-        showToast("✅ " + prod.name + " sepete eklendi");
+        addProductToPOSCart(prod);
       }
       selectEl.value = '';
     }

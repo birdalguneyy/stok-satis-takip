@@ -528,10 +528,24 @@ def record_sale():
     items = data.get("items", [])
     note = data.get("note", "Mobil Satış")
     channel = data.get("channel", "magaza")
+    total_amount = data.get("total_amount")
     if not items:
         return jsonify({"ok": False, "message": "Sepet boş!"}), 400
 
-    ok, msg = cloud_db.add_sale(items, note=note, user_id=user_id, channel=channel)
+    total_override = None
+    if total_amount is not None:
+        try:
+            total_override = float(total_amount)
+        except (ValueError, TypeError):
+            total_override = None
+
+    ok, msg = cloud_db.add_sale(
+        items,
+        note=note,
+        user_id=user_id,
+        channel=channel,
+        total_amount_override=total_override,
+    )
     if ok:
         notify_data_change(user_id)
     return jsonify({"ok": ok, "message": msg})

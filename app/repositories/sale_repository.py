@@ -9,8 +9,15 @@ class SaleRepository:
     def __init__(self, db: Optional[Database] = None) -> None:
         self.db = db or Database()
 
-    def create_sale(self, cart_items: List[CartItem], note: Optional[str] = None, channel: str = "magaza") -> Sale:
-        total_amount = sum(item.subtotal for item in cart_items)
+    def create_sale(
+        self,
+        cart_items: List[CartItem],
+        note: Optional[str] = None,
+        channel: str = "magaza",
+        total_amount_override: Optional[float] = None,
+    ) -> Sale:
+        calc_total = sum(item.subtotal for item in cart_items)
+        total_amount = round(total_amount_override, 2) if total_amount_override is not None else round(calc_total, 2)
         item_count = sum(item.quantity for item in cart_items)
         ch = (channel or "magaza").strip().lower()
 

@@ -1,4 +1,5 @@
 from collections import defaultdict
+from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Set
 
 import customtkinter as ctk
@@ -34,9 +35,14 @@ class HistoryView(ctk.CTkFrame):
         self._all_sales: List[Dict[str, Any]] = []
         self._filtered_sales: List[Dict[str, Any]] = []
         self._selected_ids: Set[int] = set()
+        self._start_date: Optional[str] = None
+        self._end_date: Optional[str] = None
+        self._date_preset: str = "all"
+        self._date_buttons: Dict[str, ctk.CTkButton] = {}
 
         # Build UI
         self._build_header()
+        self._build_date_filter_bar()
         self._build_action_bar()
         self._build_sales_container()
 
@@ -96,6 +102,186 @@ class HistoryView(ctk.CTkFrame):
         )
         self.group_menu.pack(side="right")
 
+    def _build_date_filter_bar(self) -> None:
+        filter_card = ctk.CTkFrame(self, fg_color=("gray90", "gray18"), corner_radius=8)
+        filter_card.pack(fill="x", padx=8, pady=(0, 8))
+
+        # Top row: Presets
+        presets_row = ctk.CTkFrame(filter_card, fg_color="transparent")
+        presets_row.pack(fill="x", padx=8, pady=(8, 4))
+
+        ctk.CTkLabel(
+            presets_row,
+            text="📅 Hızlı Tarih:",
+            font=FONT_SMALL,
+            text_color=("gray30", "gray70"),
+        ).pack(side="left", padx=(0, 6))
+
+        preset_defs = [
+            ("all", "🌐 Tümü"),
+            ("today", "⚡ Bugün"),
+            ("yesterday", "⏮️ Dün"),
+            ("this_week", "📅 Bu Hafta"),
+            ("last_week", "⏪ Geçen Hafta"),
+            ("this_month", "🗓️ Bu Ay"),
+            ("last_month", "⏮️ Geçen Ay"),
+            ("last_30", "📊 Son 30 Gün"),
+        ]
+
+        for p_key, p_label in preset_defs:
+            is_active = (p_key == self._date_preset)
+            btn = ctk.CTkButton(
+                presets_row,
+                text=p_label,
+                font=FONT_SMALL,
+                height=26,
+                width=75 if len(p_label) < 9 else 95,
+                fg_color=ACCENT if is_active else ("gray85", "gray28"),
+                hover_color=ACCENT_HOVER if is_active else ("gray75", "gray35"),
+                text_color="white" if is_active else ("gray10", "gray90"),
+                corner_radius=6,
+                command=lambda k=p_key: self._set_date_preset(k),
+            )
+            btn.pack(side="left", padx=2)
+            self._date_buttons[p_key] = btn
+
+        # Active date range badge
+        self._date_badge = ctk.CTkLabel(
+            presets_row,
+            text="Tüm Zamanlar",
+            font=FONT_SMALL,
+            text_color=ACCENT,
+        )
+        self._date_badge.pack(side="right", padx=(4, 0))
+
+        # Bottom row: Custom date range inputs
+        custom_row = ctk.CTkFrame(filter_card, fg_color="transparent")
+        custom_row.pack(fill="x", padx=8, pady=(0, 6))
+
+        ctk.CTkLabel(
+            custom_row,
+            text="Özel Aralık:",
+            font=FONT_SMALL,
+            text_color=("gray40", "gray60"),
+        ).pack(side="left", padx=(0, 4))
+
+        self._start_entry = ctk.CTkEntry(
+            custom_row,
+            placeholder_text="YYYY-AA-GG",
+            width=100,
+            height=26,
+            font=FONT_SMALL,
+        )
+        self._start_entry.pack(side="left", padx=2)
+
+        ctk.CTkLabel(custom_row, text="-", font=FONT_SMALL).pack(side="left", padx=2)
+
+        self._end_entry = ctk.CTkEntry(
+            custom_row,
+            placeholder_text="YYYY-AA-GG",
+            width=100,
+            height=26,
+            font=FONT_SMALL,
+        )
+        self._end_entry.pack(side="left", padx=2)
+
+        ctk.CTkButton(
+            custom_row,
+            text="Filtrele",
+            font=FONT_SMALL,
+            width=65,
+            height=26,
+            fg_color=ACCENT,
+            hover_color=ACCENT_HOVER,
+            command=self._apply_custom_date,
+        ).pack(side="left", padx=(6, 0))
+
+    def _set_date_preset(self, preset: str) -> None:
+        self._date_preset = preset
+        today = datetime.now().date()
+
+        if preset == "today":
+            self._start_date = today.strftime("%Y-%m-%d")
+            self._end_date = today.strftime("%Y-%m-%d")
+            badge_text = f"Bugün ({today.strftime('%d.%m.%Y')})"
+        elif preset == "yesterday":
+            yest = today - timedelta(days=1)
+            self._start_date = yest.strftime("%Y-%m-%d")
+            self._end_date = yest.strftime("%Y-%m-%d")
+            badge_text = f"Dün ({yest.strftime('%d.%m.%Y')})"
+        elif preset == "this_week":
+            start = today - timedelta(days=today.weekday())
+            end = start + timedelta(days=6)
+            self._start_date = start.strftime("%Y-%m-%d")
+            self._end_date = end.strftime("%Y-%m-%d")
+            badge_text = f"Bu Hafta ({start.strftime('%d.%m')} - {end.strftime('%d.%m.%Y')})"
+        elif preset == "last_week":
+            start = today - timedelta(days=today.weekday() + 7)
+            end = start + timedelta(days=6)
+            self._start_date = start.strftime("%Y-%m-%d")
+            self._end_date = end.strftime("%Y-%m-%d")
+            badge_text = f"Geçen Hafta ({start.strftime('%d.%m')} - {end.strftime('%d.%m.%Y')})"
+        elif preset == "this_month":
+            start = today.replace(day=1)
+            if today.month == 12:
+                next_month = today.replace(year=today.year + 1, month=1, day=1)
+            else:
+                next_month = today.replace(month=today.month + 1, day=1)
+            end = next_month - timedelta(days=1)
+            self._start_date = start.strftime("%Y-%m-%d")
+            self._end_date = end.strftime("%Y-%m-%d")
+            badge_text = f"Bu Ay ({start.strftime('%d.%m')} - {end.strftime('%d.%m.%Y')})"
+        elif preset == "last_month":
+            first_this_month = today.replace(day=1)
+            end = first_this_month - timedelta(days=1)
+            start = end.replace(day=1)
+            self._start_date = start.strftime("%Y-%m-%d")
+            self._end_date = end.strftime("%Y-%m-%d")
+            badge_text = f"Geçen Ay ({start.strftime('%d.%m')} - {end.strftime('%d.%m.%Y')})"
+        elif preset == "last_30":
+            start = today - timedelta(days=29)
+            self._start_date = start.strftime("%Y-%m-%d")
+            self._end_date = today.strftime("%Y-%m-%d")
+            badge_text = f"Son 30 Gün ({start.strftime('%d.%m')} - {today.strftime('%d.%m.%Y')})"
+        else:  # "all"
+            self._start_date = None
+            self._end_date = None
+            badge_text = "Tüm Zamanlar"
+
+        for p, btn in self._date_buttons.items():
+            if p == preset:
+                btn.configure(fg_color=ACCENT, text_color="white")
+            else:
+                btn.configure(fg_color=("gray85", "gray28"), text_color=("gray10", "gray90"))
+
+        if hasattr(self, "_date_badge"):
+            self._date_badge.configure(text=badge_text)
+
+        if hasattr(self, "_start_entry"):
+            self._start_entry.delete(0, "end")
+            if self._start_date:
+                self._start_entry.insert(0, self._start_date)
+        if hasattr(self, "_end_entry"):
+            self._end_entry.delete(0, "end")
+            if self._end_date:
+                self._end_entry.insert(0, self._end_date)
+
+        self.refresh()
+
+    def _apply_custom_date(self) -> None:
+        start_val = self._start_entry.get().strip()
+        end_val = self._end_entry.get().strip()
+        if not start_val or not end_val:
+            self.on_toast("Lütfen başlangıç ve bitiş tarihlerini girin (YYYY-AA-GG)", "warning")
+            return
+        self._start_date = start_val
+        self._end_date = end_val
+        self._date_preset = "custom"
+        for btn in self._date_buttons.values():
+            btn.configure(fg_color=("gray85", "gray28"), text_color=("gray10", "gray90"))
+        self._date_badge.configure(text=f"Özel: {start_val} - {end_val}")
+        self.refresh()
+
     def _build_action_bar(self) -> None:
         bar = ctk.CTkFrame(self, fg_color=("gray85", "gray22"), corner_radius=8, height=44)
         bar.pack(fill="x", padx=8, pady=(0, 10))
@@ -144,7 +330,9 @@ class HistoryView(ctk.CTkFrame):
 
     def refresh(self) -> None:
         try:
-            self._all_sales = self.sale_service.get_sales_history()
+            self._all_sales = self.sale_service.get_sales_history(
+                start_date=self._start_date, end_date=self._end_date
+            )
         except Exception as e:
             self.on_toast(f"Satış geçmişi yüklenemedi: {e}", "error")
             self._all_sales = []

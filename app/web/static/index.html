@@ -91,6 +91,85 @@
     .nav-item.active { color: var(--accent); font-weight: 600; }
     .nav-item span.icon { font-size: 1.3rem; }
 
+    /* Reports Sub-Navigation Tabs */
+    .reports-subnav-container {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding-bottom: 6px;
+      margin-bottom: 14px;
+      scrollbar-width: none;
+    }
+    .reports-subnav-container::-webkit-scrollbar { display: none; }
+    .reports-subnav-btn {
+      flex: 1;
+      min-width: 125px;
+      padding: 9px 12px;
+      background: #0F172A;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      color: var(--text-muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      transition: all 0.2s ease;
+      white-space: nowrap;
+    }
+    .reports-subnav-btn:hover {
+      background: rgba(255,255,255,0.05);
+      color: var(--text);
+    }
+    .reports-subnav-btn.active {
+      background: linear-gradient(135deg, rgba(16,185,129,0.22), rgba(56,189,248,0.18));
+      border-color: var(--accent);
+      color: var(--text);
+      box-shadow: 0 2px 10px rgba(16,185,129,0.2);
+    }
+
+    /* Easy Date Selector Pills */
+    .date-filter-box {
+      background: #0F172A;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px 14px;
+      margin-bottom: 16px;
+    }
+    .date-pills-row {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+      scrollbar-width: none;
+    }
+    .date-pills-row::-webkit-scrollbar { display: none; }
+    .date-pill {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 6px 14px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.2s ease;
+    }
+    .date-pill:hover {
+      background: rgba(255,255,255,0.1);
+      color: var(--text);
+    }
+    .date-pill.active {
+      background: var(--accent);
+      color: #000;
+      font-weight: 800;
+      border-color: var(--accent);
+      box-shadow: 0 0 12px rgba(16,185,129,0.35);
+    }
+
     /* Card styling */
     .card {
       background: var(--card);
@@ -678,264 +757,352 @@
       </div>
     </div>
 
-    <!-- TAB 3: PROFESYONEL SATIŞ RAPORLARI, AI ÖNERİLER VE ÇALIŞMA SAATLERİ -->
+    <!-- TAB 3: PROFESYONEL SATIŞ RAPORLARI, DÖNEMSEL CİRO VE AI ALT MENÜLERİ -->
     <div id="tab-reports" class="tab-content">
       <div class="card">
-        <h2>📊 Profesyonel İstatistikler & Raporlar</h2>
-        
-        <!-- Date Filter Buttons & Inputs -->
-        <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:14px;">
-          <div style="font-weight:700; font-size:0.85rem; color:var(--text); margin-bottom:8px;">📅 Tarih / Ay Filtresi</div>
-          <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;">
-            <button class="btn btn-secondary" style="padding:6px 12px; font-size:0.75rem; flex:1;" onclick="setDateFilter('today')">Bugün</button>
-            <button class="btn btn-secondary" style="padding:6px 12px; font-size:0.75rem; flex:1;" onclick="setDateFilter('yesterday')">Dün</button>
-            <button class="btn btn-secondary" style="padding:6px 12px; font-size:0.75rem; flex:1;" onclick="setDateFilter('week')">Bu Hafta</button>
-            <button class="btn btn-secondary" style="padding:6px 12px; font-size:0.75rem; flex:1;" onclick="setDateFilter('month')">Bu Ay</button>
-            <button class="btn btn-secondary" style="padding:6px 12px; font-size:0.75rem; flex:1;" onclick="setDateFilter('all')">Tümü</button>
-          </div>
-          <div style="display:flex; gap:8px; align-items:center;">
-            <input type="date" id="filter-start-date" style="flex:1; padding:6px; font-size:0.8rem;" onchange="applyCustomDateFilter()">
-            <span style="font-size:0.8rem; color:var(--text-muted);">-</span>
-            <input type="date" id="filter-end-date" style="flex:1; padding:6px; font-size:0.8rem;" onchange="applyCustomDateFilter()">
-          </div>
+        <h2>📊 Satış Raporları & Analiz Merkezi</h2>
+
+        <!-- REPORTS SUB-NAVIGATION BAR (4 ORGANIZED SUB-MENUS) -->
+        <div class="reports-subnav-container">
+          <button class="reports-subnav-btn active" id="btn-subtab-sales-list" onclick="switchReportsSubTab('sales-list', this)">
+            <span>📋</span>
+            <span>Satışlar & Filtreleme</span>
+          </button>
+          <button class="reports-subnav-btn" id="btn-subtab-revenue-periodic" onclick="switchReportsSubTab('revenue-periodic', this)">
+            <span>💰</span>
+            <span>Ciro & Dönemsel Finans</span>
+          </button>
+          <button class="reports-subnav-btn" id="btn-subtab-forecasts" onclick="switchReportsSubTab('forecasts', this)">
+            <span>⚡</span>
+            <span>Gelecek Tahminleri</span>
+          </button>
+          <button class="reports-subnav-btn" id="btn-subtab-ai-insights" onclick="switchReportsSubTab('ai-insights', this)">
+            <span>🤖</span>
+            <span>AI İşletme Asistanı</span>
+          </button>
         </div>
 
-        <!-- Stat Cards Row -->
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px;">
-          <div style="background:#0F172A; border:1px solid var(--accent); border-radius:12px; padding:12px;">
-            <div style="font-size:0.75rem; color:var(--text-muted);">Toplam Ciro</div>
-            <div id="stat-total-revenue" style="font-size:1.3rem; font-weight:800; color:var(--accent);">0.00 ₺</div>
-          </div>
-          <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px;">
-            <div style="font-size:0.75rem; color:var(--text-muted);">Toplam Giderler</div>
-            <div id="stat-total-expenses" style="font-size:1.3rem; font-weight:800; color:var(--danger);">0.00 ₺</div>
-          </div>
-          <div style="background:#0F172A; border:1px solid #38BDF8; border-radius:12px; padding:12px;">
-            <div style="font-size:0.75rem; color:var(--text-muted);">Net Kar</div>
-            <div id="stat-net-profit" style="font-size:1.3rem; font-weight:800; color:#38BDF8;">0.00 ₺</div>
-          </div>
-          <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px;">
-            <div style="font-size:0.75rem; color:var(--text-muted);">Satılan Ürün</div>
-            <div id="stat-total-items" style="font-size:1.3rem; font-weight:800; color:var(--text);">0 adet</div>
-          </div>
-        </div>
-
-        <!-- CHANNEL BREAKDOWN (STORE VS ONLINE) -->
-        <div style="background:#0F172A; border:1px solid var(--border); border-radius:14px; padding:14px; margin-bottom:16px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-            <h3 style="margin:0; font-size:0.95rem; color:#38BDF8; display:flex; align-items:center; gap:6px;">
-              <span>🌐 Satış Kanalları Kıyaslaması (Mağaza vs İnternet)</span>
-            </h3>
-            <button class="btn btn-secondary" style="width:auto; padding:4px 10px; font-size:0.75rem;" onclick="openOnlineSaleModal()">➕ İnternet Satışı Gir</button>
-          </div>
-          
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px;">
-            <div style="background:var(--card); border:1px solid rgba(16,185,129,0.3); border-radius:10px; padding:10px;">
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                <span style="font-size:0.8rem; font-weight:700; color:var(--accent);">🏬 Fiziki Mağaza</span>
-                <span id="ch-store-share" style="font-size:0.75rem; color:var(--accent); font-weight:700;">%0</span>
-              </div>
-              <div id="ch-store-revenue" style="font-size:1.15rem; font-weight:800; color:var(--text); margin-bottom:2px;">0.00 ₺</div>
-              <div id="ch-store-details" style="font-size:0.75rem; color:var(--text-muted);">0 adet • 0 işlem</div>
-            </div>
-
-            <div style="background:var(--card); border:1px solid rgba(56,189,248,0.3); border-radius:10px; padding:10px;">
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                <span style="font-size:0.8rem; font-weight:700; color:#38BDF8;">🌐 İnternet / Pazaryeri</span>
-                <span id="ch-net-share" style="font-size:0.75rem; color:#38BDF8; font-weight:700;">%0</span>
-              </div>
-              <div id="ch-net-revenue" style="font-size:1.15rem; font-weight:800; color:var(--text); margin-bottom:2px;">0.00 ₺</div>
-              <div id="ch-net-details" style="font-size:0.75rem; color:var(--text-muted);">0 adet • 0 işlem</div>
-            </div>
-          </div>
-
-          <!-- Channel Share Progress Bar -->
-          <div style="height:8px; background:rgba(255,255,255,0.06); border-radius:4px; overflow:hidden; display:flex;">
-            <div id="ch-bar-store" style="width:50%; background:var(--accent); transition:width 0.4s ease;"></div>
-            <div id="ch-bar-net" style="width:50%; background:#38BDF8; transition:width 0.4s ease;"></div>
-          </div>
-        </div>
-
-        <!-- ON-DEVICE HARDWARE-ACCELERATED FORECASTING ENGINE -->
-        <div style="background:linear-gradient(145deg, #1E293B, #0F172A); border:1px solid #10B981; border-radius:14px; padding:14px; margin-bottom:16px; box-shadow:0 8px 24px rgba(0,0,0,0.35);">
-          <!-- HARDWARE BADGE -->
-          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:10px; margin-bottom:12px;">
-            <div style="display:flex; align-items:center; gap:8px;">
-              <span style="font-size:1.4rem;">⚡</span>
-              <div>
-                <div style="font-weight:800; font-size:0.9rem; color:var(--accent);">Cihaz İşlemci Gücüyle Tahmin Algoritması</div>
-                <div id="forecast-hw-badge" style="font-size:0.75rem; color:var(--text-muted);">
-                  İstemci Donanımı: <span id="hw-core-count" style="color:var(--accent); font-weight:700;">Çok Çekirdekli</span> • <span id="hw-calc-time" style="color:#38BDF8;">Hesaplanıyor...</span>
-                </div>
-              </div>
-            </div>
-            <button class="btn" style="width:auto; padding:6px 12px; font-size:0.75rem; background:rgba(16,185,129,0.2); color:var(--accent); border:1px solid var(--accent);" onclick="loadForecastData()">
-              🔄 Yeniden Simüle Et
-            </button>
-          </div>
-
-          <!-- SECTION A: HANGİ GÜNLER YOĞUN OLACAK? -->
-          <div style="margin-bottom:16px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-              <h4 style="margin:0; font-size:0.9rem; color:var(--text); display:flex; align-items:center; gap:6px;">
-                <span>📅 Hangi Günler Yoğun Olacak? (Trafik & Ciro Yoğunluğu)</span>
-              </h4>
-            </div>
-
-            <!-- Peak Day Highlight Banner -->
-            <div id="peak-day-banner" style="background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.4); border-radius:10px; padding:10px 12px; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between;">
-              <div style="display:flex; align-items:center; gap:8px;">
-                <span style="font-size:1.3rem;">🔥</span>
-                <div>
-                  <div style="font-size:0.85rem; font-weight:800; color:#F87171;">Haftanın En Yoğun Günü: <span id="forecast-peak-day" style="color:#fff;">Cumartesi</span></div>
-                  <div id="forecast-weekend-lift" style="font-size:0.75rem; color:var(--text-muted);">Hafta sonu ciro artışı: +%0 bekleniyor</div>
-                </div>
-              </div>
-              <div style="text-align:right;">
-                <span id="forecast-quiet-day-badge" style="font-size:0.75rem; background:rgba(56,189,248,0.15); color:#38BDF8; padding:3px 8px; border-radius:12px; border:1px solid rgba(56,189,248,0.3);">En Sakin: Çarşamba</span>
-              </div>
-            </div>
-
-            <!-- 7-Day Intensity Bar Graph -->
-            <div id="weekly-intensity-bars" style="display:grid; grid-template-columns:repeat(7, 1fr); gap:6px; margin-bottom:14px; text-align:center;">
-              <!-- Days render dynamically here -->
-            </div>
-
-            <!-- Upcoming 7 Days Projection -->
-            <div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); margin-bottom:6px;">Önümüzdeki 7 Günlük Simülasyon Tahmini</div>
-            <div id="upcoming-days-list" style="display:flex; flex-direction:column; gap:6px; max-height:220px; overflow-y:auto; padding-right:4px;">
-              <!-- Upcoming day cards render here -->
-            </div>
-          </div>
-
-          <!-- SECTION B: HANGİ ÜRÜNLER ÇOK SATACAK? (TALEP HIZI & KRİTİK TEDARİK) -->
-          <div>
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-              <h4 style="margin:0; font-size:0.9rem; color:var(--text); display:flex; align-items:center; gap:6px;">
-                <span>📦 Hangi Ürünler Çok Satacak? (Talep Hızı & Tedarik Alarmları)</span>
-              </h4>
-            </div>
-
-            <!-- Stockout Alerts Box (if any) -->
-            <div id="stockout-alerts-box" style="display:none; margin-bottom:12px;">
-              <div style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.4); border-radius:10px; padding:10px; margin-bottom:8px;">
-                <div style="font-weight:700; font-size:0.85rem; color:var(--warning); display:flex; align-items:center; gap:6px;">
-                  <span>⚠️ Acil Tedarik Gereken Ürünler (7 Gün İçinde Bitecekler)</span>
-                </div>
-                <div id="stockout-alerts-list" style="margin-top:6px; display:flex; flex-direction:column; gap:6px;">
-                  <!-- Stockout alert items -->
-                </div>
-              </div>
-            </div>
-
-            <!-- Top Predicted Products List -->
-            <div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); margin-bottom:6px;">En Çok Satması Beklenen Lokomotif Ürünler (Gelecek 7 Gün)</div>
-            <div id="top-demand-products-list" style="display:flex; flex-direction:column; gap:6px;">
-              <!-- Products render here -->
-            </div>
-          </div>
-        </div>
-
-        <!-- AI Business Growth Recommendation Section -->
-        <div style="background:rgba(16,185,129,0.08); border:1px solid var(--accent); border-radius:12px; padding:14px; margin-bottom:16px;">
+        <!-- UNIVERSAL EASY DATE SELECTOR (KOLAY TARİH SEÇİCİ) -->
+        <div class="date-filter-box">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-            <h3 style="margin:0; font-size:0.95rem; color:var(--accent); display:flex; align-items:center; gap:6px;">
-              <span>🤖 Yapay Zeka İşletme Geliştirme Önerileri</span>
-            </h3>
-            <button class="btn" style="width:auto; padding:6px 12px; font-size:0.8rem;" onclick="fetchAIBusinessRecommendations()">💡 Öneri Al</button>
+            <div style="font-weight:700; font-size:0.82rem; color:var(--text); display:flex; align-items:center; gap:6px;">
+              <span>📅 Hızlı Tarih Seçici:</span>
+              <span id="active-date-range-badge" style="font-size:0.75rem; background:rgba(16,185,129,0.15); color:var(--accent); padding:2px 8px; border-radius:12px; border:1px solid rgba(16,185,129,0.3);">🌐 Tüm Zamanlar</span>
+            </div>
+            <button class="btn btn-secondary" style="width:auto; padding:3px 8px; font-size:0.72rem;" onclick="toggleCustomDateDrawer()">✏️ Özel Aralık</button>
           </div>
-          <div id="ai-recommendation-box" style="font-size:0.85rem; color:var(--text); line-height:1.5; white-space:pre-line;">
-            Yapay zekadan stok takibi, kampanya ve ciro artırma önerileri almak için <b>"💡 Öneri Al"</b> butonuna basınız.
+
+          <!-- Quick Date Pills Row -->
+          <div class="date-pills-row">
+            <button class="date-pill" onclick="setDatePreset('today', this)">⚡ Bugün</button>
+            <button class="date-pill" onclick="setDatePreset('yesterday', this)">⏮️ Dün</button>
+            <button class="date-pill" onclick="setDatePreset('this_week', this)">📅 Bu Hafta</button>
+            <button class="date-pill" onclick="setDatePreset('last_week', this)">⏪ Geçen Hafta</button>
+            <button class="date-pill" onclick="setDatePreset('this_month', this)">🗓️ Bu Ay</button>
+            <button class="date-pill" onclick="setDatePreset('last_month', this)">⏮️ Geçen Ay</button>
+            <button class="date-pill" onclick="setDatePreset('last_30_days', this)">📊 Son 30 Gün</button>
+            <button class="date-pill active" onclick="setDatePreset('all', this)">🌐 Tümü</button>
+          </div>
+
+          <!-- Collapsible Custom Date Drawer -->
+          <div id="custom-date-drawer" style="display:none; margin-top:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.08); gap:8px; align-items:center; flex-wrap:wrap;">
+            <div style="flex:1; min-width:140px;">
+              <label style="font-size:0.72rem; color:var(--text-muted); display:block; margin-bottom:3px;">Başlangıç Tarihi</label>
+              <input type="date" id="filter-start-date" style="padding:6px 10px; font-size:0.8rem;">
+            </div>
+            <div style="flex:1; min-width:140px;">
+              <label style="font-size:0.72rem; color:var(--text-muted); display:block; margin-bottom:3px;">Bitiş Tarihi</label>
+              <input type="date" id="filter-end-date" style="padding:6px 10px; font-size:0.8rem;">
+            </div>
+            <div style="display:flex; gap:6px; margin-top:16px;">
+              <button class="btn" style="width:auto; padding:6px 14px; font-size:0.78rem;" onclick="applyCustomDateFilter()">Uygula</button>
+              <button class="btn btn-secondary" style="width:auto; padding:6px 12px; font-size:0.78rem;" onclick="setDatePreset('all', null)">Sıfırla</button>
+            </div>
           </div>
         </div>
 
-        <!-- Expenses & Bills Tracker Card -->
-        <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:16px;">
-          <h3 style="margin-top:0; margin-bottom:8px; font-size:0.95rem; color:var(--text);">💸 Fatura & İşletme Giderleri Ekle (Elektrik, Su, İnternet, Kira)</h3>
-          <form onsubmit="handleAddExpenseSubmit(event)" style="display:flex; flex-direction:column; gap:8px;">
-            <div style="display:flex; gap:8px;">
-              <input type="text" id="exp-title" placeholder="Gider Adı (Örn: Elektrik Faturası)" required style="flex:2; padding:8px; font-size:0.85rem;">
-              <input type="number" step="0.5" id="exp-amount" placeholder="Tutar (₺)" required style="flex:1; padding:8px; font-size:0.85rem;">
-            </div>
-            <div style="display:flex; gap:8px;">
-              <select id="exp-category" style="flex:1; padding:8px; background:var(--card); border:1px solid var(--border); color:var(--text); border-radius:8px; font-size:0.85rem;">
-                <option value="Fatura">⚡ Fatura (Elektrik/Su/İnternet)</option>
-                <option value="Kira">🏢 Dükkan Kirası</option>
-                <option value="Maaş">👥 Personel Maaşı</option>
-                <option value="Diğer">📦 Diğer Giderler</option>
-              </select>
-              <input type="date" id="exp-date" style="flex:1; padding:8px; font-size:0.85rem;">
-            </div>
-            <button type="submit" class="btn btn-secondary" style="padding:8px; font-size:0.8rem;">➕ Gider Kaydet</button>
-          </form>
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <!-- SUB-TAB 1: SATIŞLAR VE FİLTRELEME -->
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <div id="subtab-sales-list" class="reports-subtab-content">
+          <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
+              <h3 style="font-size:1rem; margin:0; display:flex; align-items:center; gap:8px;">
+                <span>📋 Satış Hareketleri</span>
+                <span id="sales-total-badge" style="font-size:0.75rem; background:rgba(59,130,246,0.15); color:#60A5FA; padding:2px 8px; border-radius:12px; border:1px solid rgba(59,130,246,0.3);">0 Satış</span>
+              </h3>
 
-          <div id="expense-list-container" style="margin-top:10px;">
-            <!-- Expense list renders here -->
-          </div>
-        </div>
+              <!-- TOPLU SEÇİM & SİLME BUTONLARI -->
+              <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:0.8rem; font-weight:700; color:var(--text); background:rgba(255,255,255,0.05); padding:6px 10px; border-radius:8px; border:1px solid var(--border);">
+                  <input type="checkbox" id="sales-select-all-cb" onchange="toggleSelectAllSales(this.checked)" style="width:16px; height:16px; cursor:pointer;">
+                  <span>Tümünü Seç</span>
+                </label>
 
-        <!-- Store Working Hours Form Card -->
-        <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:16px;">
-          <h3 style="margin-top:0; margin-bottom:8px; font-size:0.95rem; color:var(--text);">⏰ İşletme Çalışma Saatleri</h3>
-          <form onsubmit="saveStoreHours(event)" style="display:flex; flex-direction:column; gap:8px;">
-            <div style="display:flex; gap:8px;">
-              <div style="flex:1;">
-                <label style="font-size:0.75rem; color:var(--text-muted);">Hafta İçi</label>
-                <input type="text" id="hours-weekday" placeholder="08:00 - 22:00" style="padding:8px; font-size:0.85rem;">
+                <span id="selected-sales-badge" style="font-size:0.75rem; color:var(--text-muted); font-weight:600;">0 seçildi</span>
+
+                <button type="button" class="btn btn-danger" id="bulk-delete-sales-btn" onclick="bulkDeleteSelectedSales()" disabled style="width:auto; padding:6px 12px; font-size:0.8rem; background:rgba(239,68,68,0.2); color:var(--danger); border:1px solid var(--danger); border-radius:8px; cursor:not-allowed; opacity:0.5; transition:all 0.2s;">
+                  🗑️ Seçilenleri Sil (0)
+                </button>
               </div>
-              <div style="flex:1;">
-                <label style="font-size:0.75rem; color:var(--text-muted);">Hafta Sonu</label>
-                <input type="text" id="hours-weekend" placeholder="09:00 - 23:00" style="padding:8px; font-size:0.85rem;">
+            </div>
+
+            <!-- GRUPLAMA VE ARAMA KONTROLLERİ -->
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <div style="flex:1; min-width:180px;">
+                <label style="font-size:0.72rem; color:var(--text-muted); font-weight:700; display:block; margin-bottom:4px;">📊 Gruplama Türü</label>
+                <select id="sales-group-by" onchange="renderSalesHistoryView()" style="width:100%; padding:8px 10px; background:var(--card); border:1px solid var(--border); color:var(--text); border-radius:8px; font-size:0.85rem; font-weight:600; cursor:pointer;">
+                  <option value="none">📋 Düz Liste (Tarih Sıralı)</option>
+                  <option value="customer" selected>👤 Müşteriye Göre Grupla</option>
+                  <option value="date">📅 Tarihe / Güne Göre Grupla</option>
+                  <option value="channel">🌐/🏬 Kanala Göre Grupla</option>
+                </select>
+              </div>
+
+              <div style="flex:1.2; min-width:200px;">
+                <label style="font-size:0.72rem; color:var(--text-muted); font-weight:700; display:block; margin-bottom:4px;">🔍 Müşteri / Not Filtresi</label>
+                <input type="text" id="sales-filter-input" placeholder="Müşteri adı veya not yazın..." oninput="handleSalesFilterInput(this.value)" style="width:100%; padding:8px 12px; font-size:0.85rem; background:var(--card); border:1px solid var(--border); border-radius:8px; color:var(--text);">
               </div>
             </div>
-            <button type="submit" class="btn btn-secondary" style="padding:8px; font-size:0.8rem;">💾 Çalışma Saatlerini Kaydet</button>
-          </form>
+          </div>
+
+          <div id="sales-history-container">
+            <!-- Sales history renders here -->
+          </div>
         </div>
 
-        <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:12px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
-            <h3 style="font-size:1rem; margin:0; display:flex; align-items:center; gap:8px;">
-              <span>📅 Satış Hareketleri</span>
-              <span id="sales-total-badge" style="font-size:0.75rem; background:rgba(59,130,246,0.15); color:#60A5FA; padding:2px 8px; border-radius:12px; border:1px solid rgba(59,130,246,0.3);">0 Satış</span>
-            </h3>
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <!-- SUB-TAB 2: CİRO VE DÖNEMSEL FİNANS (HER AYIN VE HAFTANIN CİROSU) -->
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <div id="subtab-revenue-periodic" class="reports-subtab-content" style="display:none;">
+          <!-- Stat Cards Row -->
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px;">
+            <div style="background:#0F172A; border:1px solid var(--accent); border-radius:12px; padding:12px;">
+              <div style="font-size:0.75rem; color:var(--text-muted);">Toplam Ciro</div>
+              <div id="stat-total-revenue" style="font-size:1.3rem; font-weight:800; color:var(--accent);">0.00 ₺</div>
+            </div>
+            <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px;">
+              <div style="font-size:0.75rem; color:var(--text-muted);">Toplam Giderler</div>
+              <div id="stat-total-expenses" style="font-size:1.3rem; font-weight:800; color:var(--danger);">0.00 ₺</div>
+            </div>
+            <div style="background:#0F172A; border:1px solid #38BDF8; border-radius:12px; padding:12px;">
+              <div style="font-size:0.75rem; color:var(--text-muted);">Net Kar</div>
+              <div id="stat-net-profit" style="font-size:1.3rem; font-weight:800; color:#38BDF8;">0.00 ₺</div>
+            </div>
+            <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px;">
+              <div style="font-size:0.75rem; color:var(--text-muted);">Satılan Ürün</div>
+              <div id="stat-total-items" style="font-size:1.3rem; font-weight:800; color:var(--text);">0 adet</div>
+            </div>
+          </div>
 
-            <!-- TOPLU SEÇİM & SİLME BUTONLARI -->
-            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-              <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:0.8rem; font-weight:700; color:var(--text); background:rgba(255,255,255,0.05); padding:6px 10px; border-radius:8px; border:1px solid var(--border);">
-                <input type="checkbox" id="sales-select-all-cb" onchange="toggleSelectAllSales(this.checked)" style="width:16px; height:16px; cursor:pointer;">
-                <span>Tümünü Seç</span>
-              </label>
+          <!-- HER AYIN TOPLAM CİROSU BÖLÜMÜ -->
+          <div style="background:#0F172A; border:1px solid rgba(16,185,129,0.3); border-radius:14px; padding:14px; margin-bottom:16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+              <h3 style="margin:0; font-size:0.95rem; color:var(--accent); display:flex; align-items:center; gap:6px;">
+                <span>📅 Her Ayın Toplam Cirosu (Aylık Rapor)</span>
+              </h3>
+              <span style="font-size:0.72rem; color:var(--text-muted);">Ay Bazında Toplam Gelir</span>
+            </div>
+            <div id="monthly-revenue-list">
+              <div style="color:var(--text-muted); font-size:0.8rem; text-align:center; padding:12px;">Yükleniyor...</div>
+            </div>
+          </div>
 
-              <span id="selected-sales-badge" style="font-size:0.75rem; color:var(--text-muted); font-weight:600;">0 seçildi</span>
+          <!-- HER HAFTANIN TOPLAM CİROSU BÖLÜMÜ -->
+          <div style="background:#0F172A; border:1px solid rgba(56,189,248,0.3); border-radius:14px; padding:14px; margin-bottom:16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+              <h3 style="margin:0; font-size:0.95rem; color:#38BDF8; display:flex; align-items:center; gap:6px;">
+                <span>📊 Her Haftanın Toplam Cirosu (Haftalık Rapor)</span>
+              </h3>
+              <span style="font-size:0.72rem; color:var(--text-muted);">Hafta Bazında Toplam Gelir</span>
+            </div>
+            <div id="weekly-revenue-list">
+              <div style="color:var(--text-muted); font-size:0.8rem; text-align:center; padding:12px;">Yükleniyor...</div>
+            </div>
+          </div>
 
-              <button type="button" class="btn btn-danger" id="bulk-delete-sales-btn" onclick="bulkDeleteSelectedSales()" disabled style="width:auto; padding:6px 12px; font-size:0.8rem; background:rgba(239,68,68,0.2); color:var(--danger); border:1px solid var(--danger); border-radius:8px; cursor:not-allowed; opacity:0.5; transition:all 0.2s;">
-                🗑️ Seçilenleri Sil (0)
+          <!-- CHANNEL BREAKDOWN (STORE VS ONLINE) -->
+          <div style="background:#0F172A; border:1px solid var(--border); border-radius:14px; padding:14px; margin-bottom:16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+              <h3 style="margin:0; font-size:0.95rem; color:#38BDF8; display:flex; align-items:center; gap:6px;">
+                <span>🌐 Satış Kanalları Kıyaslaması (Mağaza vs İnternet)</span>
+              </h3>
+              <button class="btn btn-secondary" style="width:auto; padding:4px 10px; font-size:0.75rem;" onclick="openOnlineSaleModal()">➕ İnternet Satışı Gir</button>
+            </div>
+            
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px;">
+              <div style="background:var(--card); border:1px solid rgba(16,185,129,0.3); border-radius:10px; padding:10px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                  <span style="font-size:0.8rem; font-weight:700; color:var(--accent);">🏬 Fiziki Mağaza</span>
+                  <span id="ch-store-share" style="font-size:0.75rem; color:var(--accent); font-weight:700;">%0</span>
+                </div>
+                <div id="ch-store-revenue" style="font-size:1.15rem; font-weight:800; color:var(--text); margin-bottom:2px;">0.00 ₺</div>
+                <div id="ch-store-details" style="font-size:0.75rem; color:var(--text-muted);">0 adet • 0 işlem</div>
+              </div>
+
+              <div style="background:var(--card); border:1px solid rgba(56,189,248,0.3); border-radius:10px; padding:10px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                  <span style="font-size:0.8rem; font-weight:700; color:#38BDF8;">🌐 İnternet / Pazaryeri</span>
+                  <span id="ch-net-share" style="font-size:0.75rem; color:#38BDF8; font-weight:700;">%0</span>
+                </div>
+                <div id="ch-net-revenue" style="font-size:1.15rem; font-weight:800; color:var(--text); margin-bottom:2px;">0.00 ₺</div>
+                <div id="ch-net-details" style="font-size:0.75rem; color:var(--text-muted);">0 adet • 0 işlem</div>
+              </div>
+            </div>
+
+            <!-- Channel Share Progress Bar -->
+            <div style="height:8px; background:rgba(255,255,255,0.06); border-radius:4px; overflow:hidden; display:flex;">
+              <div id="ch-bar-store" style="width:50%; background:var(--accent); transition:width 0.4s ease;"></div>
+              <div id="ch-bar-net" style="width:50%; background:#38BDF8; transition:width 0.4s ease;"></div>
+            </div>
+          </div>
+
+          <!-- Expenses & Bills Tracker Card -->
+          <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:16px;">
+            <h3 style="margin-top:0; margin-bottom:8px; font-size:0.95rem; color:var(--text);">💸 Fatura & İşletme Giderleri Ekle (Elektrik, Su, İnternet, Kira)</h3>
+            <form onsubmit="handleAddExpenseSubmit(event)" style="display:flex; flex-direction:column; gap:8px;">
+              <div style="display:flex; gap:8px;">
+                <input type="text" id="exp-title" placeholder="Gider Adı (Örn: Elektrik Faturası)" required style="flex:2; padding:8px; font-size:0.85rem;">
+                <input type="number" step="0.5" id="exp-amount" placeholder="Tutar (₺)" required style="flex:1; padding:8px; font-size:0.85rem;">
+              </div>
+              <div style="display:flex; gap:8px;">
+                <select id="exp-category" style="flex:1; padding:8px; background:var(--card); border:1px solid var(--border); color:var(--text); border-radius:8px; font-size:0.85rem;">
+                  <option value="Fatura">⚡ Fatura (Elektrik/Su/İnternet)</option>
+                  <option value="Kira">🏢 Dükkan Kirası</option>
+                  <option value="Maaş">👥 Personel Maaşı</option>
+                  <option value="Diğer">📦 Diğer Giderler</option>
+                </select>
+                <input type="date" id="exp-date" style="flex:1; padding:8px; font-size:0.85rem;">
+              </div>
+              <button type="submit" class="btn btn-secondary" style="padding:8px; font-size:0.8rem;">➕ Gider Kaydet</button>
+            </form>
+
+            <div id="expense-list-container" style="margin-top:10px;">
+              <!-- Expense list renders here -->
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <!-- SUB-TAB 3: GELECEK TAHMİNLERİ (ON-DEVICE CPU ENGINE) -->
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <div id="subtab-forecasts" class="reports-subtab-content" style="display:none;">
+          <div style="background:linear-gradient(145deg, #1E293B, #0F172A); border:1px solid #10B981; border-radius:14px; padding:14px; margin-bottom:16px; box-shadow:0 8px 24px rgba(0,0,0,0.35);">
+            <!-- HARDWARE BADGE -->
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:10px; margin-bottom:12px;">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:1.4rem;">⚡</span>
+                <div>
+                  <div style="font-weight:800; font-size:0.9rem; color:var(--accent);">Cihaz İşlemci Gücüyle Tahmin Algoritması</div>
+                  <div id="forecast-hw-badge" style="font-size:0.75rem; color:var(--text-muted);">
+                    İstemci Donanımı: <span id="hw-core-count" style="color:var(--accent); font-weight:700;">Çok Çekirdekli</span> • <span id="hw-calc-time" style="color:#38BDF8;">Hesaplanıyor...</span>
+                  </div>
+                </div>
+              </div>
+              <button class="btn" style="width:auto; padding:6px 12px; font-size:0.75rem; background:rgba(16,185,129,0.2); color:var(--accent); border:1px solid var(--accent);" onclick="loadForecastData()">
+                🔄 Yeniden Simüle Et
               </button>
             </div>
-          </div>
 
-          <!-- GRUPLAMA VE ARAMA KONTROLLERİ -->
-          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-            <div style="flex:1; min-width:180px;">
-              <label style="font-size:0.72rem; color:var(--text-muted); font-weight:700; display:block; margin-bottom:4px;">📊 Gruplama Türü</label>
-              <select id="sales-group-by" onchange="renderSalesHistoryView()" style="width:100%; padding:8px 10px; background:var(--card); border:1px solid var(--border); color:var(--text); border-radius:8px; font-size:0.85rem; font-weight:600; cursor:pointer;">
-                <option value="none">📋 Düz Liste (Tarih Sıralı)</option>
-                <option value="customer" selected>👤 Müşteriye Göre Grupla</option>
-                <option value="date">📅 Tarihe / Güne Göre Grupla</option>
-                <option value="channel">🌐/🏬 Kanala Göre Grupla</option>
-              </select>
+            <!-- SECTION A: HANGİ GÜNLER YOĞUN OLACAK? -->
+            <div style="margin-bottom:16px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <h4 style="margin:0; font-size:0.9rem; color:var(--text); display:flex; align-items:center; gap:6px;">
+                  <span>📅 Hangi Günler Yoğun Olacak? (Trafik & Ciro Yoğunluğu)</span>
+                </h4>
+              </div>
+
+              <!-- Peak Day Highlight Banner -->
+              <div id="peak-day-banner" style="background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.4); border-radius:10px; padding:10px 12px; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <span style="font-size:1.3rem;">🔥</span>
+                  <div>
+                    <div style="font-size:0.85rem; font-weight:800; color:#F87171;">Haftanın En Yoğun Günü: <span id="forecast-peak-day" style="color:#fff;">Cumartesi</span></div>
+                    <div id="forecast-weekend-lift" style="font-size:0.75rem; color:var(--text-muted);">Hafta sonu ciro artışı: +%0 bekleniyor</div>
+                  </div>
+                </div>
+                <div style="text-align:right;">
+                  <span id="forecast-quiet-day-badge" style="font-size:0.75rem; background:rgba(56,189,248,0.15); color:#38BDF8; padding:3px 8px; border-radius:12px; border:1px solid rgba(56,189,248,0.3);">En Sakin: Çarşamba</span>
+                </div>
+              </div>
+
+              <!-- 7-Day Intensity Bar Graph -->
+              <div id="weekly-intensity-bars" style="display:grid; grid-template-columns:repeat(7, 1fr); gap:6px; margin-bottom:14px; text-align:center;">
+                <!-- Days render dynamically here -->
+              </div>
+
+              <!-- Upcoming 7 Days Projection -->
+              <div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); margin-bottom:6px;">Önümüzdeki 7 Günlük Simülasyon Tahmini</div>
+              <div id="upcoming-days-list" style="display:flex; flex-direction:column; gap:6px; max-height:220px; overflow-y:auto; padding-right:4px;">
+                <!-- Upcoming day cards render here -->
+              </div>
             </div>
 
-            <div style="flex:1.2; min-width:200px;">
-              <label style="font-size:0.72rem; color:var(--text-muted); font-weight:700; display:block; margin-bottom:4px;">🔍 Müşteri / Not Filtresi</label>
-              <input type="text" id="sales-filter-input" placeholder="Müşteri adı veya not yazın..." oninput="handleSalesFilterInput(this.value)" style="width:100%; padding:8px 12px; font-size:0.85rem; background:var(--card); border:1px solid var(--border); border-radius:8px; color:var(--text);">
+            <!-- SECTION B: HANGİ ÜRÜNLER ÇOK SATACAK? (TALEP HIZI & KRİTİK TEDARİK) -->
+            <div>
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <h4 style="margin:0; font-size:0.9rem; color:var(--text); display:flex; align-items:center; gap:6px;">
+                  <span>📦 Hangi Ürünler Çok Satacak? (Talep Hızı & Tedarik Alarmları)</span>
+                </h4>
+              </div>
+
+              <!-- Stockout Alerts Box (if any) -->
+              <div id="stockout-alerts-box" style="display:none; margin-bottom:12px;">
+                <div style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.4); border-radius:10px; padding:10px; margin-bottom:8px;">
+                  <div style="font-weight:700; font-size:0.85rem; color:var(--warning); display:flex; align-items:center; gap:6px;">
+                    <span>⚠️ Acil Tedarik Gereken Ürünler (7 Gün İçinde Bitecekler)</span>
+                  </div>
+                  <div id="stockout-alerts-list" style="margin-top:6px; display:flex; flex-direction:column; gap:6px;">
+                    <!-- Stockout alert items -->
+                  </div>
+                </div>
+              </div>
+
+              <!-- Top Predicted Products List -->
+              <div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); margin-bottom:6px;">En Çok Satması Beklenen Lokomotif Ürünler (Gelecek 7 Gün)</div>
+              <div id="top-demand-products-list" style="display:flex; flex-direction:column; gap:6px;">
+                <!-- Products render here -->
+              </div>
             </div>
           </div>
         </div>
 
-        <div id="sales-history-container">
-          <!-- Sales history renders here -->
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <!-- SUB-TAB 4: AI İŞLETME ASİSTANI VE ÖNERİLER -->
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <div id="subtab-ai-insights" class="reports-subtab-content" style="display:none;">
+          <!-- AI Business Growth Recommendation Section -->
+          <div style="background:rgba(16,185,129,0.08); border:1px solid var(--accent); border-radius:12px; padding:14px; margin-bottom:16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <h3 style="margin:0; font-size:0.95rem; color:var(--accent); display:flex; align-items:center; gap:6px;">
+                <span>🤖 Yapay Zeka İşletme Geliştirme Danışmanı</span>
+              </h3>
+              <button class="btn" style="width:auto; padding:6px 12px; font-size:0.8rem;" onclick="fetchAIBusinessRecommendations()">💡 Öneri Al</button>
+            </div>
+            <div id="ai-recommendation-box" style="font-size:0.85rem; color:var(--text); line-height:1.5; white-space:pre-line;">
+              Yapay zekadan stok takibi, kampanya ve ciro artırma önerileri almak için <b>"💡 Öneri Al"</b> butonuna basınız.
+            </div>
+          </div>
+
+          <!-- Store Working Hours Form Card -->
+          <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:16px;">
+            <h3 style="margin-top:0; margin-bottom:8px; font-size:0.95rem; color:var(--text);">⏰ İşletme Çalışma Saatleri</h3>
+            <form onsubmit="saveStoreHours(event)" style="display:flex; flex-direction:column; gap:8px;">
+              <div style="display:flex; gap:8px;">
+                <div style="flex:1;">
+                  <label style="font-size:0.75rem; color:var(--text-muted);">Hafta İçi</label>
+                  <input type="text" id="hours-weekday" placeholder="08:00 - 22:00" style="padding:8px; font-size:0.85rem;">
+                </div>
+                <div style="flex:1;">
+                  <label style="font-size:0.75rem; color:var(--text-muted);">Hafta Sonu</label>
+                  <input type="text" id="hours-weekend" placeholder="09:00 - 23:00" style="padding:8px; font-size:0.85rem;">
+                </div>
+              </div>
+              <button type="submit" class="btn btn-secondary" style="padding:8px; font-size:0.8rem;">💾 Çalışma Saatlerini Kaydet</button>
+            </form>
+          </div>
         </div>
+
       </div>
     </div>
 
@@ -1092,6 +1259,7 @@
       if (tabId === 'stock') loadProducts();
       if (tabId === 'reports') {
         loadSalesHistory();
+        loadSalesAnalytics();
         loadForecastData();
       }
     }
@@ -2664,44 +2832,146 @@
       }
     }
 
-    function setDateFilter(preset) {
+    let currentReportsSubTab = 'sales-list';
+    let currentDatePreset = 'all';
+
+    function switchReportsSubTab(subTabName, btnEl) {
+      currentReportsSubTab = subTabName;
+      document.querySelectorAll('.reports-subnav-btn').forEach(b => b.classList.remove('active'));
+      if (btnEl) {
+        btnEl.classList.add('active');
+      } else {
+        const b = document.getElementById('btn-subtab-' + subTabName);
+        if (b) b.classList.add('active');
+      }
+
+      document.querySelectorAll('.reports-subtab-content').forEach(el => el.style.display = 'none');
+      const target = document.getElementById('subtab-' + subTabName);
+      if (target) target.style.display = 'block';
+
+      if (subTabName === 'sales-list') {
+        loadSalesHistory();
+      } else if (subTabName === 'revenue-periodic') {
+        loadSalesAnalytics();
+        loadExpenses();
+      } else if (subTabName === 'forecasts') {
+        loadForecastData();
+      }
+    }
+
+    function toggleCustomDateDrawer() {
+      const drawer = document.getElementById('custom-date-drawer');
+      if (!drawer) return;
+      drawer.style.display = (drawer.style.display === 'none' || !drawer.style.display) ? 'flex' : 'none';
+    }
+
+    function setDatePreset(preset, btnEl) {
+      currentDatePreset = preset;
+      document.querySelectorAll('.date-pill').forEach(p => p.classList.remove('active'));
+      if (btnEl) btnEl.classList.add('active');
+
       const now = new Date();
-      const formatYMD = (d) => d.toISOString().split('T')[0];
+      const formatYMD = (d) => {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      };
+
+      const drawer = document.getElementById('custom-date-drawer');
 
       if (preset === 'today') {
         currentStartDate = formatYMD(now);
         currentEndDate = formatYMD(now);
+        if (drawer) drawer.style.display = 'none';
       } else if (preset === 'yesterday') {
         const y = new Date(now);
         y.setDate(now.getDate() - 1);
         currentStartDate = formatYMD(y);
         currentEndDate = formatYMD(y);
-      } else if (preset === 'week') {
-        const w = new Date(now);
-        w.setDate(now.getDate() - 7);
-        currentStartDate = formatYMD(w);
+        if (drawer) drawer.style.display = 'none';
+      } else if (preset === 'this_week') {
+        const day = now.getDay();
+        const diffToMonday = (day === 0 ? -6 : 1) - day;
+        const monday = new Date(now);
+        monday.setDate(now.getDate() + diffToMonday);
+        currentStartDate = formatYMD(monday);
         currentEndDate = formatYMD(now);
-      } else if (preset === 'month') {
+        if (drawer) drawer.style.display = 'none';
+      } else if (preset === 'last_week') {
+        const day = now.getDay();
+        const diffToMonday = (day === 0 ? -6 : 1) - day;
+        const prevMonday = new Date(now);
+        prevMonday.setDate(now.getDate() + diffToMonday - 7);
+        const prevSunday = new Date(prevMonday);
+        prevSunday.setDate(prevMonday.getDate() + 6);
+        currentStartDate = formatYMD(prevMonday);
+        currentEndDate = formatYMD(prevSunday);
+        if (drawer) drawer.style.display = 'none';
+      } else if (preset === 'this_month') {
         const m = new Date(now.getFullYear(), now.getMonth(), 1);
         currentStartDate = formatYMD(m);
         currentEndDate = formatYMD(now);
+        if (drawer) drawer.style.display = 'none';
+      } else if (preset === 'last_month') {
+        const firstOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const lastOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+        currentStartDate = formatYMD(firstOfLastMonth);
+        currentEndDate = formatYMD(lastOfLastMonth);
+        if (drawer) drawer.style.display = 'none';
+      } else if (preset === 'last_30_days') {
+        const d30 = new Date(now);
+        d30.setDate(now.getDate() - 30);
+        currentStartDate = formatYMD(d30);
+        currentEndDate = formatYMD(now);
+        if (drawer) drawer.style.display = 'none';
       } else if (preset === 'all') {
         currentStartDate = '';
         currentEndDate = '';
+        if (drawer) drawer.style.display = 'none';
       }
 
-      document.getElementById('filter-start-date').value = currentStartDate;
-      document.getElementById('filter-end-date').value = currentEndDate;
+      const startInput = document.getElementById('filter-start-date');
+      const endInput = document.getElementById('filter-end-date');
+      if (startInput) startInput.value = currentStartDate;
+      if (endInput) endInput.value = currentEndDate;
 
+      updateActiveDateRangeBadge();
+
+      // Refresh data
       loadSalesHistory();
+      loadSalesAnalytics();
       loadExpenses();
+    }
+
+    function updateActiveDateRangeBadge() {
+      const badge = document.getElementById('active-date-range-badge');
+      if (!badge) return;
+
+      if (!currentStartDate && !currentEndDate) {
+        badge.innerHTML = '🌐 <b>Tüm Zamanlar</b>';
+      } else if (currentStartDate === currentEndDate) {
+        badge.innerHTML = `📅 <b>${currentStartDate}</b> (Tek Gün)`;
+      } else {
+        badge.innerHTML = `📅 <b>${currentStartDate || '...'}</b> ile <b>${currentEndDate || '...'}</b>`;
+      }
     }
 
     function applyCustomDateFilter() {
       currentStartDate = document.getElementById('filter-start-date').value;
       currentEndDate = document.getElementById('filter-end-date').value;
+      
+      document.querySelectorAll('.date-pill').forEach(p => p.classList.remove('active'));
+      updateActiveDateRangeBadge();
+
       loadSalesHistory();
+      loadSalesAnalytics();
       loadExpenses();
+    }
+
+    // Alias for backwards compatibility
+    function setDateFilter(preset) {
+      setDatePreset(preset, null);
     }
 
     async function handleAddExpenseSubmit(e) {
@@ -3162,6 +3432,74 @@
             if (sBar && nBar) {
               sBar.style.width = mShare + '%';
               nBar.style.width = nShare + '%';
+            }
+          }
+
+          // Render Monthly Revenue Breakdown (Her Ayın Toplam Cirosu)
+          const mList = document.getElementById('monthly-revenue-list');
+          if (mList) {
+            if (a.monthly_stats && a.monthly_stats.length > 0) {
+              const maxRev = Math.max(...a.monthly_stats.map(m => m.revenue), 1.0);
+              let html = '';
+              a.monthly_stats.forEach(m => {
+                const pct = Math.max(5, Math.round((m.revenue / maxRev) * 100));
+                html += `
+                  <div style="background:#0F172A; border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-bottom:8px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                      <div style="font-weight:700; font-size:0.9rem; color:var(--text);">${m.month_label}</div>
+                      <div style="font-weight:800; font-size:1.05rem; color:var(--accent);">${m.revenue.toFixed(2)} ₺</div>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:var(--text-muted); margin-bottom:6px;">
+                      <span>${m.tx_count} Fiş • ${m.items} Ürün Satışı</span>
+                      <span>Ort. Sepet: ${m.avg_cart.toFixed(2)} ₺</span>
+                    </div>
+                    <div style="display:flex; gap:12px; font-size:0.72rem; color:var(--text-muted); margin-bottom:6px;">
+                      <span>🏬 Mağaza: <b style="color:var(--text);">${(m.store_revenue || 0).toFixed(2)} ₺</b></span>
+                      <span>🌐 İnternet: <b style="color:#38BDF8;">${(m.net_revenue || 0).toFixed(2)} ₺</b></span>
+                    </div>
+                    <div style="height:6px; background:rgba(255,255,255,0.06); border-radius:3px; overflow:hidden;">
+                      <div style="width:${pct}%; height:100%; background:linear-gradient(90deg, var(--accent), #38BDF8); border-radius:3px;"></div>
+                    </div>
+                  </div>
+                `;
+              });
+              mList.innerHTML = html;
+            } else {
+              mList.innerHTML = '<div style="color:var(--text-muted); font-size:0.8rem; text-align:center; padding:12px;">Henüz aylık satış verisi yok.</div>';
+            }
+          }
+
+          // Render Weekly Revenue Breakdown (Her Haftanın Toplam Cirosu)
+          const wList = document.getElementById('weekly-revenue-list');
+          if (wList) {
+            if (a.weekly_stats && a.weekly_stats.length > 0) {
+              const maxRev = Math.max(...a.weekly_stats.map(w => w.revenue), 1.0);
+              let html = '';
+              a.weekly_stats.forEach(w => {
+                const pct = Math.max(5, Math.round((w.revenue / maxRev) * 100));
+                html += `
+                  <div style="background:#0F172A; border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-bottom:8px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                      <div style="font-weight:700; font-size:0.85rem; color:var(--text);">${w.week_label}</div>
+                      <div style="font-weight:800; font-size:1rem; color:#38BDF8;">${w.revenue.toFixed(2)} ₺</div>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:var(--text-muted); margin-bottom:6px;">
+                      <span>${w.tx_count} Fiş • ${w.items} Ürün Satışı</span>
+                      <span>Ort. Sepet: ${w.avg_cart.toFixed(2)} ₺</span>
+                    </div>
+                    <div style="display:flex; gap:12px; font-size:0.72rem; color:var(--text-muted); margin-bottom:6px;">
+                      <span>🏬 Mağaza: <b style="color:var(--text);">${(w.store_revenue || 0).toFixed(2)} ₺</b></span>
+                      <span>🌐 İnternet: <b style="color:#38BDF8;">${(w.net_revenue || 0).toFixed(2)} ₺</b></span>
+                    </div>
+                    <div style="height:6px; background:rgba(255,255,255,0.06); border-radius:3px; overflow:hidden;">
+                      <div style="width:${pct}%; height:100%; background:linear-gradient(90deg, #38BDF8, #818CF8); border-radius:3px;"></div>
+                    </div>
+                  </div>
+                `;
+              });
+              wList.innerHTML = html;
+            } else {
+              wList.innerHTML = '<div style="color:var(--text-muted); font-size:0.8rem; text-align:center; padding:12px;">Henüz haftalık satış verisi yok.</div>';
             }
           }
         }

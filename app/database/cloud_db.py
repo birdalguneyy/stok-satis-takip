@@ -1153,9 +1153,9 @@ class CloudDatabase:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
     ) -> Dict[str, Any]:
-        uid = user_id or 1
+        uid = self._resolve_user_id(user_id)
         with self.db.get_connection() as conn:
-            sales_query = "SELECT COUNT(*) as total_transactions, SUM(total_amount) as total_revenue, SUM(item_count) as total_items FROM sales WHERE user_id = ?"
+            sales_query = "SELECT COUNT(*) as total_transactions, SUM(total_amount) as total_revenue, SUM(item_count) as total_items FROM sales WHERE (user_id = ? OR user_id IS NULL)"
             s_params: list = [uid]
             if start_date:
                 sales_query += " AND sold_at >= ?"
@@ -1175,7 +1175,7 @@ class CloudDatabase:
                 SELECT si.product_name, SUM(si.quantity) as total_qty, SUM(si.subtotal) as total_sales_amount
                 FROM sale_items si
                 JOIN sales s ON si.sale_id = s.id
-                WHERE s.user_id = ?
+                WHERE (s.user_id = ? OR s.user_id IS NULL)
             """
             top_params: list = [uid]
             if start_date:
@@ -1189,12 +1189,12 @@ class CloudDatabase:
             top_products = [dict(r) for r in top_rows]
 
             # Low Stock Items for this user
-            low_query = "SELECT id, name, barcode, stock_quantity, critical_stock_level FROM products WHERE is_active = 1 AND user_id = ? AND stock_quantity <= critical_stock_level"
+            low_query = "SELECT id, name, barcode, stock_quantity, critical_stock_level FROM products WHERE is_active = 1 AND (user_id = ? OR user_id IS NULL) AND stock_quantity <= critical_stock_level"
             low_rows = conn.execute(low_query, [uid]).fetchall()
             low_stock_items = [dict(r) for r in low_rows]
 
             # Total Expenses for this user
-            exp_query = "SELECT SUM(amount) as total_exp FROM expenses WHERE user_id = ?"
+            exp_query = "SELECT SUM(amount) as total_exp FROM expenses WHERE (user_id = ? OR user_id IS NULL)"
             exp_params: list = [uid]
             if start_date:
                 exp_query += " AND expense_date >= ?"
@@ -1214,7 +1214,7 @@ class CloudDatabase:
                        SUM(total_amount) as revenue,
                        SUM(item_count) as items
                 FROM sales
-                WHERE user_id = ?
+                WHERE (user_id = ? OR user_id IS NULL)
             """
             ch_params: list = [uid]
             if start_date:
@@ -1236,6 +1236,96 @@ class CloudDatabase:
                 channel_stats[k]["items"] = int(row["items"] or 0)
                 channel_stats[k]["transactions"] = int(row["tx_count"] or 0)
 
+            # Monthly Breakdown (Her Ayın Toplam Cirosu)
+            month_query = """
+                SELECT strftime('%Y-%m', sold_at) as month_key,
+                       COUNT(*) as tx_count,
+                       SUM(total_amount) as revenue,
+                       SUM(item_count) as items,
+                       SUM(CASE WHEN COALESCE(channel, 'magaza') = 'magaza' THEN total_amount ELSE 0 END) as store_revenue,
+                       SUM(CASE WHEN COALESCE(channel, 'magaza') = 'internet' THEN total_amount ELSE 0 END) as net_revenue
+                FROM sales
+                WHERE (user_id = ? OR user_id IS NULL)
+                GROUP BY month_key
+                ORDER BY month_key DESC
+                LIMIT 24
+            """
+            month_rows = conn.execute(month_query, (uid,)).fetchall()
+            months_tr = {
+                "01": "Ocak", "02": "Şubat", "03": "Mart", "04": "Nisan",
+                "05": "Mayıs", "06": "Haziran", "07": "Temmuz", "08": "Ağustos",
+                "09": "Eylül", "10": "Ekim", "11": "Kasım", "12": "Aralık"
+            }
+            monthly_stats = []
+            for mr in month_rows:
+                m_key = mr["month_key"] or ""
+                if not m_key:
+                    continue
+                parts = m_key.split("-")
+                m_label = f"{months_tr.get(parts[1], parts[1])} {parts[0]}" if len(parts) == 2 else m_key
+                rev = round(float(mr["revenue"] or 0), 2)
+                tx = int(mr["tx_count"] or 0)
+                monthly_stats.append({
+                    "month_key": m_key,
+                    "month_label": m_label,
+                    "revenue": rev,
+                    "tx_count": tx,
+                    "items": int(mr["items"] or 0),
+                    "avg_cart": round(rev / tx, 2) if tx > 0 else 0.0,
+                    "store_revenue": round(float(mr["store_revenue"] or 0), 2),
+                    "net_revenue": round(float(mr["net_revenue"] or 0), 2),
+                })
+
+            # Weekly Breakdown (Her Haftanın Toplam Cirosu)
+            week_query = """
+                SELECT strftime('%Y-W%W', sold_at) as week_key,
+                       MIN(date(sold_at)) as week_start,
+                       MAX(date(sold_at)) as week_end,
+                       COUNT(*) as tx_count,
+                       SUM(total_amount) as revenue,
+                       SUM(item_count) as items,
+                       SUM(CASE WHEN COALESCE(channel, 'magaza') = 'magaza' THEN total_amount ELSE 0 END) as store_revenue,
+                       SUM(CASE WHEN COALESCE(channel, 'magaza') = 'internet' THEN total_amount ELSE 0 END) as net_revenue
+                FROM sales
+                WHERE (user_id = ? OR user_id IS NULL)
+                GROUP BY week_key
+                ORDER BY week_key DESC
+                LIMIT 16
+            """
+            week_rows = conn.execute(week_query, (uid,)).fetchall()
+            weekly_stats = []
+            for wr in week_rows:
+                w_key = wr["week_key"] or ""
+                if not w_key:
+                    continue
+                w_num = w_key.split("-W")[-1] if "-W" in w_key else w_key
+                w_start = wr["week_start"] or ""
+                w_end = wr["week_end"] or ""
+
+                def format_short_tr(d_str):
+                    try:
+                        dt = datetime.strptime(d_str, "%Y-%m-%d")
+                        m_name = months_tr.get(f"{dt.month:02d}", "")
+                        return f"{dt.day} {m_name}"
+                    except Exception:
+                        return d_str
+
+                range_str = f"{format_short_tr(w_start)} - {format_short_tr(w_end)}" if w_start and w_end else w_key
+                rev = round(float(wr["revenue"] or 0), 2)
+                tx = int(wr["tx_count"] or 0)
+                weekly_stats.append({
+                    "week_key": w_key,
+                    "week_label": f"{w_num}. Hafta ({range_str})",
+                    "week_start": w_start,
+                    "week_end": w_end,
+                    "revenue": rev,
+                    "tx_count": tx,
+                    "items": int(wr["items"] or 0),
+                    "avg_cart": round(rev / tx, 2) if tx > 0 else 0.0,
+                    "store_revenue": round(float(wr["store_revenue"] or 0), 2),
+                    "net_revenue": round(float(wr["net_revenue"] or 0), 2),
+                })
+
             return {
                 "total_revenue": round(total_rev, 2),
                 "total_items_sold": total_items,
@@ -1246,6 +1336,8 @@ class CloudDatabase:
                 "top_products": top_products,
                 "low_stock_items": low_stock_items,
                 "channel_stats": channel_stats,
+                "monthly_stats": monthly_stats,
+                "weekly_stats": weekly_stats,
             }
 
     # ════════════════════════════════════════════════════════════════════

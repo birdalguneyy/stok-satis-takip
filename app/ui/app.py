@@ -10,6 +10,7 @@ from app.ui.components.toast import Toast
 from app.ui.views.dashboard_view import DashboardView
 from app.ui.views.history_view import HistoryView
 from app.ui.views.products_view import ProductsView
+from app.ui.views.reports_view import ReportsView
 from app.ui.views.sales_view import SalesView
 
 
@@ -100,20 +101,28 @@ class App(ctk.CTk):
             on_stock_changed=self._on_stock_changed,
         )
 
+        self.views["reports"] = ReportsView(
+            self.content,
+            self.sale_service,
+            on_toast=self.show_toast,
+            on_stock_changed=self._on_stock_changed,
+        )
+
         for view in self.views.values():
             view.grid(row=0, column=0, sticky="nsew")
 
     def show_view(self, key: str) -> None:
-        self.sidebar.set_active(key)
+        target_key = "reports" if key == "history" else key
+        self.sidebar.set_active(target_key)
         for name, view in self.views.items():
-            if name == key:
+            if name == target_key:
                 view.tkraise()
                 if hasattr(view, "refresh"):
                     view.refresh()
                 if hasattr(view, "on_show"):
                     view.on_show()
             else:
-                if key != "sales" and name == "sales":
+                if target_key != "sales" and name == "sales":
                     pass
 
     def show_toast(self, message: str, level: str = "info") -> None:
@@ -127,6 +136,9 @@ class App(ctk.CTk):
         dashboard = self.views.get("dashboard")
         if dashboard and hasattr(dashboard, "refresh"):
             dashboard.refresh()
+        reports = self.views.get("reports")
+        if reports and hasattr(reports, "on_show"):
+            reports.on_show()
         history = self.views.get("history")
         if history and hasattr(history, "refresh"):
             history.refresh()

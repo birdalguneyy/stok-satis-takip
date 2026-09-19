@@ -25,7 +25,7 @@ class ForecastService:
         paralel iş parçacıklarıyla hesaplar.
         """
         start_time = time.perf_counter()
-        uid = user_id or 1
+        uid = self.cloud_db._resolve_user_id(user_id)
 
         with self.cloud_db.db.get_connection() as conn:
             # 1. Ham Satış ve Satış Kalemleri Verilerini Çek
@@ -33,7 +33,7 @@ class ForecastService:
                 """
                 SELECT id, total_amount, item_count, sold_at, COALESCE(channel, 'magaza') as channel
                 FROM sales
-                WHERE user_id = ?
+                WHERE (user_id = ? OR user_id IS NULL)
                 ORDER BY sold_at ASC
                 """,
                 (uid,),
@@ -45,7 +45,7 @@ class ForecastService:
                        s.sold_at, COALESCE(s.channel, 'magaza') as channel
                 FROM sale_items si
                 JOIN sales s ON si.sale_id = s.id
-                WHERE s.user_id = ?
+                WHERE (s.user_id = ? OR s.user_id IS NULL)
                 ORDER BY s.sold_at ASC
                 """,
                 (uid,),
@@ -57,7 +57,7 @@ class ForecastService:
                        p.stock_quantity, p.critical_stock_level, c.name as category_name
                 FROM products p
                 LEFT JOIN categories c ON p.category_id = c.id
-                WHERE p.user_id = ? AND p.is_active = 1
+                WHERE (p.user_id = ? OR p.user_id IS NULL) AND p.is_active = 1
                 """,
                 (uid,),
             ).fetchall()
@@ -78,18 +78,44 @@ class ForecastService:
 
         elapsed_ms = (time.perf_counter() - start_time) * 1000.0
 
+        telemetry_info = {
+            "cpu_cores": self.cpu_cores,
+            "simulation_time_ms": round(elapsed_ms, 2),
+            "elapsed_ms": round(elapsed_ms, 2),
+            "simulations_count": 5000,
+            "hardware_acceleration": True,
+            "engine": f"Multithreaded Edge Engine ({self.cpu_cores} Cores)",
+        }
+
+        peak_day_name = busy_days_result.get("peak_day", "Cumartesi")
+        top_prods_list = products_result.get("top_predicted_products", [])
+        top_prod_name = top_prods_list[0]["name"] if top_prods_list else "ürünleriniz"
+        risk_count = len(products_result.get("stockout_alerts", []))
+
+        strategic_advice = (
+            f"Haftalık simülasyon analizine göre en yüksek ciro potansiyeli {peak_day_name} günlerinde yoğunlaşmaktadır. "
+            f"Özellikle '{top_prod_name}' gibi lokomotif ürünlerde talep artışı beklenmektedir. "
+        )
+        if risk_count > 0:
+            strategic_advice += f"Dikkat: {risk_count} kritik üründe 7 gün içinde stok tükenme riski tespit edilmiştir, tedarik siparişi verilmesi önerilir."
+        else:
+            strategic_advice += "Mevcut stok seviyeleriniz öngörülen satış hızını karşılamak için dengeli görünmektedir."
+
+        ai_insights_data = {
+            "strategic_advice": strategic_advice,
+            "risk_count": risk_count,
+            "recommended_focus": "Mağaza & İnternet Karma Satış",
+        }
+
         return {
             "ok": True,
-            "telemetry": {
-                "cpu_cores": self.cpu_cores,
-                "simulation_time_ms": round(elapsed_ms, 2),
-                "simulations_count": 5000,
-                "hardware_acceleration": True,
-                "engine": f"Multithreaded Edge Engine ({self.cpu_cores} Cores)",
-            },
+            "telemetry": telemetry_info,
+            "hardware_metrics": telemetry_info,
             "busy_days": busy_days_result,
             "product_demand": products_result,
+            "product_forecasts": products_result,
             "channel_analytics": channel_result,
+            "ai_insights": ai_insights_data,
         }
 
     # ════════════════════════════════════════════════════════════════════
@@ -233,9 +259,13 @@ class ForecastService:
         afternoon_rush = sum(hourly_distribution[15:18])
         evening_rush = sum(hourly_distribution[18:23])
 
+        peak_intensity = sorted_by_intensity[0]["intensity_pct"] if sorted_by_intensity else 100
+
         return {
             "weekly_profile": day_forecasts,
+            "day_forecasts": day_forecasts,
             "peak_day": peak_day,
+            "peak_intensity": peak_intensity,
             "quiet_day": quiet_day,
             "weekend_lift_pct": weekend_lift,
             "upcoming_7_days": upcoming_7_days,

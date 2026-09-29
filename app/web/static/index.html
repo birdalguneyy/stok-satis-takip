@@ -17,24 +17,119 @@
   <!-- ZXing HTML5 Live Camera Barcode Reader Library -->
   <script src="https://unpkg.com/@zxing/library@latest"></script>
   <style>
-    :root {
-      --bg: #0B0F17;
-      --card: #131926;
-      --card-hover: #1A2337;
-      --card-subtle: #0E1420;
-      --accent: #10B981;
-      --accent-hover: #059669;
-      --accent-soft: rgba(16, 185, 129, 0.12);
-      --text: #F1F5F9;
+    /* ═══ FERAH AÇIK TEMA (Varsayılan — Göz Dinlendirici Porselen) ═══ */
+    :root, [data-theme="light"] {
+      --bg: #F4F6F9;
+      --card: #FFFFFF;
+      --card-hover: #F8FAFC;
+      --card-subtle: #EFF2F7;
+      --accent: #4F46E5;
+      --accent-hover: #4338CA;
+      --accent-soft: rgba(79, 70, 229, 0.08);
+      --text: #1E293B;
+      --text-muted: #64748B;
+      --text-dim: #94A3B8;
+      --danger: #EF4444;
+      --danger-soft: rgba(239, 68, 68, 0.08);
+      --warning: #F59E0B;
+      --border: rgba(15, 23, 42, 0.08);
+      --border-subtle: rgba(15, 23, 42, 0.04);
+      --purple: #7C3AED;
+      --blue: #0EA5E9;
+      --header-bg: rgba(255, 255, 255, 0.88);
+      --header-border: rgba(15, 23, 42, 0.06);
+      --nav-bg: rgba(255, 255, 255, 0.94);
+      --nav-border: rgba(15, 23, 42, 0.06);
+      --nav-shadow: 0 -2px 16px rgba(0, 0, 0, 0.06);
+      --input-bg: #F1F5F9;
+      --input-border: rgba(15, 23, 42, 0.12);
+      --input-focus-bg: #FFFFFF;
+      --badge-bg: rgba(79, 70, 229, 0.06);
+      --badge-color: #4F46E5;
+      --badge-border: rgba(79, 70, 229, 0.18);
+      --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.03);
+      --subnav-active-bg: linear-gradient(135deg, rgba(79, 70, 229, 0.1), rgba(14, 165, 233, 0.08));
+      --subnav-active-border: rgba(79, 70, 229, 0.35);
+      --pill-active-bg: linear-gradient(135deg, #4F46E5 0%, #4338CA 100%);
+      --pill-active-shadow: 0 3px 12px rgba(79, 70, 229, 0.25);
+      --success: #059669;
+      --success-soft: rgba(5, 150, 105, 0.08);
+    }
+    /* ═══ DİNGİN MAT GECE TEMASI ═══ */
+    [data-theme="dark"] {
+      --bg: #0F141C;
+      --card: #18202E;
+      --card-hover: #1E2738;
+      --card-subtle: #131A26;
+      --accent: #818CF8;
+      --accent-hover: #6366F1;
+      --accent-soft: rgba(129, 140, 248, 0.1);
+      --text: #E2E8F0;
       --text-muted: #94A3B8;
       --text-dim: #64748B;
-      --danger: #F43F5E;
-      --danger-soft: rgba(244, 63, 94, 0.12);
-      --warning: #F59E0B;
-      --border: rgba(255, 255, 255, 0.08);
-      --border-subtle: rgba(255, 255, 255, 0.04);
-      --purple: #8B5CF6;
+      --danger: #FB7185;
+      --danger-soft: rgba(251, 113, 133, 0.1);
+      --warning: #FBBF24;
+      --border: rgba(255, 255, 255, 0.07);
+      --border-subtle: rgba(255, 255, 255, 0.03);
+      --purple: #A78BFA;
       --blue: #38BDF8;
+      --header-bg: rgba(15, 20, 28, 0.92);
+      --header-border: rgba(255, 255, 255, 0.05);
+      --nav-bg: rgba(15, 20, 28, 0.95);
+      --nav-border: rgba(255, 255, 255, 0.05);
+      --nav-shadow: 0 -2px 16px rgba(0, 0, 0, 0.4);
+      --input-bg: #131A26;
+      --input-border: rgba(255, 255, 255, 0.08);
+      --input-focus-bg: #1E2738;
+      --badge-bg: rgba(129, 140, 248, 0.08);
+      --badge-color: #A5B4FC;
+      --badge-border: rgba(129, 140, 248, 0.2);
+      --card-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+      --subnav-active-bg: linear-gradient(135deg, rgba(129, 140, 248, 0.15), rgba(56, 189, 248, 0.1));
+      --subnav-active-border: rgba(129, 140, 248, 0.4);
+      --pill-active-bg: linear-gradient(135deg, #6366F1 0%, #4F46E5 100%);
+      --pill-active-shadow: 0 3px 12px rgba(99, 102, 241, 0.35);
+      --success: #34D399;
+      --success-soft: rgba(52, 211, 153, 0.1);
+    }
+    /* ═══ SICAK KAĞIT TEMASI (Sepia / Göz Koruma) ═══ */
+    [data-theme="warm"] {
+      --bg: #FAF7F2;
+      --card: #FFF9F0;
+      --card-hover: #FDF5EA;
+      --card-subtle: #F5F0E8;
+      --accent: #B45309;
+      --accent-hover: #92400E;
+      --accent-soft: rgba(180, 83, 9, 0.06);
+      --text: #44403C;
+      --text-muted: #78716C;
+      --text-dim: #A8A29E;
+      --danger: #DC2626;
+      --danger-soft: rgba(220, 38, 38, 0.06);
+      --warning: #D97706;
+      --border: rgba(68, 64, 60, 0.1);
+      --border-subtle: rgba(68, 64, 60, 0.05);
+      --purple: #7E22CE;
+      --blue: #0284C7;
+      --header-bg: rgba(250, 247, 242, 0.92);
+      --header-border: rgba(68, 64, 60, 0.08);
+      --nav-bg: rgba(250, 247, 242, 0.96);
+      --nav-border: rgba(68, 64, 60, 0.08);
+      --nav-shadow: 0 -2px 16px rgba(0, 0, 0, 0.05);
+      --input-bg: #F5F0E8;
+      --input-border: rgba(68, 64, 60, 0.12);
+      --input-focus-bg: #FFF9F0;
+      --badge-bg: rgba(180, 83, 9, 0.06);
+      --badge-color: #B45309;
+      --badge-border: rgba(180, 83, 9, 0.2);
+      --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.03), 0 4px 16px rgba(0, 0, 0, 0.02);
+      --subnav-active-bg: linear-gradient(135deg, rgba(180, 83, 9, 0.1), rgba(217, 119, 6, 0.08));
+      --subnav-active-border: rgba(180, 83, 9, 0.35);
+      --pill-active-bg: linear-gradient(135deg, #B45309 0%, #92400E 100%);
+      --pill-active-shadow: 0 3px 12px rgba(180, 83, 9, 0.25);
+      --success: #15803D;
+      --success-soft: rgba(21, 128, 61, 0.06);
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
@@ -50,12 +145,12 @@
     }
 
     header {
-      background-color: rgba(11, 15, 23, 0.85);
+      background-color: var(--header-bg);
       backdrop-filter: blur(20px);
       position: sticky;
       top: 0;
       z-index: 50;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      border-bottom: 1px solid var(--header-border);
       padding: 12px 18px;
       display: flex;
       justify-content: space-between;
@@ -68,17 +163,16 @@
     header .status-badge {
       font-size: 0.74rem;
       font-weight: 600;
-      background: rgba(16, 185, 129, 0.08);
-      color: #34D399;
+      background: var(--badge-bg);
+      color: var(--badge-color);
       padding: 4px 10px;
       border-radius: 20px;
-      border: 1px solid rgba(16, 185, 129, 0.22);
+      border: 1px solid var(--badge-border);
       cursor: pointer;
       transition: all 0.2s ease;
     }
     header .status-badge:hover {
-      background: rgba(16, 185, 129, 0.16);
-      border-color: rgba(16, 185, 129, 0.4);
+      opacity: 0.85;
     }
 
     main { padding: 16px; flex: 1; max-width: 600px; margin: 0 auto; width: 100%; }
@@ -89,14 +183,14 @@
       bottom: 0;
       left: 0;
       right: 0;
-      background: rgba(11, 15, 23, 0.94);
+      background: var(--nav-bg);
       backdrop-filter: blur(24px);
-      border-top: 1px solid rgba(255, 255, 255, 0.07);
+      border-top: 1px solid var(--nav-border);
       display: flex;
       justify-content: space-around;
       padding: 8px 6px 12px 6px;
       z-index: 100;
-      box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.45);
+      box-shadow: var(--nav-shadow);
     }
 
     .nav-item {
@@ -104,7 +198,7 @@
       flex-direction: column;
       align-items: center;
       gap: 3px;
-      color: #64748B;
+      color: var(--text-dim);
       font-size: 0.72rem;
       font-weight: 500;
       text-decoration: none;
@@ -118,14 +212,13 @@
     }
 
     .nav-item * { pointer-events: none; }
-    .nav-item:hover { color: #94A3B8; }
+    .nav-item:hover { color: var(--text-muted); }
     .nav-item.active {
-      color: #10B981;
+      color: var(--accent);
       font-weight: 700;
     }
     .nav-item.active span.icon {
       transform: translateY(-1px) scale(1.06);
-      filter: drop-shadow(0 2px 8px rgba(16, 185, 129, 0.4));
     }
     .nav-item span.icon {
       font-size: 1.25rem;
@@ -146,7 +239,7 @@
     }
     .reports-subnav-btn {
       padding: 10px 8px;
-      background: rgba(255, 255, 255, 0.03);
+      background: var(--card-subtle);
       border: 1px solid var(--border);
       border-radius: 12px;
       color: var(--text-muted);
@@ -169,18 +262,17 @@
       transform: translateY(-1px);
     }
     .reports-subnav-btn.active {
-      background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(56, 189, 248, 0.14));
-      border-color: rgba(16, 185, 129, 0.45);
-      color: #FFFFFF;
+      background: var(--subnav-active-bg);
+      border-color: var(--subnav-active-border);
+      color: var(--text);
       font-weight: 700;
-      box-shadow: 0 4px 18px -2px rgba(16, 185, 129, 0.3);
     }
     .reports-subnav-btn * { pointer-events: none; }
     .date-pill * { pointer-events: none; }
 
     /* Easy Date Selector Pills */
     .date-filter-box {
-      background: #0E1420;
+      background: var(--card-subtle);
       border: 1px solid var(--border);
       border-radius: 14px;
       padding: 14px 16px;
@@ -193,8 +285,8 @@
       margin-top: 8px;
     }
     .date-pill {
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: var(--card);
+      border: 1px solid var(--border);
       border-radius: 20px;
       padding: 7px 14px;
       font-size: 0.8rem;
@@ -205,26 +297,25 @@
       transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
     }
     .date-pill:hover {
-      background: rgba(255, 255, 255, 0.09);
+      background: var(--card-hover);
       color: var(--text);
-      border-color: rgba(255, 255, 255, 0.16);
-      transform: translateY(-1px);
+      border-color: var(--accent);
     }
     .date-pill.active {
-      background: linear-gradient(135deg, #10B981 0%, #0D9488 100%);
+      background: var(--pill-active-bg);
       color: #FFFFFF;
       font-weight: 700;
       border-color: transparent;
-      box-shadow: 0 3px 12px rgba(16, 185, 129, 0.4);
+      box-shadow: var(--pill-active-shadow);
     }
 
     .active-date-badge {
       font-size: 0.74rem;
-      background: rgba(16, 185, 129, 0.08);
-      color: #34D399;
+      background: var(--badge-bg);
+      color: var(--badge-color);
       padding: 4px 12px;
       border-radius: 20px;
-      border: 1px solid rgba(16, 185, 129, 0.22);
+      border: 1px solid var(--badge-border);
       font-weight: 600;
       letter-spacing: 0.2px;
       display: inline-flex;
@@ -239,12 +330,12 @@
       border-radius: 18px;
       padding: 20px;
       margin-bottom: 16px;
-      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.32);
-      backdrop-filter: blur(12px);
+      box-shadow: var(--card-shadow);
       transition: border-color 0.2s ease;
     }
     .card:hover {
-      border-color: rgba(255, 255, 255, 0.12);
+      border-color: var(--accent);
+      border-color: color-mix(in srgb, var(--border) 50%, var(--accent) 15%);
     }
 
     .card h2 {
@@ -271,8 +362,8 @@
     }
 
     .ai-upload-area:active, .ai-upload-area:hover {
-      background: rgba(16, 185, 129, 0.08);
-      border-color: #10B981;
+      background: var(--accent-soft);
+      border-color: var(--accent);
     }
     .ai-upload-area .camera-icon { font-size: 2.5rem; margin-bottom: 6px; }
 
@@ -282,8 +373,8 @@
     
     input, select {
       width: 100%;
-      background: #090D16;
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: var(--input-bg);
+      border: 1px solid var(--input-border);
       border-radius: 12px;
       padding: 12px 14px;
       color: var(--text);
@@ -293,14 +384,14 @@
     }
 
     input:focus, select:focus {
-      border-color: #10B981;
-      box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.12);
-      background: #0D131F;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+      background: var(--input-focus-bg);
     }
 
     .btn {
       width: 100%;
-      background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+      background: var(--accent);
       color: #FFFFFF;
       font-weight: 700;
       border: none;
@@ -313,12 +404,11 @@
       justify-content: center;
       align-items: center;
       gap: 8px;
-      box-shadow: 0 4px 14px rgba(16, 185, 129, 0.25);
       transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
     .btn:hover {
-      box-shadow: 0 6px 20px rgba(16, 185, 129, 0.35);
+      background: var(--accent-hover);
       transform: translateY(-1px);
     }
     .btn:active {
@@ -326,25 +416,24 @@
       opacity: 0.9;
     }
     .btn-secondary {
-      background: rgba(255, 255, 255, 0.05);
+      background: var(--card-subtle);
       border: 1px solid var(--border);
       color: var(--text);
       box-shadow: none;
     }
     .btn-secondary:hover {
-      background: rgba(255, 255, 255, 0.09);
-      border-color: rgba(255, 255, 255, 0.16);
-      color: #FFFFFF;
+      background: var(--card-hover);
+      border-color: var(--accent);
+      color: var(--text);
       box-shadow: none;
       transform: translateY(-1px);
     }
     .btn-danger {
-      background: linear-gradient(135deg, #F43F5E 0%, #E11D48 100%);
+      background: var(--danger);
       color: white;
-      box-shadow: 0 4px 14px rgba(244, 63, 94, 0.25);
     }
     .btn-danger:hover {
-      box-shadow: 0 6px 20px rgba(244, 63, 94, 0.35);
+      opacity: 0.9;
       transform: translateY(-1px);
     }
 
@@ -466,7 +555,7 @@
       </div>
 
       <!-- AUTH TAB SWITCHER -->
-      <div style="display:flex; background:#0F172A; padding:4px; border-radius:12px; margin-bottom:16px; border:1px solid var(--border);">
+      <div style="display:flex; background:var(--card-subtle); padding:4px; border-radius:12px; margin-bottom:16px; border:1px solid var(--border);">
         <button id="auth-tab-btn-login" class="btn" style="flex:1; padding:8px; font-size:0.85rem; background:var(--accent); color:#000;" onclick="switchAuthTab('login')">Giriş Yap</button>
         <button id="auth-tab-btn-register" class="btn btn-secondary" style="flex:1; padding:8px; font-size:0.85rem; background:transparent;" onclick="switchAuthTab('register')">Yeni Üyelik</button>
       </div>
@@ -587,7 +676,7 @@
       <form onsubmit="handleOnlineSaleSubmit(event)" style="display:flex; flex-direction:column; gap:12px;">
         <div class="form-group" style="margin-bottom:0;">
           <label style="color:var(--text); font-weight:600;">Satışı Yapılan Ürün</label>
-          <select id="online-sale-product-select" onchange="handleOnlineProductSelectChange(this)" required style="width:100%; padding:10px; background:#0F172A; border:1px solid var(--border); color:var(--text); border-radius:10px; font-weight:600;">
+          <select id="online-sale-product-select" onchange="handleOnlineProductSelectChange(this)" required style="width:100%; padding:10px; background:var(--card-subtle); border:1px solid var(--border); color:var(--text); border-radius:10px; font-weight:600;">
             <option value="">-- Ürün Listesinden Seçin --</option>
           </select>
           <div id="online-sale-stock-hint" style="font-size:0.75rem; color:#38BDF8; margin-top:4px; font-weight:600;"></div>
@@ -607,7 +696,7 @@
         <div style="display:flex; gap:10px;">
           <div style="flex:1;">
             <label style="font-size:0.8rem; color:var(--text-muted); display:block; margin-bottom:4px;">Satış Kanalı / Platform</label>
-            <select id="online-sale-platform" style="width:100%; padding:10px; background:#0F172A; border:1px solid var(--border); color:var(--text); border-radius:10px; font-size:0.85rem;">
+            <select id="online-sale-platform" style="width:100%; padding:10px; background:var(--card-subtle); border:1px solid var(--border); color:var(--text); border-radius:10px; font-size:0.85rem;">
               <option value="Trendyol">Trendyol</option>
               <option value="Hepsiburada">Hepsiburada</option>
               <option value="Web Sitesi">Kendi Web Sitemiz</option>
@@ -650,10 +739,10 @@
         <input type="hidden" id="edit-prod-image-path">
 
         <!-- FOTOĞRAF YÖNETİMİ -->
-        <div style="background:#0F172A; border:1px dashed #0284C7; border-radius:14px; padding:14px; margin-bottom:16px; text-align:center;">
+        <div style="background:var(--card-subtle); border:1px dashed #0284C7; border-radius:14px; padding:14px; margin-bottom:16px; text-align:center;">
           <div style="font-size:0.8rem; font-weight:700; color:var(--text); margin-bottom:8px;">📸 Ürün Görseli / Fotoğrafı</div>
           
-          <div style="position:relative; width:110px; height:110px; margin:0 auto 10px; border-radius:14px; overflow:hidden; background:#1E293B; border:2px solid var(--border); display:flex; align-items:center; justify-content:center;">
+          <div style="position:relative; width:110px; height:110px; margin:0 auto 10px; border-radius:14px; overflow:hidden; background:var(--card-hover); border:2px solid var(--border); display:flex; align-items:center; justify-content:center;">
             <img id="edit-prod-img-preview" src="/static/placeholder.png" style="width:100%; height:100%; object-fit:cover;">
           </div>
 
@@ -739,7 +828,7 @@
       </div>
 
       <!-- SECTION 1: PC NODE MODE -->
-      <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:14px;">
+      <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:14px;">
         <div style="font-weight:700; font-size:0.9rem; color:var(--text); margin-bottom:4px;">💻 PC Görsel Depo Sunucusu Modu</div>
         <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:10px;">
           Bu bilgisayarı görsel depolama cihazı yapın. Telefonlardan gelen fotoğraflar doğrudan PC'ye kaydedilir.
@@ -757,7 +846,7 @@
       </div>
 
       <!-- SECTION 2: PHONE NODE MODE -->
-      <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:14px;">
+      <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:14px;">
         <div style="font-weight:700; font-size:0.9rem; color:var(--text); margin-bottom:4px;">📱 Telefon Modu — PC'ye Bağlan</div>
         <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:10px;">
           PC ekranında görünen 6 haneli eşleşme kodunu yazıp bağlanın.
@@ -776,12 +865,13 @@
       <span>Stok & Satış</span>
     </h1>
     <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
-      <div id="p2p-status-badge" class="status-badge" style="background:rgba(239,68,68,0.25); color:#EF4444; font-weight:700;" onclick="openP2PModal()">🔴 PC Bağlı Değil</div>
-      <div id="sync-status-badge" class="status-badge" style="background:rgba(16,185,129,0.2); color:#10B981; font-weight:700;" onclick="triggerManualSync()">🔥 🟢 Firebase Aktif</div>
-      <div id="user-profile-badge" class="status-badge" style="background:rgba(16,185,129,0.15); color:var(--accent);" onclick="openAuthModal()">🏢 <span id="user-profile-name">Giriş / Profil</span></div>
+      <div id="p2p-status-badge" class="status-badge" style="font-weight:700;" onclick="openP2PModal()">🔴 PC Bağlı Değil</div>
+      <div id="sync-status-badge" class="status-badge" style="font-weight:700;" onclick="triggerManualSync()">🟢 Firebase Aktif</div>
+      <div id="user-profile-badge" class="status-badge" onclick="openAuthModal()">🏢 <span id="user-profile-name">Giriş / Profil</span></div>
 
-      <div id="pwa-install-badge" class="status-badge" style="display:none; background:rgba(16, 185, 129, 0.25); color:var(--accent); font-weight:bold;" onclick="installPWA()">📲 Uygulamayı Yükle</div>
-      <div class="status-badge" onclick="openAIKeyModal()">🔑 AI Ayarı</div>
+      <div id="pwa-install-badge" class="status-badge" style="display:none;" onclick="installPWA()">📲 Yükle</div>
+      <div class="status-badge" onclick="cycleTheme()" id="theme-toggle-btn" title="Tema Değiştir">☀️ Açık</div>
+      <div class="status-badge" onclick="openAIKeyModal()">🔑 AI</div>
     </div>
   </header>
 
@@ -823,13 +913,13 @@
             <button class="btn" style="width: 80px;" onclick="handlePOSScan()">Ekle</button>
           </div>
           <!-- CANLI ARAMA / ADAY ÜRÜN ÖNERİ LİSTESİ -->
-          <div id="pos-suggestions-dropdown" style="display:none; position:absolute; left:0; right:0; top:100%; z-index:9999; background:#0F172A; border:2px solid var(--accent); border-radius:12px; max-height:280px; overflow-y:auto; box-shadow:0 12px 30px rgba(0,0,0,0.85); margin-top:4px;"></div>
+          <div id="pos-suggestions-dropdown" style="display:none; position:absolute; left:0; right:0; top:100%; z-index:9999; background:var(--card-subtle); border:2px solid var(--accent); border-radius:12px; max-height:280px; overflow-y:auto; box-shadow:0 12px 30px rgba(0,0,0,0.85); margin-top:4px;"></div>
         </div>
 
         <!-- KATEGORİLİ ÜRÜN SEÇİCİ (BARKODSUZ SEÇİM) -->
         <div class="form-group" style="margin-top: 10px;">
           <label style="color:var(--accent); font-weight:700;">📦 Veya Barkodsuz Ürün Seçin (Kategoriye Göre)</label>
-          <select id="pos-product-picker" onchange="handleProductPickerSelect(this)" style="width:100%; padding:12px; background:#0F172A; border:1px solid var(--accent); color:var(--text); border-radius:12px; font-weight:600; cursor:pointer;">
+          <select id="pos-product-picker" onchange="handleProductPickerSelect(this)" style="width:100%; padding:12px; background:var(--card-subtle); border:1px solid var(--accent); color:var(--text); border-radius:12px; font-weight:600; cursor:pointer;">
             <option value="">-- Ürün Listesinden Seçin --</option>
           </select>
         </div>
@@ -837,7 +927,7 @@
         <!-- MÜŞTERİ ADI GİRİŞİ (OPSİYONEL) -->
         <div class="form-group" style="margin-top: 10px;">
           <label style="color:var(--text-muted); font-size:0.8rem; font-weight:700;">👤 Müşteri Adı (Opsiyonel)</label>
-          <input type="text" id="pos-customer-name" placeholder="Müşteri veya firma adı yazın (Örn: Ahmet Yılmaz)..." style="width:100%; padding:10px 12px; background:#0F172A; border:1px solid var(--border); color:var(--text); border-radius:10px; font-size:0.9rem;">
+          <input type="text" id="pos-customer-name" placeholder="Müşteri veya firma adı yazın (Örn: Ahmet Yılmaz)..." style="width:100%; padding:10px 12px; background:var(--card-subtle); border:1px solid var(--border); color:var(--text); border-radius:10px; font-size:0.9rem;">
         </div>
 
         <div id="pos-cart-list" style="margin-top: 14px;">
@@ -863,7 +953,7 @@
     <div id="tab-stock" class="tab-content">
       <div class="card">
         <h2>📦 Ürün & Stok Kataloğu</h2>
-        <input type="text" id="stock-search" placeholder="Ürün veya barkod ara..." oninput="loadProducts(this.value)" style="margin-bottom: 12px;">
+        <input type="text" id="stock-search" placeholder="Ürün veya barkod ara..." oninput="handleStockSearchInput(this.value)" style="margin-bottom: 12px;">
         <div id="product-list-container" class="product-list">
           <!-- Products render here -->
         </div>
@@ -917,7 +1007,7 @@
           </div>
 
           <!-- Collapsible Custom Date Drawer -->
-          <div id="custom-date-drawer" style="display:none; margin-top:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.08); gap:8px; align-items:center; flex-wrap:wrap;">
+          <div id="custom-date-drawer" style="display:none; margin-top:10px; padding-top:10px; border-top:1px solid var(--border); gap:8px; align-items:center; flex-wrap:wrap;">
             <div style="flex:1; min-width:140px;">
               <label style="font-size:0.72rem; color:var(--text-muted); display:block; margin-bottom:3px;">Başlangıç Tarihi</label>
               <input type="date" id="filter-start-date" style="padding:6px 10px; font-size:0.8rem;">
@@ -937,7 +1027,7 @@
         <!-- SUB-TAB 1: SATIŞLAR VE FİLTRELEME -->
         <!-- ═══════════════════════════════════════════════════════════════ -->
         <div id="subtab-sales-list" class="reports-subtab-content">
-          <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:12px;">
+          <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:12px;">
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
               <h3 style="font-size:1rem; margin:0; display:flex; align-items:center; gap:8px;">
                 <span>📋 Satış Hareketleri</span>
@@ -989,26 +1079,26 @@
         <div id="subtab-revenue-periodic" class="reports-subtab-content" style="display:none;">
           <!-- Stat Cards Row -->
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px;">
-            <div style="background:#0F172A; border:1px solid var(--accent); border-radius:12px; padding:12px;">
+            <div style="background:var(--card-subtle); border:1px solid var(--accent); border-radius:12px; padding:12px;">
               <div style="font-size:0.75rem; color:var(--text-muted);">Toplam Ciro</div>
               <div id="stat-total-revenue" style="font-size:1.3rem; font-weight:800; color:var(--accent);">0.00 ₺</div>
             </div>
-            <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px;">
+            <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:12px;">
               <div style="font-size:0.75rem; color:var(--text-muted);">Toplam Giderler</div>
               <div id="stat-total-expenses" style="font-size:1.3rem; font-weight:800; color:var(--danger);">0.00 ₺</div>
             </div>
-            <div style="background:#0F172A; border:1px solid #38BDF8; border-radius:12px; padding:12px;">
+            <div style="background:var(--card-subtle); border:1px solid #38BDF8; border-radius:12px; padding:12px;">
               <div style="font-size:0.75rem; color:var(--text-muted);">Net Kar</div>
               <div id="stat-net-profit" style="font-size:1.3rem; font-weight:800; color:#38BDF8;">0.00 ₺</div>
             </div>
-            <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px;">
+            <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:12px;">
               <div style="font-size:0.75rem; color:var(--text-muted);">Satılan Ürün</div>
               <div id="stat-total-items" style="font-size:1.3rem; font-weight:800; color:var(--text);">0 adet</div>
             </div>
           </div>
 
           <!-- HER AYIN TOPLAM CİROSU BÖLÜMÜ -->
-          <div style="background:#0F172A; border:1px solid rgba(16,185,129,0.3); border-radius:14px; padding:14px; margin-bottom:16px;">
+          <div style="background:var(--card-subtle); border:1px solid rgba(16,185,129,0.3); border-radius:14px; padding:14px; margin-bottom:16px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
               <h3 style="margin:0; font-size:0.95rem; color:var(--accent); display:flex; align-items:center; gap:6px;">
                 <span>📅 Her Ayın Toplam Cirosu (Aylık Rapor)</span>
@@ -1021,7 +1111,7 @@
           </div>
 
           <!-- HER HAFTANIN TOPLAM CİROSU BÖLÜMÜ -->
-          <div style="background:#0F172A; border:1px solid rgba(56,189,248,0.3); border-radius:14px; padding:14px; margin-bottom:16px;">
+          <div style="background:var(--card-subtle); border:1px solid rgba(56,189,248,0.3); border-radius:14px; padding:14px; margin-bottom:16px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
               <h3 style="margin:0; font-size:0.95rem; color:#38BDF8; display:flex; align-items:center; gap:6px;">
                 <span>📊 Her Haftanın Toplam Cirosu (Haftalık Rapor)</span>
@@ -1034,7 +1124,7 @@
           </div>
 
           <!-- CHANNEL BREAKDOWN (STORE VS ONLINE) -->
-          <div style="background:#0F172A; border:1px solid var(--border); border-radius:14px; padding:14px; margin-bottom:16px;">
+          <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:14px; padding:14px; margin-bottom:16px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
               <h3 style="margin:0; font-size:0.95rem; color:#38BDF8; display:flex; align-items:center; gap:6px;">
                 <span>🌐 Satış Kanalları Kıyaslaması (Mağaza vs İnternet)</span>
@@ -1063,14 +1153,14 @@
             </div>
 
             <!-- Channel Share Progress Bar -->
-            <div style="height:8px; background:rgba(255,255,255,0.06); border-radius:4px; overflow:hidden; display:flex;">
+            <div style="height:8px; background:var(--border); border-radius:4px; overflow:hidden; display:flex;">
               <div id="ch-bar-store" style="width:50%; background:var(--accent); transition:width 0.4s ease;"></div>
               <div id="ch-bar-net" style="width:50%; background:#38BDF8; transition:width 0.4s ease;"></div>
             </div>
           </div>
 
           <!-- Expenses & Bills Tracker Card -->
-          <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:16px;">
+          <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:16px;">
             <h3 style="margin-top:0; margin-bottom:8px; font-size:0.95rem; color:var(--text);">💸 Fatura & İşletme Giderleri Ekle (Elektrik, Su, İnternet, Kira)</h3>
             <form onsubmit="handleAddExpenseSubmit(event)" style="display:flex; flex-direction:column; gap:8px;">
               <div style="display:flex; gap:8px;">
@@ -1099,9 +1189,9 @@
         <!-- SUB-TAB 3: GELECEK TAHMİNLERİ (ON-DEVICE CPU ENGINE) -->
         <!-- ═══════════════════════════════════════════════════════════════ -->
         <div id="subtab-forecasts" class="reports-subtab-content" style="display:none;">
-          <div style="background:linear-gradient(145deg, #1E293B, #0F172A); border:1px solid #10B981; border-radius:14px; padding:14px; margin-bottom:16px; box-shadow:0 8px 24px rgba(0,0,0,0.35);">
+          <div style="background:var(--card); border:1px solid var(--accent); border-radius:14px; padding:14px; margin-bottom:16px; box-shadow:var(--card-shadow);">
             <!-- HARDWARE BADGE -->
-            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:10px; margin-bottom:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:12px;">
               <div style="display:flex; align-items:center; gap:8px;">
                 <span style="font-size:1.4rem;">⚡</span>
                 <div>
@@ -1197,7 +1287,7 @@
           </div>
 
           <!-- Store Working Hours Form Card -->
-          <div style="background:#0F172A; border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:16px;">
+          <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:16px;">
             <h3 style="margin-top:0; margin-bottom:8px; font-size:0.95rem; color:var(--text);">⏰ İşletme Çalışma Saatleri</h3>
             <form onsubmit="saveStoreHours(event)" style="display:flex; flex-direction:column; gap:8px;">
               <div style="display:flex; gap:8px;">
@@ -1312,6 +1402,27 @@
   </nav>
 
   <script>
+    // ═══ TEMA SİSTEMİ ═══
+    const THEMES = ['light', 'dark', 'warm'];
+    const THEME_LABELS = { light: '☀️ Açık', dark: '🌙 Gece', warm: '📜 Sıcak' };
+    function setTheme(name) {
+      document.documentElement.setAttribute('data-theme', name);
+      localStorage.setItem('app-theme', name);
+      const btn = document.getElementById('theme-toggle-btn');
+      if (btn) btn.textContent = THEME_LABELS[name] || name;
+    }
+    function cycleTheme() {
+      const cur = localStorage.getItem('app-theme') || 'light';
+      const idx = THEMES.indexOf(cur);
+      const next = THEMES[(idx + 1) % THEMES.length];
+      setTheme(next);
+    }
+    // Tema hemen yüklensin (FOUC önleme)
+    (function initTheme() {
+      const saved = localStorage.getItem('app-theme') || 'light';
+      document.documentElement.setAttribute('data-theme', saved);
+    })();
+
     let posCart = [];
     let codeReader = null;
     let isScanning = false;
@@ -2377,7 +2488,7 @@
               </div>
             </div>
             <div style="display:flex; align-items:center; gap:8px;">
-              <div style="display:flex; align-items:center; background:#0F172A; border:1px solid var(--border); border-radius:8px; overflow:hidden;">
+              <div style="display:flex; align-items:center; background:var(--card-subtle); border:1px solid var(--border); border-radius:8px; overflow:hidden;">
                 <button style="padding:6px 12px; background:var(--card-hover); border:none; color:var(--text); font-weight:bold; cursor:pointer;" onclick="updatePOSCartQty(${index}, -1)">-</button>
                 <input type="number" value="${item.quantity}" min="1" style="width:40px; text-align:center; padding:4px; border:none; background:none; color:var(--accent); font-weight:bold; outline:none;" onchange="setPOSCartQty(${index}, this.value)">
                 <button style="padding:6px 12px; background:var(--card-hover); border:none; color:var(--text); font-weight:bold; cursor:pointer;" onclick="updatePOSCartQty(${index}, 1)">+</button>
@@ -2524,18 +2635,18 @@
       posActiveSuggestionIndex = -1;
 
       dropdown.innerHTML = shown.map((p, idx) => `
-        <div id="pos-sug-${idx}" class="pos-sug-item" onclick="selectPOSCandidate(${p.id})" style="padding:10px 14px; border-bottom:1px solid #1E293B; cursor:pointer; display:flex; justify-content:space-between; align-items:center; transition:background 0.15s ease;" onmouseover="setPOSActiveSuggestion(${idx})" onmouseout="setPOSActiveSuggestion(-1)">
+        <div id="pos-sug-${idx}" class="pos-sug-item" onclick="selectPOSCandidate(${p.id})" style="padding:10px 14px; border-bottom:1px solid var(--border); cursor:pointer; display:flex; justify-content:space-between; align-items:center; transition:background 0.15s ease;" onmouseover="setPOSActiveSuggestion(${idx})" onmouseout="setPOSActiveSuggestion(-1)">
           <div>
-            <div style="font-weight:700; font-size:0.92rem; color:#F8FAFC;">${p.name}</div>
-            <div style="font-size:0.75rem; color:#94A3B8; margin-top:2px;">
-              Barkod: <span style="color:#E2E8F0;">${p.barcode || 'Barkodsuz'}</span> | 
-              Stok: <b style="color:${p.stock_quantity > 3 ? '#10B981' : (p.stock_quantity > 0 ? '#F59E0B' : '#EF4444')}">${p.stock_quantity} Adet</b> | 
+            <div style="font-weight:700; font-size:0.92rem; color:var(--text);">${p.name}</div>
+            <div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">
+              Barkod: <span style="color:var(--text); font-weight:600;">${p.barcode || 'Barkodsuz'}</span> | 
+              Stok: <b style="color:${p.stock_quantity > 3 ? 'var(--success)' : (p.stock_quantity > 0 ? 'var(--warning)' : 'var(--danger)')}">${p.stock_quantity} Adet</b> | 
               Kategori: ${p.category_name || 'Genel'}
             </div>
           </div>
           <div style="text-align:right; margin-left:12px;">
             <div style="font-weight:800; color:var(--accent); font-size:1rem;">${Number(p.sale_price).toFixed(2)} ₺</div>
-            <span style="font-size:0.72rem; color:#60A5FA; background:rgba(96,165,250,0.1); padding:2px 6px; border-radius:4px; font-weight:600;">➕ Seç</span>
+            <span style="font-size:0.72rem; color:var(--blue); background:var(--accent-soft); padding:2px 6px; border-radius:4px; font-weight:600;">➕ Seç</span>
           </div>
         </div>
       `).join('');
@@ -2547,7 +2658,7 @@
       const items = document.querySelectorAll('.pos-sug-item');
       items.forEach((el, i) => {
         if (i === idx) {
-          el.style.background = 'rgba(59, 130, 246, 0.22)';
+          el.style.background = 'var(--accent-soft)';
         } else {
           el.style.background = 'transparent';
         }
@@ -2653,15 +2764,13 @@
     });
 
     let _allProductsCache = [];
+    let _stockSearchDebounceTimer = null;
 
-    async function loadProducts(search = '') {
-      const res = await fetchWithAuth('/api/products?search=' + encodeURIComponent(search));
-      const products = await res.json();
-      _allProductsCache = products || [];
-      if (!search) allProductsCache = _allProductsCache;
+    function renderProductList(products) {
       const container = document.getElementById('product-list-container');
+      if (!container) return;
       
-      if (!products.length) {
+      if (!products || !products.length) {
         container.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:20px;">Ürün bulunamadı</div>';
         return;
       }
@@ -2670,25 +2779,61 @@
         const safeName = (p.name || '').replace(/'/g, "\\'");
         const isCritical = p.stock_quantity <= (p.critical_stock_level || 5);
         return `
-          <div class="product-item" style="flex-wrap:wrap; gap:10px; align-items:center; background:#1E293B; border-radius:12px; padding:12px; border:1px solid rgba(255,255,255,0.06); margin-bottom:8px;">
+          <div class="product-item" style="content-visibility:auto; contain-intrinsic-size:0 80px; flex-wrap:wrap; gap:10px; align-items:center; background:var(--card-hover); border-radius:12px; padding:12px; border:1px solid var(--border-subtle); margin-bottom:8px;">
             <div style="position:relative; cursor:pointer;" onclick="openEditProductModal(${p.id})" title="Fotoğraf Ekle / Ürünü Düzenle">
               <img src="${p.image_path || '/static/placeholder.png'}" id="prod-img-${p.id}" onerror="handleProductImageError(this, '${p.image_path || ''}')" style="width:54px; height:54px; border-radius:10px; object-fit:cover; border:1px solid var(--border);">
-              <span style="position:absolute; bottom:-4px; right:-4px; background:#0284C7; color:#fff; border-radius:50%; width:20px; height:20px; font-size:11px; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 5px rgba(0,0,0,0.5);" title="Fotoğraf Değiştir">📷</span>
+              <span style="position:absolute; bottom:-4px; right:-4px; background:var(--accent); color:#fff; border-radius:50%; width:20px; height:20px; font-size:11px; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 5px rgba(0,0,0,0.25);" title="Fotoğraf Değiştir">📷</span>
             </div>
             <div class="product-info" style="min-width:140px; flex:1; cursor:pointer;" onclick="openEditProductModal(${p.id})">
               <h3 style="margin:0 0 4px 0; font-size:0.95rem; font-weight:700;">${p.name}</h3>
-              <p style="margin:0 0 4px 0; font-size:0.75rem; color:var(--text-muted);">Barkod: <code>${p.barcode}</code> | Kategori: <strong style="color:var(--text);">${p.category_name || 'Genel'}</strong></p>
-              <p style="margin:0; font-size:0.8rem;">Stok: <strong style="color:${isCritical ? '#EF4444' : 'var(--accent)'};">${p.stock_quantity}</strong> adet ${isCritical ? '⚠️' : ''}</p>
+              <p style="margin:0 0 4px 0; font-size:0.75rem; color:var(--text-muted);">Barkod: <code>${p.barcode || '-'}</code> | Kategori: <strong style="color:var(--text);">${p.category_name || 'Genel'}</strong></p>
+              <p style="margin:0; font-size:0.8rem;">Stok: <strong style="color:${isCritical ? 'var(--danger)' : 'var(--accent)'};">${p.stock_quantity}</strong> adet ${isCritical ? '⚠️' : ''}</p>
             </div>
             <div style="display:flex; align-items:center; gap:8px; margin-left:auto; flex-wrap:wrap;">
-              <div class="product-price" style="cursor:pointer; font-weight:800; font-size:1.05rem;" onclick="quickEditPrice(${p.id}, ${p.sale_price}, '${safeName}')" title="Fiyatı Değiştirmek İçin Tıklayın">${p.sale_price.toFixed(2)} ₺</div>
-              <button class="btn" style="padding:6px 12px; font-size:0.75rem; width:auto; background:linear-gradient(135deg, #0284C7, #0369A1); color:#fff; border:none; font-weight:700; border-radius:8px;" title="Ürünü ve Fotoğrafı Düzenle" onclick="openEditProductModal(${p.id})">✏️ Düzenle</button>
+              <div class="product-price" style="cursor:pointer; font-weight:800; font-size:1.05rem;" onclick="quickEditPrice(${p.id}, ${p.sale_price}, '${safeName}')" title="Fiyatı Değiştirmek İçin Tıklayın">${Number(p.sale_price).toFixed(2)} ₺</div>
+              <button class="btn" style="padding:6px 12px; font-size:0.75rem; width:auto; background:var(--accent); color:#fff; border:none; font-weight:700; border-radius:8px;" title="Ürünü ve Fotoğrafı Düzenle" onclick="openEditProductModal(${p.id})">✏️ Düzenle</button>
               <button class="btn btn-secondary" style="padding:6px 10px; font-size:0.75rem; width:auto; border-radius:8px;" title="Stok Miktarını Düzenle" onclick="editProductStockPrompt(${p.id}, ${p.stock_quantity}, '${safeName}')">📦 Stok</button>
               <button class="btn btn-danger" style="padding:6px 10px; font-size:0.75rem; width:auto; border-radius:8px;" title="Ürünü Stoktan Sil" onclick="deleteProductPrompt(${p.id}, '${safeName}')">🗑️ Sil</button>
             </div>
           </div>
         `;
       }).join('');
+    }
+
+    function handleStockSearchInput(query) {
+      const q = (query || '').toLowerCase().trim();
+      if (_allProductsCache && _allProductsCache.length > 0) {
+        if (!q) {
+          renderProductList(_allProductsCache);
+        } else {
+          const filtered = _allProductsCache.filter(p => 
+            (p.name && p.name.toLowerCase().includes(q)) || 
+            (p.barcode && p.barcode.toLowerCase().includes(q)) ||
+            (p.category_name && p.category_name.toLowerCase().includes(q))
+          );
+          renderProductList(filtered);
+        }
+        return;
+      }
+      clearTimeout(_stockSearchDebounceTimer);
+      _stockSearchDebounceTimer = setTimeout(() => {
+        loadProducts(query);
+      }, 150);
+    }
+
+    async function loadProducts(search = '') {
+      try {
+        const res = await fetchWithAuth('/api/products' + (search ? '?search=' + encodeURIComponent(search) : ''));
+        const products = await res.json();
+        if (!search) {
+          _allProductsCache = products || [];
+          allProductsCache = _allProductsCache;
+        }
+        renderProductList(products || []);
+      } catch (e) {
+        const container = document.getElementById('product-list-container');
+        if (container) container.innerHTML = '<div style="text-align:center; color:var(--danger); padding:20px;">Ürünler yüklenemedi!</div>';
+      }
     }
 
     function openEditProductModal(productId) {
@@ -3067,10 +3212,8 @@
 
       updateActiveDateRangeBadge();
 
-      // Refresh data
+      // Refresh data (loadSalesHistory internally triggers analytics & expenses)
       loadSalesHistory();
-      loadSalesAnalytics();
-      loadExpenses();
     }
 
     function updateActiveDateRangeBadge() {
@@ -3093,9 +3236,8 @@
       document.querySelectorAll('.date-pill').forEach(p => p.classList.remove('active'));
       updateActiveDateRangeBadge();
 
+      // Refresh data
       loadSalesHistory();
-      loadSalesAnalytics();
-      loadExpenses();
     }
 
     // Alias for backwards compatibility
@@ -3232,8 +3374,6 @@
                     loadProducts();
                   } else if (tabId === 'tab-reports') {
                     loadSalesHistory();
-                    loadExpenses();
-                    loadSalesAnalytics();
                   }
                 }
                 checkSyncStatus();
@@ -3252,6 +3392,7 @@
     let _allSalesData = [];
     let _selectedSaleIds = new Set();
     let _salesFilterQuery = '';
+    let _salesRenderLimit = 30;
 
     async function loadSalesHistory() {
       const container = document.getElementById('sales-history-container');
@@ -3267,6 +3408,7 @@
         const json = await res.json();
         _allSalesData = json.sales || [];
         _selectedSaleIds.clear();
+        _salesRenderLimit = 30;
         updateBulkDeleteButton();
         renderSalesHistoryView();
       } catch (err) {
@@ -3278,7 +3420,13 @@
     }
 
     function handleSalesFilterInput(val) {
+      _salesRenderLimit = 30;
       _salesFilterQuery = (val || '').toLowerCase().trim();
+      renderSalesHistoryView();
+    }
+
+    function loadMoreSales() {
+      _salesRenderLimit += 30;
       renderSalesHistoryView();
     }
 
@@ -3397,12 +3545,12 @@
       const isSelected = _selectedSaleIds.has(s.id);
       const isNet = (s.channel === 'internet');
       const chBadge = isNet
-        ? `<span style="font-size:0.7rem; background:rgba(56,189,248,0.18); color:#38BDF8; border:1px solid rgba(56,189,248,0.35); padding:2px 8px; border-radius:10px; font-weight:700; margin-left:6px;">🌐 İnternet</span>`
-        : `<span style="font-size:0.7rem; background:rgba(16,185,129,0.15); color:var(--accent); border:1px solid rgba(16,185,129,0.3); padding:2px 8px; border-radius:10px; font-weight:700; margin-left:6px;">🏬 Mağaza</span>`;
+        ? `<span style="font-size:0.7rem; background:var(--accent-soft); color:var(--blue); border:1px solid var(--border); padding:2px 8px; border-radius:10px; font-weight:700; margin-left:6px;">🌐 İnternet</span>`
+        : `<span style="font-size:0.7rem; background:var(--success-soft); color:var(--success); border:1px solid var(--border); padding:2px 8px; border-radius:10px; font-weight:700; margin-left:6px;">🏬 Mağaza</span>`;
 
       const custBadge = (s.customer_name && s.customer_name.trim())
-        ? `<span style="font-size:0.72rem; background:rgba(99,102,241,0.18); color:#A5B4FC; border:1px solid rgba(99,102,241,0.35); padding:2px 8px; border-radius:10px; font-weight:700; margin-left:6px;">👤 ${s.customer_name}</span>`
-        : `<span style="font-size:0.72rem; background:rgba(148,163,184,0.1); color:var(--text-muted); border:1px solid rgba(148,163,184,0.2); padding:2px 6px; border-radius:10px;">👤 İsimsiz Müşteri</span>`;
+        ? `<span style="font-size:0.72rem; background:var(--accent-soft); color:var(--accent); border:1px solid var(--border); padding:2px 8px; border-radius:10px; font-weight:700; margin-left:6px;">👤 ${s.customer_name}</span>`
+        : `<span style="font-size:0.72rem; color:var(--text-dim); padding:2px 6px; border-radius:10px;">👤 İsimsiz</span>`;
 
       const itemDetails = (s.items || []).map(i => `
         <div style="font-size:0.8rem; color:var(--text-muted); display:flex; justify-content:space-between; margin-top:2px;">
@@ -3412,7 +3560,7 @@
       `).join('');
 
       return `
-        <div id="sale-card-${s.id}" style="background:#0F172A; border:${isSelected ? '2px solid var(--accent)' : '1px solid var(--border)'}; border-radius:12px; padding:12px; margin-bottom:10px; transition:border-color 0.2s;">
+        <div id="sale-card-${s.id}" class="sale-card-item" style="content-visibility:auto; contain-intrinsic-size:0 90px; background:var(--card-subtle); border:${isSelected ? '2px solid var(--accent)' : '1px solid var(--border)'}; border-radius:12px; padding:12px; margin-bottom:10px; transition:border-color 0.2s;">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:1px solid var(--border); padding-bottom:8px; margin-bottom:8px;">
             <div style="display:flex; align-items:flex-start; gap:10px;">
               <input type="checkbox" class="sale-select-cb" ${isSelected ? 'checked' : ''} onchange="toggleSaleSelection(${s.id}, this.checked)" style="width:18px; height:18px; cursor:pointer; margin-top:3px;">
@@ -3453,7 +3601,19 @@
       const groupBy = groupByEl ? groupByEl.value : 'none';
 
       if (groupBy === 'none') {
-        container.innerHTML = filtered.map(renderSaleCardHTML).join('');
+        const toShow = filtered.slice(0, _salesRenderLimit);
+        let cardsHtml = toShow.map(renderSaleCardHTML).join('');
+        if (filtered.length > _salesRenderLimit) {
+          const remaining = filtered.length - _salesRenderLimit;
+          cardsHtml += `
+            <div style="text-align:center; padding:16px 0;">
+              <button type="button" class="btn btn-secondary" style="width:auto; margin:0 auto; padding:10px 24px; font-weight:700;" onclick="loadMoreSales()">
+                ⬇️ Daha Fazla Göster (${remaining} satış daha var)
+              </button>
+            </div>
+          `;
+        }
+        container.innerHTML = cardsHtml;
         updateBulkDeleteButton();
         return;
       }
@@ -3486,12 +3646,12 @@
         const idsJson = JSON.stringify(grpSales.map(s => s.id));
 
         html += `
-          <div style="background:#1E293B; border:1px solid rgba(255,255,255,0.08); border-radius:14px; padding:14px; margin-bottom:14px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.06); padding-bottom:8px;">
+          <div style="background:var(--card-hover); border:1px solid var(--border); border-radius:14px; padding:14px; margin-bottom:14px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px; border-bottom:1px solid var(--border-subtle); padding-bottom:8px;">
               <div style="display:flex; align-items:center; gap:8px;">
                 <span style="font-size:1.25rem;">${grp.icon}</span>
                 <div>
-                  <div style="font-weight:800; font-size:1rem; color:#F8FAFC;">${key}</div>
+                  <div style="font-weight:800; font-size:1rem; color:var(--text);">${key}</div>
                   <div style="font-size:0.75rem; color:var(--text-muted);">${grpSales.length} fiş / sipariş • ${grpItems} adet ürün</div>
                 </div>
               </div>
@@ -3573,7 +3733,7 @@
               a.monthly_stats.forEach(m => {
                 const pct = Math.max(5, Math.round((m.revenue / maxRev) * 100));
                 html += `
-                  <div style="background:#0F172A; border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-bottom:8px;">
+                  <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-bottom:8px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                       <div style="font-weight:700; font-size:0.9rem; color:var(--text);">${m.month_label}</div>
                       <div style="font-weight:800; font-size:1.05rem; color:var(--accent);">${m.revenue.toFixed(2)} ₺</div>
@@ -3586,7 +3746,7 @@
                       <span>🏬 Mağaza: <b style="color:var(--text);">${(m.store_revenue || 0).toFixed(2)} ₺</b></span>
                       <span>🌐 İnternet: <b style="color:#38BDF8;">${(m.net_revenue || 0).toFixed(2)} ₺</b></span>
                     </div>
-                    <div style="height:6px; background:rgba(255,255,255,0.06); border-radius:3px; overflow:hidden;">
+                    <div style="height:6px; background:var(--border); border-radius:3px; overflow:hidden;">
                       <div style="width:${pct}%; height:100%; background:linear-gradient(90deg, var(--accent), #38BDF8); border-radius:3px;"></div>
                     </div>
                   </div>
@@ -3607,7 +3767,7 @@
               a.weekly_stats.forEach(w => {
                 const pct = Math.max(5, Math.round((w.revenue / maxRev) * 100));
                 html += `
-                  <div style="background:#0F172A; border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-bottom:8px;">
+                  <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-bottom:8px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                       <div style="font-weight:700; font-size:0.85rem; color:var(--text);">${w.week_label}</div>
                       <div style="font-weight:800; font-size:1rem; color:#38BDF8;">${w.revenue.toFixed(2)} ₺</div>
@@ -3620,7 +3780,7 @@
                       <span>🏬 Mağaza: <b style="color:var(--text);">${(w.store_revenue || 0).toFixed(2)} ₺</b></span>
                       <span>🌐 İnternet: <b style="color:#38BDF8;">${(w.net_revenue || 0).toFixed(2)} ₺</b></span>
                     </div>
-                    <div style="height:6px; background:rgba(255,255,255,0.06); border-radius:3px; overflow:hidden;">
+                    <div style="height:6px; background:var(--border); border-radius:3px; overflow:hidden;">
                       <div style="width:${pct}%; height:100%; background:linear-gradient(90deg, #38BDF8, #818CF8); border-radius:3px;"></div>
                     </div>
                   </div>
@@ -3737,7 +3897,7 @@
 
               const shortName = d.day_name.substring(0, 3);
               return `
-                <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:6px 2px; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:105px;">
+                <div style="background:var(--card-subtle); border:1px solid var(--border-subtle); border-radius:8px; padding:6px 2px; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:105px;">
                   <span style="font-size:0.65rem; font-weight:800; color:${barColor}; margin-bottom:4px;">%${d.intensity_pct}</span>
                   <div style="width:70%; max-width:18px; height:${Math.max(8, d.intensity_pct * 0.55)}px; background:${barColor}; border-radius:4px;"></div>
                   <span style="font-size:0.65rem; color:var(--text); font-weight:700; margin-top:6px;">${shortName}</span>
@@ -4220,6 +4380,8 @@
     checkAIStatus();
     checkSavedAuthSession();
     startRealtimeListener();
+    // Tema butonunu güncelle
+    setTheme(localStorage.getItem('app-theme') || 'light');
 
   </script>
 </body>

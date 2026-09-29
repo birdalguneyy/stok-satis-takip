@@ -48,6 +48,9 @@ class CloudDatabase:
                 conn.execute("UPDATE sales SET user_id = 1 WHERE user_id IS NULL")
                 conn.execute("UPDATE expenses SET user_id = 1 WHERE user_id IS NULL")
                 conn.execute("UPDATE store_settings SET user_id = 1 WHERE user_id IS NULL")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_sales_user_date ON sales(user_id, sold_at)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_expenses_user_date ON expenses(user_id, expense_date)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_sale_items_sale_prod ON sale_items(sale_id, product_name)")
         except Exception:
             pass
 
@@ -1138,13 +1141,26 @@ class CloudDatabase:
         sales = []
         with self.db.get_connection() as conn:
             rows = conn.execute(query, params).fetchall()
-            for r in rows:
-                s_dict = dict(r)
-                items_rows = conn.execute(
-                    "SELECT * FROM sale_items WHERE sale_id = ?", (s_dict["id"],)
-                ).fetchall()
-                s_dict["items"] = [dict(i) for i in items_rows]
-                sales.append(s_dict)
+            if not rows:
+                return []
+            sales = [dict(r) for r in rows]
+            sale_ids = [s["id"] for s in sales]
+
+            # Batch fetch all sale_items in a single indexed query instead of N queries
+            placeholders = ",".join("?" for _ in sale_ids)
+            items_query = f"SELECT * FROM sale_items WHERE sale_id IN ({placeholders})"
+            items_rows = conn.execute(items_query, sale_ids).fetchall()
+
+            items_by_sale: Dict[int, List[Dict[str, Any]]] = {}
+            for i in items_rows:
+                i_dict = dict(i)
+                sid = i_dict["sale_id"]
+                if sid not in items_by_sale:
+                    items_by_sale[sid] = []
+                items_by_sale[sid].append(i_dict)
+
+            for s in sales:
+                s["items"] = items_by_sale.get(s["id"], [])
         return sales
 
     def get_sales_analytics(

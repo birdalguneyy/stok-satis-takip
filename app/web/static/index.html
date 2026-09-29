@@ -560,13 +560,24 @@
         <button id="auth-tab-btn-register" class="btn btn-secondary" style="flex:1; padding:8px; font-size:0.85rem; background:transparent;" onclick="switchAuthTab('register')">Yeni Üyelik</button>
       </div>
 
+      <!-- HIZLI MAĞAZA SEÇİMİ (TEK TIKLA BAĞLAN) -->
+      <div id="quick-store-container" style="margin-bottom:16px; display:none; background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:10px;">
+        <div style="font-size:0.75rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+          <span>⚡ Kayıtlı Mağazalar</span>
+          <span style="font-size:0.7rem; color:var(--accent); font-weight:700;">Tek Tıkla Geçiş</span>
+        </div>
+        <div id="quick-store-list" style="display:flex; flex-direction:column; gap:6px; max-height:160px; overflow-y:auto;">
+          <!-- Mağaza butonları JS ile doldurulacak -->
+        </div>
+      </div>
+
       <div id="auth-error" style="background:rgba(239,68,68,0.15); border:1px solid var(--danger); color:var(--danger); font-size:0.8rem; padding:10px; border-radius:10px; margin-bottom:14px; display:none;"></div>
 
       <!-- FORM 1: GİRİŞ YAP -->
       <form id="auth-login-form" onsubmit="handleLoginSubmit(event)">
         <div class="form-group">
-          <label>Telefon Numarası veya E-posta Adresi</label>
-          <input type="text" id="login-identifier" placeholder="Örn: 05321234567 veya ahmet@firma.com" required>
+          <label>İşletme Adı, Telefon veya E-posta</label>
+          <input type="text" id="login-identifier" placeholder="Örn: gallus2, 0532... veya email" required>
         </div>
 
         <div class="form-group">
@@ -788,14 +799,23 @@
           </div>
         </div>
 
+        <!-- SATIŞ BİRİMİ SEÇİMİ -->
+        <div class="form-group" style="margin-bottom:12px;">
+          <label style="font-size:0.78rem; font-weight:700;">Satış & Stok Birimi *</label>
+          <select id="edit-prod-unit" onchange="onEditProdUnitChange(this.value)" style="width:100%; padding:10px; border-radius:10px; font-size:0.88rem; font-weight:600; background:var(--card-subtle); color:var(--text); border:1px solid var(--border);">
+            <option value="adet">📦 Adet (Standart Paket / Tane)</option>
+            <option value="kg">⚖️ Kilogram - kg (Açık Mama / Tartılı Ürün)</option>
+          </select>
+        </div>
+
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px;">
           <div class="form-group">
-            <label style="font-size:0.78rem; font-weight:700;">Mevcut Stok (Adet)</label>
-            <input type="number" step="1" min="0" id="edit-prod-stock" placeholder="0" style="width:100%; padding:10px; border-radius:10px; font-size:0.88rem;">
+            <label id="edit-prod-stock-label" style="font-size:0.78rem; font-weight:700;">Mevcut Stok (Adet)</label>
+            <input type="number" step="0.001" min="0" id="edit-prod-stock" placeholder="0" style="width:100%; padding:10px; border-radius:10px; font-size:0.88rem;">
           </div>
           <div class="form-group">
-            <label style="font-size:0.78rem; font-weight:700;">Kritik Stok Uyarısı</label>
-            <input type="number" step="1" min="0" id="edit-prod-critical" placeholder="5" style="width:100%; padding:10px; border-radius:10px; font-size:0.88rem;">
+            <label id="edit-prod-critical-label" style="font-size:0.78rem; font-weight:700;">Kritik Stok Uyarısı</label>
+            <input type="number" step="0.001" min="0" id="edit-prod-critical" placeholder="5" style="width:100%; padding:10px; border-radius:10px; font-size:0.88rem;">
           </div>
         </div>
 
@@ -808,6 +828,111 @@
           </button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- TARTILI / KİLOGRAM BAZLI SATIŞ HESAPLAMA MODALI -->
+  <div id="weight-sale-modal-overlay" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(15,23,42,0.92); backdrop-filter:blur(14px); z-index:9999; justify-content:center; align-items:center; padding:16px;">
+    <div class="card" style="width:100%; max-width:480px; box-shadow:0 20px 50px rgba(0,0,0,0.5); border-radius:18px; padding:22px; position:relative;">
+      
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:1px solid var(--border); padding-bottom:12px; margin-bottom:16px;">
+        <div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:1.4rem;">⚖️</span>
+            <h3 id="weight-modal-title" style="margin:0; font-size:1.15rem; font-weight:800; color:var(--text);">Açık Mama Satışı</h3>
+          </div>
+          <div id="weight-modal-subtitle" style="font-size:0.85rem; color:var(--accent); font-weight:700; margin-top:3px;">
+            Kg Fiyatı: 70.00 ₺ / kg • Mevcut Stok: 15.000 kg
+          </div>
+        </div>
+        <button style="background:none; border:none; color:var(--text-muted); font-size:1.6rem; cursor:pointer; line-height:1; padding:2px 8px;" onclick="closeWeightSaleModal()">&times;</button>
+      </div>
+
+      <!-- HESAPLAMA MODU SEÇİCİ -->
+      <div style="display:flex; background:var(--card-subtle); padding:4px; border-radius:12px; margin-bottom:16px; border:1px solid var(--border);">
+        <button id="weight-tab-btn-amount" class="btn" style="flex:1; padding:10px; font-size:0.88rem; font-weight:700; background:var(--accent); color:#fff; border-radius:8px;" onclick="switchWeightMode('amount')">
+          💵 Tutara Göre (TL)
+        </button>
+        <button id="weight-tab-btn-weight" class="btn btn-secondary" style="flex:1; padding:10px; font-size:0.88rem; font-weight:700; background:transparent; border-radius:8px;" onclick="switchWeightMode('weight')">
+          ⚖️ Gramaja Göre (kg/gr)
+        </button>
+      </div>
+
+      <!-- MOD 1: TUTARA GÖRE SATIŞ (Örn. 200 TL'lik mama) -->
+      <div id="weight-mode-amount-box">
+        <label style="font-size:0.85rem; font-weight:700; color:var(--text); margin-bottom:6px; display:block;">
+          Müşterinin İstediği Satış Tutarı (₺)
+        </label>
+        <div style="position:relative; margin-bottom:12px;">
+          <input type="number" id="weight-input-amount" step="1" min="1" placeholder="Örn: 200" style="width:100%; font-size:1.6rem; font-weight:900; padding:12px 50px 12px 16px; border-radius:12px; border:2px solid var(--accent); color:var(--text); background:var(--card);" oninput="calcByAmount(this.value)">
+          <span style="position:absolute; right:16px; top:50%; transform:translateY(-50%); font-size:1.3rem; font-weight:800; color:var(--accent);">₺</span>
+        </div>
+        
+        <!-- Hızlı tutar butonları -->
+        <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; margin-bottom:16px;">
+          <button type="button" class="btn btn-secondary" style="padding:8px 4px; font-size:0.85rem; font-weight:700;" onclick="setQuickAmount(50)">50 ₺</button>
+          <button type="button" class="btn btn-secondary" style="padding:8px 4px; font-size:0.85rem; font-weight:700;" onclick="setQuickAmount(100)">100 ₺</button>
+          <button type="button" class="btn btn-secondary" style="padding:8px 4px; font-size:0.85rem; font-weight:700;" onclick="setQuickAmount(150)">150 ₺</button>
+          <button type="button" class="btn btn-secondary" style="padding:8px 4px; font-size:0.85rem; font-weight:700;" onclick="setQuickAmount(200)">200 ₺</button>
+          <button type="button" class="btn btn-secondary" style="padding:8px 4px; font-size:0.85rem; font-weight:700;" onclick="setQuickAmount(250)">250 ₺</button>
+          <button type="button" class="btn btn-secondary" style="padding:8px 4px; font-size:0.85rem; font-weight:700;" onclick="setQuickAmount(300)">300 ₺</button>
+          <button type="button" class="btn btn-secondary" style="padding:8px 4px; font-size:0.85rem; font-weight:700;" onclick="setQuickAmount(400)">400 ₺</button>
+          <button type="button" class="btn btn-secondary" style="padding:8px 4px; font-size:0.85rem; font-weight:700;" onclick="setQuickAmount(500)">500 ₺</button>
+        </div>
+      </div>
+
+      <!-- MOD 2: GRAMAJ / AĞIRLIĞA GÖRE SATIŞ -->
+      <div id="weight-mode-weight-box" style="display:none;">
+        <label style="font-size:0.85rem; font-weight:700; color:var(--text); margin-bottom:6px; display:block;">
+          Tartılan Miktar (Kilogram veya Gram)
+        </label>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px;">
+          <div style="position:relative;">
+            <input type="number" id="weight-input-kg" step="0.001" min="0.001" placeholder="Örn: 2.857" style="width:100%; font-size:1.3rem; font-weight:800; padding:12px 42px 12px 12px; border-radius:12px; border:2px solid var(--accent); color:var(--text); background:var(--card);" oninput="calcByKg(this.value)">
+            <span style="position:absolute; right:12px; top:50%; transform:translateY(-50%); font-size:0.9rem; font-weight:800; color:var(--accent);">kg</span>
+          </div>
+          <div style="position:relative;">
+            <input type="number" id="weight-input-gr" step="1" min="1" placeholder="Örn: 2857" style="width:100%; font-size:1.3rem; font-weight:800; padding:12px 42px 12px 12px; border-radius:12px; border:1px solid var(--border); color:var(--text); background:var(--card);" oninput="calcByGr(this.value)">
+            <span style="position:absolute; right:12px; top:50%; transform:translateY(-50%); font-size:0.9rem; font-weight:800; color:var(--text-muted);">gr</span>
+          </div>
+        </div>
+        
+        <!-- Hızlı ağırlık butonları -->
+        <div style="display:grid; grid-template-columns:repeat(5, 1fr); gap:6px; margin-bottom:16px;">
+          <button type="button" class="btn btn-secondary" style="padding:8px 2px; font-size:0.8rem; font-weight:700;" onclick="setQuickWeight(0.25)">250 gr</button>
+          <button type="button" class="btn btn-secondary" style="padding:8px 2px; font-size:0.8rem; font-weight:700;" onclick="setQuickWeight(0.5)">500 gr</button>
+          <button type="button" class="btn btn-secondary" style="padding:8px 2px; font-size:0.8rem; font-weight:700;" onclick="setQuickWeight(1.0)">1 kg</button>
+          <button type="button" class="btn btn-secondary" style="padding:8px 2px; font-size:0.8rem; font-weight:700;" onclick="setQuickWeight(2.0)">2 kg</button>
+          <button type="button" class="btn btn-secondary" style="padding:8px 2px; font-size:0.8rem; font-weight:700;" onclick="setQuickWeight(5.0)">5 kg</button>
+        </div>
+      </div>
+
+      <!-- HESAPLAMA ÖZETİ KUTUSU -->
+      <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:14px; padding:14px; margin-bottom:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <span style="font-size:0.85rem; color:var(--text-muted);">Tartılacak / Verilecek Miktar:</span>
+          <span id="weight-calc-kg-display" style="font-size:1.15rem; font-weight:900; color:var(--accent);">0.000 kg (0 gr)</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <span style="font-size:0.85rem; color:var(--text-muted);">Hesaplanan Satış Tutarı:</span>
+          <span id="weight-calc-amount-display" style="font-size:1.3rem; font-weight:900; color:var(--text);">0.00 ₺</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.75rem; color:var(--text-muted); border-top:1px dashed var(--border); padding-top:6px;">
+          <span>Satış Sonrası Kalan Stok:</span>
+          <span id="weight-calc-remaining-stock" style="font-weight:700; color:var(--text);">--</span>
+        </div>
+      </div>
+
+      <!-- AKSİYON BUTONLARI -->
+      <div style="display:flex; gap:10px;">
+        <button type="button" class="btn btn-secondary" style="flex:1; padding:14px; border-radius:12px;" onclick="closeWeightSaleModal()">
+          Vazgeç
+        </button>
+        <button type="button" id="weight-submit-btn" class="btn" style="flex:2; padding:14px; font-size:1rem; font-weight:800; background:var(--accent); border-radius:12px;" onclick="confirmWeightSale()">
+          🛒 Sepete Ekle
+        </button>
+      </div>
+
     </div>
   </div>
 
@@ -951,8 +1076,12 @@
 
     <!-- TAB 2: STOK KATALOĞU -->
     <div id="tab-stock" class="tab-content">
-      <div class="card">
-        <h2>📦 Ürün & Stok Kataloğu</h2>
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+          <h2 style="margin:0;">📦 Ürün & Stok Kataloğu</h2>
+          <button type="button" class="btn" style="width:auto; padding:8px 14px; font-size:0.82rem; background:linear-gradient(135deg, #10B981, #059669); color:#fff; border-radius:10px; display:inline-flex; align-items:center; gap:6px; box-shadow:0 4px 12px rgba(16,185,129,0.3);" onclick="triggerFullCloudSync()">
+            ☁️ Bulutla Tam Eşitle (Firebase)
+          </button>
+        </div>
         <input type="text" id="stock-search" placeholder="Ürün veya barkod ara..." oninput="handleStockSearchInput(this.value)" style="margin-bottom: 12px;">
         <div id="product-list-container" class="product-list">
           <!-- Products render here -->
@@ -1353,14 +1482,21 @@
             </div>
           </div>
 
-          <div class="form-group" style="display: flex; gap: 10px;">
-            <div style="flex: 1;">
+          <div class="form-group" style="display: flex; gap: 10px; flex-wrap:wrap;">
+            <div style="flex: 1; min-width:120px;">
               <label>Kategori</label>
               <input type="text" id="form-category" value="Genel">
             </div>
-            <div style="flex: 1;">
-              <label>Stok Adedi</label>
-              <input type="number" id="form-stock" value="10" min="0">
+            <div style="flex: 1; min-width:140px;">
+              <label>Satış Birimi</label>
+              <select id="form-unit" onchange="onFormUnitChange(this.value)" style="width:100%; padding:10px; border-radius:10px; font-weight:600; background:var(--card-subtle); color:var(--text); border:1px solid var(--border);">
+                <option value="adet">📦 Adet (Paket)</option>
+                <option value="kg">⚖️ Kilogram (Açık Mama)</option>
+              </select>
+            </div>
+            <div style="flex: 1; min-width:120px;">
+              <label id="form-stock-label">Stok Miktarı (Adet)</label>
+              <input type="number" step="0.001" id="form-stock" value="10" min="0">
             </div>
           </div>
 
@@ -2336,15 +2472,46 @@
     }
 
 
+    function onEditProdUnitChange(val) {
+      const stockLabel = document.getElementById('edit-prod-stock-label');
+      const criticalLabel = document.getElementById('edit-prod-critical-label');
+      const stockInput = document.getElementById('edit-prod-stock');
+      const criticalInput = document.getElementById('edit-prod-critical');
+      if (val === 'kg') {
+        if (stockLabel) stockLabel.innerText = 'Mevcut Stok (kg)';
+        if (criticalLabel) criticalLabel.innerText = 'Kritik Stok Uyarısı (kg)';
+        if (stockInput) stockInput.step = '0.001';
+        if (criticalInput) criticalInput.step = '0.001';
+      } else {
+        if (stockLabel) stockLabel.innerText = 'Mevcut Stok (Adet)';
+        if (criticalLabel) criticalLabel.innerText = 'Kritik Stok Uyarısı (Adet)';
+        if (stockInput) stockInput.step = '1';
+        if (criticalInput) criticalInput.step = '1';
+      }
+    }
+
+    function onFormUnitChange(val) {
+      const stockLabel = document.getElementById('form-stock-label');
+      const stockInput = document.getElementById('form-stock');
+      if (val === 'kg') {
+        if (stockLabel) stockLabel.innerText = 'Stok Miktarı (kg)';
+        if (stockInput) stockInput.step = '0.001';
+      } else {
+        if (stockLabel) stockLabel.innerText = 'Stok Miktarı (Adet)';
+        if (stockInput) stockInput.step = '1';
+      }
+    }
+
     async function saveProductFromForm(e) {
       e.preventDefault();
       const payload = {
         name: document.getElementById('form-name').value,
         barcode: document.getElementById('form-barcode').value,
         category: document.getElementById('form-category').value,
-        stock_quantity: parseInt(document.getElementById('form-stock').value) || 0,
+        stock_quantity: parseFloat(document.getElementById('form-stock').value) || 0,
         purchase_price: parseFloat(document.getElementById('form-purchase').value) || 0,
         sale_price: parseFloat(document.getElementById('form-sale').value) || 0,
+        unit: document.getElementById('form-unit') ? document.getElementById('form-unit').value : 'adet',
         image_path: document.getElementById('form-image-path').value
       };
 
@@ -2364,6 +2531,230 @@
 
 
     // ════════════════════════════════════════════════════════════════════
+    // TARTILI / KİLOGRAM BAZLI AÇIK MAMA SATIŞ MOTORU (HESAPLAYICI)
+    // ════════════════════════════════════════════════════════════════════
+    let currentWeightProduct = null;
+    let currentWeightMode = 'amount'; // 'amount' (TL) veya 'weight' (kg/gr)
+    let calculatedKg = 0;
+    let calculatedAmount = 0;
+
+    function openWeightSaleModal(prod, initialQty = null) {
+      if (!prod) return;
+      currentWeightProduct = prod;
+      currentWeightMode = 'amount';
+
+      const titleEl = document.getElementById('weight-modal-title');
+      const subEl = document.getElementById('weight-modal-subtitle');
+      if (titleEl) titleEl.innerText = prod.name;
+      const pPrice = Number(prod.sale_price) || 0;
+      const pStock = Number(prod.stock_quantity) || 0;
+      if (subEl) subEl.innerText = `Kg Fiyatı: ${pPrice.toFixed(2)} ₺ / kg • Mevcut Stok: ${pStock.toFixed(3)} kg`;
+
+      switchWeightMode('amount');
+
+      if (initialQty && initialQty > 0) {
+        switchWeightMode('weight');
+        const kgInput = document.getElementById('weight-input-kg');
+        if (kgInput) {
+          kgInput.value = initialQty;
+          calcByKg(initialQty);
+        }
+      } else {
+        const amountInput = document.getElementById('weight-input-amount');
+        if (amountInput) {
+          amountInput.value = '';
+          calcByAmount('');
+        }
+      }
+
+      const modal = document.getElementById('weight-sale-modal-overlay');
+      if (modal) modal.style.display = 'flex';
+      setTimeout(() => {
+        if (currentWeightMode === 'amount') {
+          const el = document.getElementById('weight-input-amount');
+          if (el) el.focus();
+        } else {
+          const el = document.getElementById('weight-input-kg');
+          if (el) el.focus();
+        }
+      }, 100);
+    }
+
+    function closeWeightSaleModal() {
+      const modal = document.getElementById('weight-sale-modal-overlay');
+      if (modal) modal.style.display = 'none';
+      currentWeightProduct = null;
+    }
+
+    function switchWeightMode(mode) {
+      currentWeightMode = mode;
+      const btnAmount = document.getElementById('weight-tab-btn-amount');
+      const btnWeight = document.getElementById('weight-tab-btn-weight');
+      const boxAmount = document.getElementById('weight-mode-amount-box');
+      const boxWeight = document.getElementById('weight-mode-weight-box');
+
+      if (mode === 'amount') {
+        if (btnAmount) { btnAmount.style.background = 'var(--accent)'; btnAmount.style.color = '#fff'; }
+        if (btnWeight) { btnWeight.style.background = 'transparent'; btnWeight.style.color = 'var(--text-muted)'; }
+        if (boxAmount) boxAmount.style.display = 'block';
+        if (boxWeight) boxWeight.style.display = 'none';
+        const curVal = document.getElementById('weight-input-amount') ? document.getElementById('weight-input-amount').value : '';
+        calcByAmount(curVal);
+      } else {
+        if (btnAmount) { btnAmount.style.background = 'transparent'; btnAmount.style.color = 'var(--text-muted)'; }
+        if (btnWeight) { btnWeight.style.background = 'var(--accent)'; btnWeight.style.color = '#fff'; }
+        if (boxAmount) boxAmount.style.display = 'none';
+        if (boxWeight) boxWeight.style.display = 'block';
+        const curVal = document.getElementById('weight-input-kg') ? document.getElementById('weight-input-kg').value : '';
+        calcByKg(curVal);
+      }
+    }
+
+    function calcByAmount(amountVal) {
+      if (!currentWeightProduct) return;
+      const price = Number(currentWeightProduct.sale_price) || 1;
+      const amount = parseFloat(amountVal) || 0;
+
+      if (amount <= 0) {
+        calculatedKg = 0;
+        calculatedAmount = 0;
+        updateWeightDisplays(0, 0);
+        return;
+      }
+
+      // Exact kg calculation: örn. 200 TL / 70 TL = 2.85714... kg -> 2.857 kg
+      const kg = amount / price;
+      calculatedKg = Math.round(kg * 1000) / 1000;
+      calculatedAmount = Math.round(amount * 100) / 100;
+
+      const kgInput = document.getElementById('weight-input-kg');
+      const grInput = document.getElementById('weight-input-gr');
+      if (kgInput) kgInput.value = calculatedKg;
+      if (grInput) grInput.value = Math.round(calculatedKg * 1000);
+
+      updateWeightDisplays(calculatedKg, calculatedAmount);
+    }
+
+    function calcByKg(kgVal) {
+      if (!currentWeightProduct) return;
+      const price = Number(currentWeightProduct.sale_price) || 0;
+      const kg = parseFloat(kgVal) || 0;
+
+      if (kg <= 0) {
+        calculatedKg = 0;
+        calculatedAmount = 0;
+        updateWeightDisplays(0, 0);
+        return;
+      }
+
+      calculatedKg = Math.round(kg * 1000) / 1000;
+      calculatedAmount = Math.round(calculatedKg * price * 100) / 100;
+
+      const grInput = document.getElementById('weight-input-gr');
+      const amountInput = document.getElementById('weight-input-amount');
+      if (grInput) grInput.value = Math.round(calculatedKg * 1000);
+      if (amountInput) amountInput.value = calculatedAmount;
+
+      updateWeightDisplays(calculatedKg, calculatedAmount);
+    }
+
+    function calcByGr(grVal) {
+      const gr = parseFloat(grVal) || 0;
+      const kg = gr / 1000;
+      const kgInput = document.getElementById('weight-input-kg');
+      if (kgInput) kgInput.value = kg;
+      calcByKg(kg);
+    }
+
+    function setQuickAmount(tl) {
+      const input = document.getElementById('weight-input-amount');
+      if (input) {
+        input.value = tl;
+        calcByAmount(tl);
+      }
+    }
+
+    function setQuickWeight(kg) {
+      const input = document.getElementById('weight-input-kg');
+      if (input) {
+        input.value = kg;
+        calcByKg(kg);
+      }
+    }
+
+    function updateWeightDisplays(kg, amount) {
+      const gr = Math.round(kg * 1000);
+      const kgDisp = document.getElementById('weight-calc-kg-display');
+      const amtDisp = document.getElementById('weight-calc-amount-display');
+      const remDisp = document.getElementById('weight-calc-remaining-stock');
+      const btn = document.getElementById('weight-submit-btn');
+
+      if (kgDisp) kgDisp.innerText = `${kg.toFixed(3)} kg (${gr} gr)`;
+      if (amtDisp) amtDisp.innerText = `${amount.toFixed(2)} ₺`;
+
+      if (currentWeightProduct && remDisp) {
+        const stock = Number(currentWeightProduct.stock_quantity) || 0;
+        const remaining = Math.max(0, Math.round((stock - kg) * 1000) / 1000);
+        remDisp.innerText = `${stock.toFixed(3)} kg - ${kg.toFixed(3)} kg = ${remaining.toFixed(3)} kg kaldı`;
+        remDisp.style.color = (remaining <= (currentWeightProduct.critical_stock_level || 5)) ? 'var(--danger)' : 'var(--accent)';
+      }
+
+      if (btn) {
+        btn.innerText = (amount > 0) ? `🛒 ${amount.toFixed(2)} ₺ (${kg.toFixed(3)} kg) Sepete Ekle` : '🛒 Sepete Ekle';
+        btn.disabled = (kg <= 0 || amount <= 0);
+      }
+    }
+
+    function confirmWeightSale() {
+      if (!currentWeightProduct || calculatedKg <= 0 || calculatedAmount <= 0) {
+        showToast("⚠️ Lütfen geçerli bir tutar veya gramaj giriniz!");
+        return;
+      }
+
+      const existingIndex = posCart.findIndex(i => i.product_id === currentWeightProduct.id);
+      const uPrice = Number(currentWeightProduct.sale_price) || 0;
+
+      if (existingIndex >= 0) {
+        posCart[existingIndex].quantity = calculatedKg;
+        posCart[existingIndex].unit_price = uPrice;
+        posCart[existingIndex].subtotal = calculatedAmount;
+        posCart[existingIndex].unit = 'kg';
+      } else {
+        posCart.push({
+          product_id: currentWeightProduct.id,
+          product_name: currentWeightProduct.name,
+          barcode: currentWeightProduct.barcode || '',
+          unit: 'kg',
+          original_unit_price: uPrice,
+          unit_price: uPrice,
+          quantity: calculatedKg,
+          subtotal: calculatedAmount
+        });
+      }
+
+      playBeep();
+      renderPOSCart();
+      closeWeightSaleModal();
+      showToast(`⚖️ ${currentWeightProduct.name} (${calculatedKg.toFixed(3)} kg - ${calculatedAmount.toFixed(2)} ₺) sepete eklendi.`);
+    }
+
+    function editPOSItemWeight(index) {
+      const item = posCart[index];
+      if (!item) return;
+      const pool = (allProductsCache && allProductsCache.length > 0) ? allProductsCache : (_allProductsCache || []);
+      const prod = pool.find(p => p.id === item.product_id) || {
+        id: item.product_id,
+        name: item.product_name,
+        barcode: item.barcode,
+        sale_price: item.unit_price,
+        stock_quantity: 999,
+        unit: 'kg'
+      };
+      openWeightSaleModal(prod, item.quantity);
+    }
+
+
+    // ════════════════════════════════════════════════════════════════════
     // POS SATIŞ, OTOMATİK ÖNERİ & GEÇİCİ FİYAT / TUTAR YÖNETİMİ
     // ════════════════════════════════════════════════════════════════════
     let posCustomTotal = null; // Manuel girilen özel sepet toplamı
@@ -2372,6 +2763,10 @@
 
     function addProductToPOSCart(prod) {
       if (!prod) return;
+      if (prod.unit === 'kg') {
+        openWeightSaleModal(prod);
+        return;
+      }
       const existing = posCart.find(i => i.product_id === prod.id);
       if (existing) {
         existing.quantity += 1;
@@ -2382,6 +2777,7 @@
           product_id: prod.id,
           product_name: prod.name,
           barcode: prod.barcode || '',
+          unit: prod.unit || 'adet',
           original_unit_price: uPrice,
           unit_price: uPrice,
           quantity: 1,
@@ -2470,14 +2866,22 @@
         calcTotal += item.subtotal;
         const orig = item.original_unit_price !== undefined ? item.original_unit_price : item.unit_price;
         const isCustomPrice = Math.abs(item.unit_price - orig) > 0.001;
+        const isKg = (item.unit === 'kg');
+        const unitLabel = isKg ? 'kg' : 'adet';
+        const qtyFormatted = isKg ? Number(item.quantity).toFixed(3) : item.quantity;
 
         return `
           <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--border);">
             <div style="flex:1;">
-              <div style="font-weight:600; font-size:0.95rem;">${item.product_name}</div>
+              <div style="font-weight:600; font-size:0.95rem; display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
+                <span>${item.product_name}</span>
+                ${isKg ? `
+                  <span style="background:rgba(16,185,129,0.15); color:var(--accent); border:1px solid var(--accent); padding:1px 6px; border-radius:4px; font-size:0.7rem; font-weight:800; cursor:pointer;" onclick="editPOSItemWeight(${index})" title="Gramajı / Tutarı Hesaplayıcı ile Düzenle">⚖️ ${qtyFormatted} kg ✏️</span>
+                ` : ''}
+              </div>
               <div style="font-size:0.75rem; color:var(--text-muted); display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:2px;">
                 <span style="cursor:pointer; color:var(--text); text-decoration:underline dashed var(--accent);" onclick="editPOSItemPrice(${index})" title="Fiyatı bu satış için düzenle">
-                  <b>${item.unit_price.toFixed(2)} ₺</b> / adet ✏️
+                  <b>${item.unit_price.toFixed(2)} ₺</b> / ${unitLabel} ✏️
                 </span>
                 ${isCustomPrice ? `
                   <span style="text-decoration:line-through; font-size:0.72rem; color:var(--text-muted);">${orig.toFixed(2)} ₺</span>
@@ -2489,11 +2893,11 @@
             </div>
             <div style="display:flex; align-items:center; gap:8px;">
               <div style="display:flex; align-items:center; background:var(--card-subtle); border:1px solid var(--border); border-radius:8px; overflow:hidden;">
-                <button style="padding:6px 12px; background:var(--card-hover); border:none; color:var(--text); font-weight:bold; cursor:pointer;" onclick="updatePOSCartQty(${index}, -1)">-</button>
-                <input type="number" value="${item.quantity}" min="1" style="width:40px; text-align:center; padding:4px; border:none; background:none; color:var(--accent); font-weight:bold; outline:none;" onchange="setPOSCartQty(${index}, this.value)">
-                <button style="padding:6px 12px; background:var(--card-hover); border:none; color:var(--text); font-weight:bold; cursor:pointer;" onclick="updatePOSCartQty(${index}, 1)">+</button>
+                <button style="padding:6px 10px; background:var(--card-hover); border:none; color:var(--text); font-weight:bold; cursor:pointer;" onclick="updatePOSCartQty(${index}, -1)">-</button>
+                <input type="number" value="${qtyFormatted}" step="${isKg ? '0.001' : '1'}" min="${isKg ? '0.001' : '1'}" style="width:${isKg ? '60px' : '40px'}; text-align:center; padding:4px; border:none; background:none; color:var(--accent); font-weight:bold; outline:none;" onchange="setPOSCartQty(${index}, this.value)">
+                <button style="padding:6px 10px; background:var(--card-hover); border:none; color:var(--text); font-weight:bold; cursor:pointer;" onclick="updatePOSCartQty(${index}, 1)">+</button>
               </div>
-              <div style="font-weight:700; color:var(--accent); width:70px; text-align:right;">${item.subtotal.toFixed(2)} ₺</div>
+              <div style="font-weight:700; color:var(--accent); width:75px; text-align:right;">${item.subtotal.toFixed(2)} ₺</div>
               <button style="background:none; border:none; color:var(--danger); cursor:pointer; font-size:1.1rem; padding:4px;" onclick="removeFromPOSCart(${index})" title="Sepetten Çıkar">🗑️</button>
             </div>
           </div>
@@ -2519,10 +2923,13 @@
 
     function updatePOSCartQty(index, delta) {
       if (posCart[index]) {
-        posCart[index].quantity += delta;
-        if (posCart[index].quantity <= 0) {
+        const isKg = posCart[index].unit === 'kg';
+        const step = isKg ? 0.1 : 1;
+        const newQ = posCart[index].quantity + delta * step;
+        if (newQ <= 0.0001) {
           posCart.splice(index, 1);
         } else {
+          posCart[index].quantity = isKg ? Math.round(newQ * 1000) / 1000 : Math.round(newQ);
           posCart[index].subtotal = Math.round(posCart[index].quantity * posCart[index].unit_price * 100) / 100;
         }
         playBeep();
@@ -2531,17 +2938,17 @@
     }
 
     function setPOSCartQty(index, val) {
-      const q = parseInt(val) || 1;
-      if (posCart[index]) {
-        if (q <= 0) {
-          posCart.splice(index, 1);
-        } else {
-          posCart[index].quantity = q;
-          posCart[index].subtotal = Math.round(posCart[index].quantity * posCart[index].unit_price * 100) / 100;
-        }
-        playBeep();
-        renderPOSCart();
+      if (!posCart[index]) return;
+      const isKg = posCart[index].unit === 'kg';
+      const q = isKg ? parseFloat(String(val).replace(',', '.')) : parseInt(val);
+      if (isNaN(q) || q <= 0) {
+        posCart.splice(index, 1);
+      } else {
+        posCart[index].quantity = isKg ? Math.round(q * 1000) / 1000 : q;
+        posCart[index].subtotal = Math.round(posCart[index].quantity * posCart[index].unit_price * 100) / 100;
       }
+      playBeep();
+      renderPOSCart();
     }
 
     function removeFromPOSCart(index) {
@@ -2634,22 +3041,30 @@
       const shown = candidates.slice(0, 15);
       posActiveSuggestionIndex = -1;
 
-      dropdown.innerHTML = shown.map((p, idx) => `
+      dropdown.innerHTML = shown.map((p, idx) => {
+        const isKg = (p.unit === 'kg');
+        const uStr = isKg ? 'kg' : 'Adet';
+        const sStr = isKg ? Number(p.stock_quantity).toFixed(3) : p.stock_quantity;
+        return `
         <div id="pos-sug-${idx}" class="pos-sug-item" onclick="selectPOSCandidate(${p.id})" style="padding:10px 14px; border-bottom:1px solid var(--border); cursor:pointer; display:flex; justify-content:space-between; align-items:center; transition:background 0.15s ease;" onmouseover="setPOSActiveSuggestion(${idx})" onmouseout="setPOSActiveSuggestion(-1)">
           <div>
-            <div style="font-weight:700; font-size:0.92rem; color:var(--text);">${p.name}</div>
+            <div style="font-weight:700; font-size:0.92rem; color:var(--text); display:flex; align-items:center; gap:6px;">
+              <span>${p.name}</span>
+              ${isKg ? '<span style="background:rgba(16,185,129,0.15); color:var(--accent); border:1px solid var(--accent); padding:1px 6px; border-radius:4px; font-size:0.7rem; font-weight:800;">⚖️ Tartılı / Kg</span>' : ''}
+            </div>
             <div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">
               Barkod: <span style="color:var(--text); font-weight:600;">${p.barcode || 'Barkodsuz'}</span> | 
-              Stok: <b style="color:${p.stock_quantity > 3 ? 'var(--success)' : (p.stock_quantity > 0 ? 'var(--warning)' : 'var(--danger)')}">${p.stock_quantity} Adet</b> | 
+              Stok: <b style="color:${p.stock_quantity > 3 ? 'var(--success)' : (p.stock_quantity > 0 ? 'var(--warning)' : 'var(--danger)')}">${sStr} ${uStr}</b> | 
               Kategori: ${p.category_name || 'Genel'}
             </div>
           </div>
           <div style="text-align:right; margin-left:12px;">
-            <div style="font-weight:800; color:var(--accent); font-size:1rem;">${Number(p.sale_price).toFixed(2)} ₺</div>
-            <span style="font-size:0.72rem; color:var(--blue); background:var(--accent-soft); padding:2px 6px; border-radius:4px; font-weight:600;">➕ Seç</span>
+            <div style="font-weight:800; color:var(--accent); font-size:1rem;">${Number(p.sale_price).toFixed(2)} ₺ <span style="font-size:0.72rem; font-weight:500;">/${isKg ? 'kg' : 'ad'}</span></div>
+            <span style="font-size:0.72rem; color:var(--blue); background:var(--accent-soft); padding:2px 6px; border-radius:4px; font-weight:600;">➕ ${isKg ? 'Tartım' : 'Seç'}</span>
           </div>
         </div>
-      `).join('');
+      `;
+      }).join('');
 
       dropdown.style.display = 'block';
     }
@@ -2777,6 +3192,9 @@
 
       container.innerHTML = products.map(p => {
         const safeName = (p.name || '').replace(/'/g, "\\'");
+        const isKg = (p.unit === 'kg');
+        const unitStr = isKg ? 'kg' : 'adet';
+        const stockDisplay = isKg ? Number(p.stock_quantity).toFixed(3) : p.stock_quantity;
         const isCritical = p.stock_quantity <= (p.critical_stock_level || 5);
         return `
           <div class="product-item" style="content-visibility:auto; contain-intrinsic-size:0 80px; flex-wrap:wrap; gap:10px; align-items:center; background:var(--card-hover); border-radius:12px; padding:12px; border:1px solid var(--border-subtle); margin-bottom:8px;">
@@ -2785,12 +3203,15 @@
               <span style="position:absolute; bottom:-4px; right:-4px; background:var(--accent); color:#fff; border-radius:50%; width:20px; height:20px; font-size:11px; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 5px rgba(0,0,0,0.25);" title="Fotoğraf Değiştir">📷</span>
             </div>
             <div class="product-info" style="min-width:140px; flex:1; cursor:pointer;" onclick="openEditProductModal(${p.id})">
-              <h3 style="margin:0 0 4px 0; font-size:0.95rem; font-weight:700;">${p.name}</h3>
+              <h3 style="margin:0 0 4px 0; font-size:0.95rem; font-weight:700; display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
+                <span>${p.name}</span>
+                ${isKg ? '<span style="background:rgba(16,185,129,0.15); color:var(--accent); border:1px solid var(--accent); padding:1px 6px; border-radius:6px; font-size:0.7rem; font-weight:800;">⚖️ Tartılı / Kg</span>' : ''}
+              </h3>
               <p style="margin:0 0 4px 0; font-size:0.75rem; color:var(--text-muted);">Barkod: <code>${p.barcode || '-'}</code> | Kategori: <strong style="color:var(--text);">${p.category_name || 'Genel'}</strong></p>
-              <p style="margin:0; font-size:0.8rem;">Stok: <strong style="color:${isCritical ? 'var(--danger)' : 'var(--accent)'};">${p.stock_quantity}</strong> adet ${isCritical ? '⚠️' : ''}</p>
+              <p style="margin:0; font-size:0.8rem;">Stok: <strong style="color:${isCritical ? 'var(--danger)' : 'var(--accent)'};">${stockDisplay}</strong> ${unitStr} ${isCritical ? '⚠️' : ''}</p>
             </div>
             <div style="display:flex; align-items:center; gap:8px; margin-left:auto; flex-wrap:wrap;">
-              <div class="product-price" style="cursor:pointer; font-weight:800; font-size:1.05rem;" onclick="quickEditPrice(${p.id}, ${p.sale_price}, '${safeName}')" title="Fiyatı Değiştirmek İçin Tıklayın">${Number(p.sale_price).toFixed(2)} ₺</div>
+              <div class="product-price" style="cursor:pointer; font-weight:800; font-size:1.05rem;" onclick="quickEditPrice(${p.id}, ${p.sale_price}, '${safeName}')" title="Fiyatı Değiştirmek İçin Tıklayın">${Number(p.sale_price).toFixed(2)} ₺ <span style="font-size:0.72rem; color:var(--text-muted); font-weight:500;">/ ${unitStr}</span></div>
               <button class="btn" style="padding:6px 12px; font-size:0.75rem; width:auto; background:var(--accent); color:#fff; border:none; font-weight:700; border-radius:8px;" title="Ürünü ve Fotoğrafı Düzenle" onclick="openEditProductModal(${p.id})">✏️ Düzenle</button>
               <button class="btn btn-secondary" style="padding:6px 10px; font-size:0.75rem; width:auto; border-radius:8px;" title="Stok Miktarını Düzenle" onclick="editProductStockPrompt(${p.id}, ${p.stock_quantity}, '${safeName}')">📦 Stok</button>
               <button class="btn btn-danger" style="padding:6px 10px; font-size:0.75rem; width:auto; border-radius:8px;" title="Ürünü Stoktan Sil" onclick="deleteProductPrompt(${p.id}, '${safeName}')">🗑️ Sil</button>
@@ -2859,6 +3280,11 @@
       document.getElementById('edit-prod-sale').value = prod.sale_price !== undefined ? prod.sale_price : 0;
       document.getElementById('edit-prod-stock').value = prod.stock_quantity !== undefined ? prod.stock_quantity : 0;
       document.getElementById('edit-prod-critical').value = prod.critical_stock_level !== undefined ? prod.critical_stock_level : 5;
+
+      const unitVal = (prod.unit || 'adet').toLowerCase();
+      const unitSelect = document.getElementById('edit-prod-unit');
+      if (unitSelect) unitSelect.value = unitVal;
+      onEditProdUnitChange(unitVal);
 
       const imgPreview = document.getElementById('edit-prod-img-preview');
       const imgPathInput = document.getElementById('edit-prod-image-path');
@@ -2940,14 +3366,16 @@
       }
 
       const prodId = parseInt(document.getElementById('edit-prod-id').value);
+      const unit = (document.getElementById('edit-prod-unit') ? document.getElementById('edit-prod-unit').value : 'adet') || 'adet';
       const payload = {
         name: document.getElementById('edit-prod-name').value.trim(),
         barcode: document.getElementById('edit-prod-barcode').value.trim(),
         category: document.getElementById('edit-prod-category').value.trim() || 'Genel',
         purchase_price: parseFloat(document.getElementById('edit-prod-purchase').value) || 0,
         sale_price: parseFloat(document.getElementById('edit-prod-sale').value) || 0,
-        stock_quantity: parseInt(document.getElementById('edit-prod-stock').value) || 0,
-        critical_stock_level: parseInt(document.getElementById('edit-prod-critical').value) || 5,
+        stock_quantity: parseFloat(document.getElementById('edit-prod-stock').value) || 0,
+        critical_stock_level: parseFloat(document.getElementById('edit-prod-critical').value) || 5,
+        unit: unit,
         image_path: document.getElementById('edit-prod-image-path').value || null
       };
 
@@ -3002,7 +3430,7 @@
     async function editProductStockPrompt(id, currentStock, name) {
       const input = prompt(`'${name}' için yeni stok miktarını giriniz:`, currentStock);
       if (input === null) return;
-      const newStock = parseInt(input);
+      const newStock = parseFloat(String(input).replace(',', '.').trim());
       if (isNaN(newStock) || newStock < 0) {
         showToast("⚠️ Geçersiz stok miktarı!");
         return;
@@ -3051,7 +3479,10 @@
           prods.forEach(p => {
             const opt = document.createElement('option');
             opt.value = p.id;
-            opt.textContent = `${p.name} - ${p.sale_price.toFixed(2)} ₺ (Kod: ${p.barcode})`;
+            const isKg = (p.unit === 'kg');
+            const uStr = isKg ? 'kg' : 'adet';
+            const sStr = isKg ? Number(p.stock_quantity).toFixed(3) : p.stock_quantity;
+            opt.textContent = `${p.name} - ${Number(p.sale_price).toFixed(2)} ₺/${uStr} (Stok: ${sStr} ${uStr})`;
             groupEl.appendChild(opt);
           });
           select.appendChild(groupEl);
@@ -3552,12 +3983,17 @@
         ? `<span style="font-size:0.72rem; background:var(--accent-soft); color:var(--accent); border:1px solid var(--border); padding:2px 8px; border-radius:10px; font-weight:700; margin-left:6px;">👤 ${s.customer_name}</span>`
         : `<span style="font-size:0.72rem; color:var(--text-dim); padding:2px 6px; border-radius:10px;">👤 İsimsiz</span>`;
 
-      const itemDetails = (s.items || []).map(i => `
+      const itemDetails = (s.items || []).map(i => {
+        const isKg = (i.unit === 'kg');
+        const unitLabel = isKg ? 'kg' : 'adet';
+        const qtyLabel = isKg ? Number(i.quantity).toFixed(3) : i.quantity;
+        return `
         <div style="font-size:0.8rem; color:var(--text-muted); display:flex; justify-content:space-between; margin-top:2px;">
-          <span>• ${i.product_name} (${i.quantity} adet x ${Number(i.unit_price).toFixed(2)} ₺)</span>
+          <span>• ${i.product_name} (${qtyLabel} ${unitLabel} x ${Number(i.unit_price).toFixed(2)} ₺)</span>
           <span style="font-weight:600; color:var(--text);">${Number(i.subtotal).toFixed(2)} ₺</span>
         </div>
-      `).join('');
+      `;
+      }).join('');
 
       return `
         <div id="sale-card-${s.id}" class="sale-card-item" style="content-visibility:auto; contain-intrinsic-size:0 90px; background:var(--card-subtle); border:${isSelected ? '2px solid var(--accent)' : '1px solid var(--border)'}; border-radius:12px; padding:12px; margin-bottom:10px; transition:border-color 0.2s;">
@@ -4216,7 +4652,7 @@
           }
           setLoggedInUser(json.user);
           showToast("✅ " + (json.message || "Başarıyla giriş yapıldı!"));
-          triggerManualSync();
+          triggerFullCloudSync();
         } else {
           showAuthError(json.message || "Giriş başarısız! Lütfen bilgilerinizi kontrol ediniz.");
         }
@@ -4260,7 +4696,7 @@
           localStorage.setItem('stok_user_info', JSON.stringify(json.user));
           setLoggedInUser(json.user);
           showToast("✅ " + (json.message || "Hesabınız başarıyla oluşturuldu!"));
-          triggerManualSync();
+          triggerFullCloudSync();
         } else {
           showAuthError(json.message || "Kayıt oluşturulamadı!");
         }
@@ -4323,6 +4759,80 @@
     function openAuthModal() {
       const modal = document.getElementById('auth-modal-overlay');
       if (modal) modal.style.display = 'flex';
+      loadAvailableStores();
+    }
+
+    async function loadAvailableStores() {
+      const container = document.getElementById('quick-store-container');
+      const listEl = document.getElementById('quick-store-list');
+      if (!container || !listEl) return;
+      try {
+        const res = await fetch('/api/auth/stores');
+        const json = await res.json();
+        if (json.ok && json.stores && json.stores.length > 0) {
+          listEl.innerHTML = json.stores.map(st => `
+            <div style="display:flex; justify-content:space-between; align-items:center; background:var(--card); border:1px solid var(--border); padding:8px 12px; border-radius:10px; cursor:pointer; transition:border-color 0.2s;" onclick="quickSwitchStore(${st.id}, '${st.auth_token}')">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:1.1rem;">🏬</span>
+                <div>
+                  <div style="font-weight:700; font-size:0.88rem; color:var(--text);">${st.company_name}</div>
+                  <div style="font-size:0.72rem; color:var(--text-muted);">${st.full_name || ''} ${st.phone ? '• ' + st.phone : ''}</div>
+                </div>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span style="background:rgba(16,185,129,0.15); color:var(--accent); padding:2px 8px; border-radius:12px; font-size:0.75rem; font-weight:800;">${st.product_count} Ürün</span>
+                <button type="button" class="btn" style="padding:4px 10px; font-size:0.75rem; width:auto; border-radius:6px;">Giriş</button>
+              </div>
+            </div>
+          `).join('');
+          container.style.display = 'block';
+        } else {
+          container.style.display = 'none';
+        }
+      } catch (e) {
+        container.style.display = 'none';
+      }
+    }
+
+    async function quickSwitchStore(storeId, token) {
+      try {
+        const res = await fetch('/api/auth/switch-store', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: storeId })
+        });
+        const json = await res.json();
+        if (json.ok && json.user) {
+          const userToken = json.user.auth_token || token;
+          if (userToken) localStorage.setItem('stok_auth_token', userToken);
+          localStorage.setItem('stok_user_info', JSON.stringify(json.user));
+          setLoggedInUser(json.user);
+          showToast("✅ " + json.message);
+          triggerFullCloudSync();
+        }
+      } catch (e) {
+        showToast("Mağaza geçiş hatası!");
+      }
+    }
+
+    async function triggerFullCloudSync() {
+      const token = localStorage.getItem('stok_auth_token') || sessionStorage.getItem('stok_auth_token');
+      showToast("☁️ Firebase tam senkronizasyonu başlatıldı...");
+      try {
+        const res = await fetch('/api/sync/full', {
+          method: 'POST',
+          headers: token ? { 'Authorization': 'Bearer ' + token } : {}
+        });
+        const json = await res.json();
+        if (json.ok && json.result) {
+          showToast(`☁️ Firebase Eşitleme: ${json.result.pushed} veri buluta yüklendi, ${json.result.pulled} veri güncellendi.`);
+          loadProducts();
+          if (typeof loadPOSProductPicker === 'function') loadPOSProductPicker();
+          checkSyncStatus();
+        }
+      } catch (e) {
+        showToast("Bulut senkronizasyonu başarısız!");
+      }
     }
 
     function closeAuthModal() {
@@ -4358,7 +4868,24 @@
         return;
       }
 
-      // Default to standard local user session and silently load everything!
+      // Telefon veya yeni tarayıcıdan ilk kez giriliyorsa otomatik olarak en çok ürünü olan aktif mağazayı (GALLUS2) seç
+      try {
+        const storeRes = await fetch('/api/auth/stores');
+        const storeJson = await storeRes.json();
+        if (storeJson.ok && storeJson.stores && storeJson.stores.length > 0) {
+          const primaryStore = storeJson.stores[0];
+          if (primaryStore.auth_token) {
+            localStorage.setItem('stok_auth_token', primaryStore.auth_token);
+            localStorage.setItem('stok_user_info', JSON.stringify(primaryStore));
+          }
+          setLoggedInUser(primaryStore);
+          return;
+        }
+      } catch (err) {
+        console.warn("Could not fetch server stores:", err);
+      }
+
+      // Varsayılan
       setLoggedInUser({ id: 1, company_name: "Ana İşletme", full_name: "Yönetici" });
     }
 

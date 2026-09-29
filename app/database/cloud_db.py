@@ -51,6 +51,14 @@ class CloudDatabase:
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_sales_user_date ON sales(user_id, sold_at)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_expenses_user_date ON expenses(user_id, expense_date)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_sale_items_sale_prod ON sale_items(sale_id, product_name)")
+                try:
+                    conn.execute("ALTER TABLE products ADD COLUMN unit TEXT NOT NULL DEFAULT 'adet'")
+                except Exception:
+                    pass
+                try:
+                    conn.execute("ALTER TABLE sale_items ADD COLUMN unit TEXT NOT NULL DEFAULT 'adet'")
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -223,8 +231,8 @@ class CloudDatabase:
                                 """
                                 INSERT OR REPLACE INTO products (
                                     id, user_id, category_id, name, barcode, purchase_price, sale_price,
-                                    stock_quantity, critical_stock_level, image_path, is_active, synced_to_cloud, created_at, updated_at
-                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                                    stock_quantity, critical_stock_level, unit, image_path, is_active, synced_to_cloud, created_at, updated_at
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                                 """,
                                 (
                                     pid,
@@ -234,8 +242,9 @@ class CloudDatabase:
                                     d.get("barcode", f"KOD{pid}"),
                                     float(d.get("purchase_price", 0)),
                                     float(d.get("sale_price", 0)),
-                                    int(d.get("stock_quantity", 0)),
-                                    int(d.get("critical_stock_level", 5)),
+                                    float(d.get("stock_quantity", 0)),
+                                    float(d.get("critical_stock_level", 5)),
+                                    str(d.get("unit", "adet")),
                                     d.get("image_path", ""),
                                     int(d.get("is_active", 1)),
                                     d.get("created_at", now),
@@ -554,12 +563,105 @@ class CloudDatabase:
                 return user_id
         try:
             with self.db.get_connection() as conn:
-                row = conn.execute("SELECT id FROM users ORDER BY id ASC LIMIT 1").fetchone()
+                # 1. En çok aktif ürünü olan ana işletmeyi bul (örn: GALLUS2)
+                row = conn.execute("""
+                    SELECT u.id 
+                    FROM users u
+                    JOIN products p ON p.user_id = u.id AND p.is_active = 1
+                    GROUP BY u.id
+                    ORDER BY COUNT(p.id) DESC
+                    LIMIT 1
+                """).fetchone()
+                if row:
+                    return row["id"]
+                # 2. Ürün bulunamazsa son oluşturulan veya ilk kullanıcıyı al
+                row = conn.execute("SELECT id FROM users ORDER BY id DESC LIMIT 1").fetchone()
                 if row:
                     return row["id"]
         except Exception:
             pass
         return None
+
+    def force_full_sync_with_firebase(self, user_id: Optional[int] = None) -> Dict[str, Any]:
+        """Kullanıcının TÜM ürünlerini, kategorilerini, satışlarını ve kullanıcı kaydını
+        synced_to_cloud değerine bakılmaksızın Firestore'a tam olarak eşitler."""
+        if not self.firestore_db:
+            self._init_firebase_optional()
+
+        if not self.firestore_db:
+            return {
+                "synced": False,
+                "reason": "Firebase bağlantısı çevrimdışı. Lütfen internet bağlantınızı kontrol ediniz.",
+                "pushed": 0,
+                "pulled": 0,
+            }
+
+        uid = self._resolve_user_id(user_id) or 1
+        pushed_count = 0
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        try:
+            with self.db.get_connection() as conn:
+                # 1. Kullanıcıyı eşitle
+                u_row = conn.execute("SELECT * FROM users WHERE id = ?", (uid,)).fetchone()
+                if u_row:
+                    u_dict = dict(u_row)
+                    u_dict["synced_to_cloud"] = 1
+                    try:
+                        self.firestore_db.collection("users").document(str(uid)).set(u_dict)
+                        conn.execute("UPDATE users SET synced_to_cloud = 1 WHERE id = ?", (uid,))
+                        pushed_count += 1
+                    except Exception as e:
+                        logger.warning(f"Kullanıcı senkronizasyon hatası: {e}")
+
+                # 2. Tüm kategorileri eşitle
+                cats = conn.execute("SELECT * FROM categories WHERE user_id = ?", (uid,)).fetchall()
+                for c in cats:
+                    c_dict = dict(c)
+                    c_id = c_dict["id"]
+                    c_dict["synced_to_cloud"] = 1
+                    doc_id = f"u{uid}_c{c_id}"
+                    try:
+                        self.firestore_db.collection("categories").document(doc_id).set(c_dict)
+                        conn.execute("UPDATE categories SET synced_to_cloud = 1 WHERE id = ?", (c_id,))
+                        pushed_count += 1
+                    except Exception as e:
+                        logger.warning(f"Kategori senkronizasyon hatası: {e}")
+
+                # 3. Tüm ürünleri (Aktif olanlar) eşitle
+                prods = conn.execute("""
+                    SELECT p.*, c.name as category_name
+                    FROM products p
+                    LEFT JOIN categories c ON p.category_id = c.id
+                    WHERE p.user_id = ? AND p.is_active = 1
+                """, (uid,)).fetchall()
+                for p in prods:
+                    p_dict = dict(p)
+                    p_id = p_dict["id"]
+                    p_dict["synced_to_cloud"] = 1
+                    p_dict["stock_quantity"] = float(p_dict.get("stock_quantity", 0))
+                    p_dict["critical_stock_level"] = float(p_dict.get("critical_stock_level", 5))
+                    p_dict["unit"] = str(p_dict.get("unit", "adet"))
+                    doc_id = f"u{uid}_p{p_id}"
+                    try:
+                        self.firestore_db.collection("products").document(doc_id).set(p_dict)
+                        conn.execute("UPDATE products SET synced_to_cloud = 1 WHERE id = ?", (p_id,))
+                        pushed_count += 1
+                    except Exception as e:
+                        logger.warning(f"Ürün senkronizasyon hatası: {e}")
+
+            # 4. Çift yönlü çekme
+            pulled_count = self.pull_all_from_firebase(user_id=uid)
+
+            return {
+                "synced": True,
+                "reason": f"Tüm ürünler ve veriler Firebase ile başarıyla eşitlendi ({pushed_count} buluta yüklendi, {pulled_count} indirildi).",
+                "pushed": pushed_count,
+                "pulled": pulled_count,
+            }
+        except Exception as e:
+            logger.error(f"Full sync hatası: {e}")
+            return {"synced": False, "reason": str(e), "pushed": pushed_count, "pulled": 0}
 
     # ════════════════════════════════════════════════════════════════════
     # KATEGORİ İŞLEMLERİ (KULLANICIYA ÖZEL İZOLE)
@@ -651,16 +753,20 @@ class CloudDatabase:
         category_name: str,
         purchase_price: float,
         sale_price: float,
-        stock_quantity: int,
-        critical_stock_level: int = 5,
+        stock_quantity: float,
+        critical_stock_level: float = 5,
         image_path: Optional[str] = None,
         product_id: Optional[int] = None,
         user_id: Optional[int] = None,
+        unit: str = "adet",
     ) -> tuple[bool, str, Optional[Dict[str, Any]]]:
 
         uid = user_id or 1
         cat_id = self.add_category(category_name, user_id=uid) or 1
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        unit_clean = (unit or "adet").strip().lower()
+        if unit_clean not in ("adet", "kg"):
+            unit_clean = "adet"
 
         with self.db.get_connection() as conn:
             if product_id:
@@ -682,8 +788,6 @@ class CloudDatabase:
                     return False, f"'{barcode}' barkodlu başka bir ürününüz zaten mevcut!", None
 
                 # Fotoğraf koruma mantığı:
-                # Eğer image_path verilmemişse (None) mevcut fotoğraf korunur.
-                # Eğer '__REMOVE__' verilmişse fotoğraf temizlenir.
                 if image_path == "__REMOVE__":
                     final_image_path = ""
                 elif image_path is not None:
@@ -696,7 +800,7 @@ class CloudDatabase:
                     UPDATE products
                     SET category_id = ?, name = ?, barcode = ?, purchase_price = ?,
                         sale_price = ?, stock_quantity = ?, critical_stock_level = ?,
-                        image_path = ?, updated_at = ?, is_active = 1
+                        unit = ?, image_path = ?, updated_at = ?, is_active = 1
                     WHERE id = ? AND user_id = ?
                     """,
                     (
@@ -705,8 +809,9 @@ class CloudDatabase:
                         barcode,
                         purchase_price,
                         sale_price,
-                        stock_quantity,
-                        critical_stock_level,
+                        float(stock_quantity),
+                        float(critical_stock_level),
+                        unit_clean,
                         final_image_path,
                         now,
                         product_id,
@@ -730,8 +835,8 @@ class CloudDatabase:
                     """
                     INSERT INTO products (
                         user_id, category_id, name, barcode, purchase_price, sale_price,
-                        stock_quantity, critical_stock_level, image_path, is_active, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                        stock_quantity, critical_stock_level, unit, image_path, is_active, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                     """,
                     (
                         uid,
@@ -740,8 +845,9 @@ class CloudDatabase:
                         barcode,
                         purchase_price,
                         sale_price,
-                        stock_quantity,
-                        critical_stock_level,
+                        float(stock_quantity),
+                        float(critical_stock_level),
+                        unit_clean,
                         final_image_path,
                         now,
                         now,
@@ -759,8 +865,9 @@ class CloudDatabase:
             "barcode": barcode,
             "purchase_price": purchase_price,
             "sale_price": sale_price,
-            "stock_quantity": stock_quantity,
-            "critical_stock_level": critical_stock_level,
+            "stock_quantity": float(stock_quantity),
+            "critical_stock_level": float(critical_stock_level),
+            "unit": unit_clean,
             "image_path": final_image_path,
             "is_active": 1,
             "created_at": now,
@@ -884,7 +991,7 @@ class CloudDatabase:
 
         return True, "Ürün stok kataloğundan silindi."
 
-    def update_product_stock(self, product_id: int, stock_quantity: int, user_id: Optional[int] = None) -> tuple[bool, str]:
+    def update_product_stock(self, product_id: int, stock_quantity: float, user_id: Optional[int] = None) -> tuple[bool, str]:
         if stock_quantity < 0:
             return False, "Stok miktarı negatif olamaz!"
 
@@ -893,14 +1000,16 @@ class CloudDatabase:
         with self.db.get_connection() as conn:
             conn.execute(
                 "UPDATE products SET stock_quantity = ?, synced_to_cloud = 0, updated_at = ? WHERE id = ? AND user_id = ? AND is_active = 1",
-                (stock_quantity, now, product_id, uid)
+                (float(stock_quantity), now, product_id, uid)
             )
+            p_row = conn.execute("SELECT unit FROM products WHERE id = ?", (product_id,)).fetchone()
+            unit_str = p_row["unit"] if p_row and p_row["unit"] else "adet"
 
         if self.firestore_db:
             try:
                 doc_id = f"u{uid}_p{product_id}"
                 self.firestore_db.collection("products").document(doc_id).update({
-                    "stock_quantity": stock_quantity,
+                    "stock_quantity": float(stock_quantity),
                     "updated_at": now,
                     "synced_to_cloud": 1
                 })
@@ -909,7 +1018,7 @@ class CloudDatabase:
             except Exception as e:
                 logger.warning(f"Firestore stok güncelleme uyarısı: {e}")
 
-        return True, f"Stok miktarı {stock_quantity} adet olarak güncellendi."
+        return True, f"Stok miktarı {float(stock_quantity):g} {unit_str} olarak güncellendi."
 
     # ════════════════════════════════════════════════════════════════════
     # SATIŞ İŞLEMLERİ (KULLANICIYA ÖZEL İZOLE)
@@ -942,7 +1051,7 @@ class CloudDatabase:
         else:
             total_amount = round(calculated_total, 2)
 
-        item_count = sum(int(item.get("quantity", 1)) for item in cart_items)
+        item_count = len(cart_items)
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         with self.db.get_connection() as conn:
@@ -955,27 +1064,28 @@ class CloudDatabase:
             for item in cart_items:
                 conn.execute(
                     """
-                    INSERT INTO sale_items (sale_id, product_id, product_name, barcode, unit_price, quantity, subtotal)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO sale_items (sale_id, product_id, product_name, barcode, unit_price, quantity, subtotal, unit)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         sale_id,
                         item["product_id"],
                         item["product_name"],
                         item["barcode"],
-                        item["unit_price"],
-                        item["quantity"],
-                        item["subtotal"],
+                        float(item["unit_price"]),
+                        float(item["quantity"]),
+                        float(item["subtotal"]),
+                        str(item.get("unit", "adet")),
                     ),
                 )
                 # Deduct stock ONLY for active products of this user
                 conn.execute(
                     """
                     UPDATE products
-                    SET stock_quantity = MAX(0, stock_quantity - ?), updated_at = ?
+                    SET stock_quantity = MAX(0.0, stock_quantity - ?), updated_at = ?
                     WHERE id = ? AND user_id = ? AND is_active = 1
                     """,
-                    (item["quantity"], now, item["product_id"], uid),
+                    (float(item["quantity"]), now, item["product_id"], uid),
                 )
 
         synced = 0
@@ -995,7 +1105,20 @@ class CloudDatabase:
                     "synced_to_cloud": 1,
                 })
                 synced = 1
-            except Exception:
+                # Also update live stock_quantity for affected products in Firestore
+                for item in cart_items:
+                    pid = item.get("product_id")
+                    if pid:
+                        with self.db.get_connection() as c:
+                            p_row = c.execute("SELECT stock_quantity, unit FROM products WHERE id = ?", (pid,)).fetchone()
+                            if p_row:
+                                self.firestore_db.collection("products").document(f"u{uid}_p{pid}").update({
+                                    "stock_quantity": float(p_row["stock_quantity"]),
+                                    "unit": p_row["unit"],
+                                    "updated_at": now,
+                                })
+            except Exception as e:
+                logger.warning(f"Firestore satış kaydı uyarısı: {e}")
                 synced = 0
 
         with self.db.get_connection() as conn:
@@ -1677,9 +1800,9 @@ class CloudDatabase:
             row = conn.execute(
                 """
                 SELECT * FROM users 
-                WHERE phone = ? OR phone = ? OR phone = ? OR phone = ? OR phone = ? OR LOWER(email) = ?
+                WHERE phone = ? OR phone = ? OR phone = ? OR phone = ? OR phone = ? OR LOWER(email) = ? OR LOWER(company_name) = ?
                 """,
-                (query_val, p_clean, p_zero, p_90, p_plus90, e_clean),
+                (query_val, p_clean, p_zero, p_90, p_plus90, e_clean, e_clean),
             ).fetchone()
 
             if row:
@@ -1718,9 +1841,8 @@ class CloudDatabase:
                 docs = list(users_col.stream())
                 for d in docs:
                     data = d.to_dict()
-                    d_phone = self._clean_phone(str(data.get("phone", "")))
-                    d_email = str(data.get("email", "")).strip().lower()
-                    if (p_clean and d_phone == p_clean) or d_email == e_clean or str(data.get("phone", "")) == query_val:
+                    d_company = str(data.get("company_name", "")).strip().lower()
+                    if (p_clean and d_phone == p_clean) or d_email == e_clean or str(data.get("phone", "")) == query_val or d_company == e_clean:
                         saved_hash = data.get("password_hash")
                         if not saved_hash or saved_hash == pass_hash:
                             token = self._generate_token()
@@ -1813,3 +1935,52 @@ class CloudDatabase:
                 logger.warning(f"Firestore token doğrulama uyarısı: {e}")
 
         return None
+
+    def get_all_stores(self) -> list[Dict[str, Any]]:
+        """Sistemde kayıtlı mağazaları ve aktif ürün sayılarını listeler."""
+        stores = []
+        try:
+            with self.db.get_connection() as conn:
+                rows = conn.execute("""
+                    SELECT u.id, u.company_name, u.full_name, u.phone, u.email, u.auth_token,
+                           COUNT(p.id) as product_count
+                    FROM users u
+                    LEFT JOIN products p ON p.user_id = u.id AND p.is_active = 1
+                    GROUP BY u.id
+                    ORDER BY product_count DESC, u.id ASC
+                """).fetchall()
+                for r in rows:
+                    token = r["auth_token"]
+                    if not token:
+                        token = self._generate_token()
+                        conn.execute("UPDATE users SET auth_token = ? WHERE id = ?", (token, r["id"]))
+                    stores.append({
+                        "id": r["id"],
+                        "company_name": r["company_name"] or f"Mağaza #{r['id']}",
+                        "full_name": r["full_name"] or "",
+                        "phone": r["phone"] or "",
+                        "email": r["email"] or "",
+                        "auth_token": token,
+                        "product_count": int(r["product_count"] or 0)
+                    })
+        except Exception as e:
+            logger.error(f"get_all_stores error: {e}")
+        return stores
+
+    def quick_switch_user(self, user_id: int) -> tuple[bool, str, Optional[Dict[str, Any]]]:
+        """Kullanıcının şifresiz hızlı mağaza geçişi yapmasını sağlar (lokal/güvenilir ağ modu)."""
+        try:
+            with self.db.get_connection() as conn:
+                row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+                if not row:
+                    return False, f"Mağaza ID {user_id} bulunamadı!", None
+                user_dict = dict(row)
+                token = user_dict.get("auth_token")
+                if not token:
+                    token = self._generate_token()
+                    conn.execute("UPDATE users SET auth_token = ? WHERE id = ?", (token, user_id))
+                    user_dict["auth_token"] = token
+                user_dict.pop("password_hash", None)
+                return True, f"'{user_dict.get('company_name', '')}' mağazasına geçildi.", user_dict
+        except Exception as e:
+            return False, f"Mağaza geçiş hatası: {e}", None

@@ -10,8 +10,9 @@ class Product:
     barcode: str
     purchase_price: float
     sale_price: float
-    stock_quantity: int
-    critical_stock_level: int = 5
+    stock_quantity: float
+    critical_stock_level: float = 5
+    unit: str = "adet"
     image_path: Optional[str] = None
     is_active: int = 1
     created_at: Optional[str] = None
@@ -26,10 +27,11 @@ class Product:
             category_id=row["category_id"],
             name=row["name"],
             barcode=row["barcode"],
-            purchase_price=row["purchase_price"],
-            sale_price=row["sale_price"],
-            stock_quantity=row["stock_quantity"],
-            critical_stock_level=row["critical_stock_level"],
+            purchase_price=float(row["purchase_price"]),
+            sale_price=float(row["sale_price"]),
+            stock_quantity=float(row["stock_quantity"]),
+            critical_stock_level=float(row["critical_stock_level"]),
+            unit=str(row["unit"]) if "unit" in keys and row["unit"] else "adet",
             image_path=row["image_path"] if "image_path" in keys else None,
             is_active=row["is_active"],
             created_at=row["created_at"],

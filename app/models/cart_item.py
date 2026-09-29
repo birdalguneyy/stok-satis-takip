@@ -8,8 +8,9 @@ class CartItem:
     product_name: str
     barcode: str
     unit_price: float
-    quantity: int = 1
-    stock_quantity: int = 0
+    quantity: float = 1.0
+    stock_quantity: float = 0.0
+    unit: str = "adet"
     original_unit_price: Optional[float] = None
 
     def __post_init__(self):

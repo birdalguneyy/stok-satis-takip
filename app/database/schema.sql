@@ -39,8 +39,9 @@ CREATE TABLE IF NOT EXISTS products (
     barcode              TEXT NOT NULL,
     purchase_price       REAL NOT NULL CHECK (purchase_price >= 0),
     sale_price           REAL NOT NULL CHECK (sale_price >= 0),
-    stock_quantity       INTEGER NOT NULL DEFAULT 0 CHECK (stock_quantity >= 0),
-    critical_stock_level INTEGER NOT NULL DEFAULT 5,
+    stock_quantity       REAL NOT NULL DEFAULT 0 CHECK (stock_quantity >= 0),
+    critical_stock_level REAL NOT NULL DEFAULT 5,
+    unit                 TEXT NOT NULL DEFAULT 'adet',
     image_path           TEXT,
     is_active            INTEGER NOT NULL DEFAULT 1,
     synced_to_cloud      INTEGER NOT NULL DEFAULT 0,
@@ -77,7 +78,8 @@ CREATE TABLE IF NOT EXISTS sale_items (
     product_name TEXT NOT NULL,
     barcode      TEXT NOT NULL,
     unit_price   REAL NOT NULL,
-    quantity     INTEGER NOT NULL CHECK (quantity > 0),
+    quantity     REAL NOT NULL CHECK (quantity > 0),
+    unit         TEXT NOT NULL DEFAULT 'adet',
     subtotal     REAL NOT NULL
 );
 

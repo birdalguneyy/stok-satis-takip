@@ -148,6 +148,31 @@ def auth_me():
     return jsonify({"authenticated": False, "message": "Oturum geçersiz"}), 401
 
 
+@app.route("/api/auth/stores", methods=["GET"])
+def get_stores():
+    """Tüm kayıtlı mağazaları listeler."""
+    stores = cloud_db.get_all_stores()
+    return jsonify({"ok": True, "stores": stores})
+
+
+@app.route("/api/auth/switch-store", methods=["POST"])
+def switch_store():
+    """Hızlı mağaza geçişi yapar."""
+    data = request.json or {}
+    store_id = data.get("user_id") or data.get("id")
+    if not store_id:
+        return jsonify({"ok": False, "message": "Mağaza ID belirtilmedi!"}), 400
+    try:
+        store_id = int(store_id)
+    except (ValueError, TypeError):
+        return jsonify({"ok": False, "message": "Geçersiz mağaza ID!"}), 400
+
+    ok, msg, user = cloud_db.quick_switch_user(store_id)
+    if not ok:
+        return jsonify({"ok": False, "message": msg}), 400
+    return jsonify({"ok": True, "message": msg, "user": user})
+
+
 def get_current_user_id() -> int:
     token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
     if not token:
@@ -228,6 +253,17 @@ def trigger_sync():
     return jsonify({"ok": True, "result": res})
 
 
+@app.route("/api/sync/full", methods=["GET", "POST"])
+def full_sync():
+    """Tüm aktif ürünleri ve verileri Firebase Firestore ile tam senkronize eder."""
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
+    res = cloud_db.force_full_sync_with_firebase(user_id=user_id)
+    notify_data_change(user_id)
+    return jsonify({"ok": True, "result": res})
+
+
 @app.route("/api/sync/status", methods=["GET"])
 def sync_status():
     user_id = get_current_user_id()
@@ -298,8 +334,9 @@ def save_product():
     category = data.get("category", "Genel").strip()
     purchase_price = float(data.get("purchase_price", 0))
     sale_price = float(data.get("sale_price", 0))
-    stock_quantity = int(data.get("stock_quantity", 0))
-    critical_stock = int(data.get("critical_stock_level", 5))
+    stock_quantity = float(data.get("stock_quantity", 0))
+    critical_stock = float(data.get("critical_stock_level", 5))
+    unit = str(data.get("unit", "adet")).strip().lower()
     image_path = data.get("image_path")
     raw_id = data.get("id") or data.get("product_id")
     product_id = int(raw_id) if raw_id else None
@@ -318,6 +355,7 @@ def save_product():
         image_path=image_path,
         product_id=product_id,
         user_id=user_id,
+        unit=unit,
     )
     if ok:
         notify_data_change(user_id)
@@ -344,11 +382,12 @@ def update_product_route(product_id: int):
     try:
         purchase_price = float(data.get("purchase_price") if data.get("purchase_price") is not None else curr.get("purchase_price", 0.0))
         sale_price = float(data.get("sale_price") if data.get("sale_price") is not None else curr.get("sale_price", 0.0))
-        stock_quantity = int(data.get("stock_quantity") if data.get("stock_quantity") is not None else curr.get("stock_quantity", 0))
-        critical_stock = int(data.get("critical_stock_level") if data.get("critical_stock_level") is not None else curr.get("critical_stock_level", 5))
+        stock_quantity = float(data.get("stock_quantity") if data.get("stock_quantity") is not None else curr.get("stock_quantity", 0))
+        critical_stock = float(data.get("critical_stock_level") if data.get("critical_stock_level") is not None else curr.get("critical_stock_level", 5))
     except (ValueError, TypeError) as e:
         return jsonify({"ok": False, "message": f"Geçersiz sayısal değer: {e}"}), 400
 
+    unit = str(data.get("unit") if data.get("unit") is not None else curr.get("unit", "adet")).strip().lower()
     image_path = data.get("image_path")  # None ise mevcut korunur, '__REMOVE__' ise silinir
 
     ok, msg, prod = cloud_db.save_product(
@@ -362,6 +401,7 @@ def update_product_route(product_id: int):
         image_path=image_path,
         product_id=product_id,
         user_id=user_id,
+        unit=unit,
     )
     if ok:
         notify_data_change(user_id)
@@ -462,7 +502,7 @@ def update_product_stock_route(product_id):
         return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
     data = request.json or {}
     try:
-        stock = int(data.get("stock_quantity", 0))
+        stock = float(data.get("stock_quantity", 0))
     except (ValueError, TypeError):
         return jsonify({"ok": False, "message": "Geçersiz stok miktarı!"}), 400
 
@@ -566,12 +606,12 @@ def record_online_sale():
     barcode = str(data.get("barcode", "")).strip()
 
     try:
-        qty = int(data.get("quantity", 1))
+        qty = float(data.get("quantity", 1))
     except (ValueError, TypeError):
-        qty = 1
+        qty = 1.0
 
     if qty <= 0:
-        return jsonify({"ok": False, "message": "Geçersiz satış adedi!"}), 400
+        return jsonify({"ok": False, "message": "Geçersiz satış miktarı!"}), 400
 
     prod = None
     if product_id:
@@ -583,11 +623,12 @@ def record_online_sale():
     if not prod:
         return jsonify({"ok": False, "message": "Satışı yapılacak ürün bulunamadı!"}), 404
 
-    current_stock = int(prod.get("stock_quantity", 0))
+    current_stock = float(prod.get("stock_quantity", 0))
+    p_unit = prod.get("unit", "adet")
     if current_stock < qty:
         return jsonify({
             "ok": False,
-            "message": f"Yetersiz stok! Mevcut stok: {current_stock} adet, girilen satış: {qty} adet."
+            "message": f"Yetersiz stok! Mevcut stok: {current_stock:g} {p_unit}, girilen satış: {qty:g} {p_unit}."
         }), 400
 
     unit_price = float(data.get("unit_price") or prod.get("sale_price", 0.0))
@@ -600,6 +641,7 @@ def record_online_sale():
         "unit_price": unit_price,
         "quantity": qty,
         "subtotal": round(unit_price * qty, 2),
+        "unit": p_unit,
     }]
 
     ok, msg = cloud_db.add_sale(

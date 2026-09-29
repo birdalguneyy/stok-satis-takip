@@ -5,6 +5,8 @@ __pycache__/
 venv/
 env/
 data/*.db
+*.db
+*.db-journal
 data/*.pem
 data/gemini_key.txt
 data/uploads/

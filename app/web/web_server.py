@@ -2,8 +2,9 @@ import logging
 import os
 import socket
 import threading
+import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import cv2
 import numpy as np
@@ -206,6 +207,13 @@ def notify_data_change(user_id: Optional[int] = None) -> int:
         else:
             _version_events[uid] = threading.Event()
         return current
+
+
+# ════════════════════════════════════════════════════════════════════
+# SATIŞ MÜKERRER KAYIT & KİLİT MEKANİZMASI (IDEMPOTENCY / ANTI-DUPLICATE)
+# ════════════════════════════════════════════════════════════════════
+_sale_idempotency_lock = threading.Lock()
+_sale_idempotency_cache: dict[str, dict[str, Any]] = {}
 
 
 def get_data_version(user_id: Optional[int] = None) -> int:
@@ -571,8 +579,34 @@ def record_sale():
     channel = data.get("channel", "magaza")
     total_amount = data.get("total_amount")
     customer_name = data.get("customer_name")
+    idempotency_key = data.get("idempotency_key")
     if not items:
         return jsonify({"ok": False, "message": "Sepet boş!"}), 400
+
+    # Benzersiz imza / key ile çift tıklama ve mükerrer istek koruması
+    now_ts = time.time()
+    if idempotency_key:
+        cache_key = f"u{user_id}_k_{idempotency_key}"
+    else:
+        items_sig = tuple(sorted((int(it.get("product_id", 0)), float(it.get("quantity", 1))) for it in items))
+        cache_key = f"u{user_id}_sig_{hash(items_sig)}_{total_amount}_{customer_name}"
+
+    with _sale_idempotency_lock:
+        # 60 saniyeden eski kayıtları temizle
+        expired = [k for k, v in _sale_idempotency_cache.items() if now_ts - v.get("timestamp", 0) > 60.0]
+        for k in expired:
+            _sale_idempotency_cache.pop(k, None)
+
+        entry = _sale_idempotency_cache.get(cache_key)
+        if entry:
+            if entry.get("in_progress"):
+                logger.warning("Çift tıklama / eşzamanlı satış engellendi: %s", cache_key)
+                return jsonify({"ok": True, "message": "Satış işlemi kaydediliyor, lütfen bekleyiniz...", "duplicate": True})
+            if now_ts - entry.get("timestamp", 0) < 15.0:
+                logger.warning("Son 15 saniyede tamamlanmış mükerrer satış engellendi: %s", cache_key)
+                return jsonify(entry.get("response", {"ok": True, "message": "Satış zaten işlendi.", "duplicate": True}))
+
+        _sale_idempotency_cache[cache_key] = {"timestamp": now_ts, "in_progress": True}
 
     total_override = None
     if total_amount is not None:
@@ -581,17 +615,26 @@ def record_sale():
         except (ValueError, TypeError):
             total_override = None
 
-    ok, msg = cloud_db.add_sale(
-        items,
-        note=note,
-        user_id=user_id,
-        channel=channel,
-        total_amount_override=total_override,
-        customer_name=customer_name,
-    )
-    if ok:
-        notify_data_change(user_id)
-    return jsonify({"ok": ok, "message": msg})
+    try:
+        ok, msg = cloud_db.add_sale(
+            items,
+            note=note,
+            user_id=user_id,
+            channel=channel,
+            total_amount_override=total_override,
+            customer_name=customer_name,
+        )
+        if ok:
+            notify_data_change(user_id)
+        resp_data = {"ok": ok, "message": msg}
+        with _sale_idempotency_lock:
+            _sale_idempotency_cache[cache_key] = {"timestamp": time.time(), "in_progress": False, "response": resp_data}
+        return jsonify(resp_data)
+    except Exception as exc:
+        with _sale_idempotency_lock:
+            _sale_idempotency_cache.pop(cache_key, None)
+        logger.error("Satış kaydı sırasında hata: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "message": f"Satış kaydedilirken hata oluştu: {str(exc)}"}), 500
 
 
 @app.route("/api/sales/online", methods=["POST"])
@@ -644,20 +687,41 @@ def record_online_sale():
         "unit": p_unit,
     }]
 
-    ok, msg = cloud_db.add_sale(
-        cart_items,
-        note=f"🌐 {platform}",
-        user_id=user_id,
-        channel="internet",
-    )
-    if ok:
-        notify_data_change(user_id)
-    return jsonify({
-        "ok": ok,
-        "message": f"🌐 {qty} adet '{prod['name']}' internet satışı başarıyla kaydedildi." if ok else msg,
-        "product_name": prod["name"],
-        "remaining_stock": max(0, current_stock - qty),
-    })
+    # Mükerrer internet satışı koruması
+    cache_key = f"u{user_id}_online_{prod['id']}_{qty}_{unit_price}"
+    now_ts = time.time()
+    with _sale_idempotency_lock:
+        entry = _sale_idempotency_cache.get(cache_key)
+        if entry:
+            if entry.get("in_progress"):
+                return jsonify({"ok": True, "message": "İnternet satışı kaydediliyor...", "duplicate": True})
+            if now_ts - entry.get("timestamp", 0) < 10.0:
+                return jsonify(entry.get("response", {"ok": True, "message": "Satış zaten işlendi.", "duplicate": True}))
+        _sale_idempotency_cache[cache_key] = {"timestamp": now_ts, "in_progress": True}
+
+    try:
+        ok, msg = cloud_db.add_sale(
+            cart_items,
+            note=f"🌐 {platform}",
+            user_id=user_id,
+            channel="internet",
+        )
+        if ok:
+            notify_data_change(user_id)
+        resp_data = {
+            "ok": ok,
+            "message": f"🌐 {qty} adet '{prod['name']}' internet satışı başarıyla kaydedildi." if ok else msg,
+            "product_name": prod["name"],
+            "remaining_stock": max(0, current_stock - qty),
+        }
+        with _sale_idempotency_lock:
+            _sale_idempotency_cache[cache_key] = {"timestamp": time.time(), "in_progress": False, "response": resp_data}
+        return jsonify(resp_data)
+    except Exception as exc:
+        with _sale_idempotency_lock:
+            _sale_idempotency_cache.pop(cache_key, None)
+        logger.error("İnternet satışı sırasında hata: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "message": f"Satış kaydedilirken hata oluştu: {str(exc)}"}), 500
 
 
 @app.route("/api/sales/forecast", methods=["GET"])

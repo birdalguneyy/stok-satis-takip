@@ -472,6 +472,17 @@
       100% { top: 20%; }
     }
 
+    @keyframes btnSpin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .btn-loading {
+      opacity: 0.75 !important;
+      cursor: not-allowed !important;
+      pointer-events: none !important;
+      filter: grayscale(20%);
+    }
+
     /* Product Image Preview */
     .image-preview {
       width: 100%;
@@ -726,7 +737,7 @@
 
         <div style="display:flex; gap:10px; margin-top:8px;">
           <button type="button" class="btn btn-secondary" style="flex:1; padding:12px;" onclick="closeOnlineSaleModal()">Vazgeç</button>
-          <button type="submit" class="btn" style="flex:2; background:#0284C7; color:#fff; padding:12px; font-weight:700;">
+          <button type="submit" id="online-sale-submit-btn" class="btn" style="flex:2; background:#0284C7; color:#fff; padding:12px; font-weight:700;">
             🚀 Satışı Onayla & Stoktan Düş
           </button>
         </div>
@@ -1069,7 +1080,7 @@
             <div id="pos-total-amount" style="font-size: 1.4rem; font-weight: 800; color: var(--accent);">0.00 ₺</div>
             <div id="pos-calc-total-note" style="display:none; font-size:0.75rem; color:var(--text-muted); text-decoration:line-through;"></div>
           </div>
-          <button class="btn" style="width: auto; padding: 12px 24px;" onclick="completePOSSale()">Satışı Tamamla</button>
+          <button id="pos-complete-sale-btn" class="btn" style="width: auto; min-width: 160px; padding: 12px 24px; font-weight: 700;" onclick="completePOSSale()">Satışı Tamamla</button>
         </div>
       </div>
     </div>
@@ -2958,34 +2969,93 @@
       }
     }
 
+    let isCompletingPOSSale = false;
+
     async function completePOSSale() {
-      if (posCart.length === 0) {
+      if (isCompletingPOSSale) {
+        return;
+      }
+      if (!posCart || posCart.length === 0) {
         showToast("⚠️ Sepetiniz boş!");
         return;
       }
-      const calcTotal = Math.round(posCart.reduce((sum, item) => sum + item.subtotal, 0) * 100) / 100;
-      const finalTotal = posCustomTotal !== null ? posCustomTotal : calcTotal;
+
+      const btn = document.getElementById('pos-complete-sale-btn');
+      const cartContainer = document.getElementById('pos-cart-list');
       const custNameInput = document.getElementById('pos-customer-name');
       const customerName = custNameInput ? custNameInput.value.trim() : '';
 
-      const res = await fetchWithAuth('/api/sales', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          items: posCart,
-          note: 'Mobil POS Satış',
-          total_amount: finalTotal,
-          customer_name: customerName || null
-        })
-      });
-      const json = await res.json();
-      showToast(json.message);
-      if (json.ok) {
-        posCart = [];
-        posCustomTotal = null;
-        if (custNameInput) custNameInput.value = '';
-        renderPOSCart();
-        loadProducts();
+      const calcTotal = Math.round(posCart.reduce((sum, item) => sum + item.subtotal, 0) * 100) / 100;
+      const finalTotal = posCustomTotal !== null ? posCustomTotal : calcTotal;
+
+      // 1. Kullanıcının tekrar tekrar basmasını önlemek için anında kilitle
+      isCompletingPOSSale = true;
+      if (btn) {
+        btn.disabled = true;
+        btn.classList.add('btn-loading');
+        btn.innerHTML = `
+          <span style="display:inline-flex; align-items:center; justify-content:center; gap:8px;">
+            <svg style="animation: btnSpin 0.7s linear infinite; width:16px; height:16px; display:inline-block;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle>
+              <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"></path>
+            </svg>
+            İşleniyor...
+          </span>
+        `;
+      }
+      if (cartContainer) {
+        cartContainer.style.opacity = '0.5';
+        cartContainer.style.pointerEvents = 'none';
+      }
+
+      // Benzersiz işlem anahtarı oluştur (mükerrer istek koruması)
+      const idempotencyKey = 'pos_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+
+      try {
+        const res = await fetchWithAuth('/api/sales', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            items: posCart,
+            note: 'Mobil POS Satış',
+            total_amount: finalTotal,
+            customer_name: customerName || null,
+            idempotency_key: idempotencyKey
+          })
+        });
+        const json = await res.json();
+        
+        if (json.ok) {
+          playBeep();
+          showToast(json.message || "✅ Satış başarıyla tamamlandı!");
+          // Sepeti ve toplamı anında sıfırla
+          posCart = [];
+          posCustomTotal = null;
+          if (custNameInput) custNameInput.value = '';
+          renderPOSCart();
+          loadProducts();
+          loadPOSProductPicker();
+          loadSalesHistory();
+          loadSalesAnalytics();
+          loadForecastData();
+        } else {
+          showToast("❌ " + (json.message || "Satış kaydedilemedi!"));
+        }
+      } catch (err) {
+        console.error("completePOSSale hatası:", err);
+        showToast("⚠️ Satış işlenirken bağlantı hatası oluştu!");
+      } finally {
+        // Satış bittiğinde veya hata aldığında kilidi aç ve butonu eski haline getir
+        isCompletingPOSSale = false;
+        if (btn) {
+          btn.disabled = false;
+          btn.classList.remove('btn-loading');
+          btn.innerHTML = 'Satışı Tamamla';
+        }
+        if (cartContainer) {
+          cartContainer.style.opacity = '1';
+          cartContainer.style.pointerEvents = 'auto';
+        }
       }
     }
 
@@ -4485,13 +4555,18 @@
       }
     }
 
+    let isSubmittingOnlineSale = false;
+
     async function handleOnlineSaleSubmit(e) {
       e.preventDefault();
+      if (isSubmittingOnlineSale) return;
+
       const select = document.getElementById('online-sale-product-select');
       const qtyInput = document.getElementById('online-sale-qty');
       const priceInput = document.getElementById('online-sale-price');
       const platformSelect = document.getElementById('online-sale-platform');
       const noteInput = document.getElementById('online-sale-note');
+      const submitBtn = document.getElementById('online-sale-submit-btn');
 
       const productId = select.value;
       if (!productId) {
@@ -4499,10 +4574,25 @@
         return;
       }
 
-      const qty = parseInt(qtyInput.value);
+      const qty = parseFloat(qtyInput.value);
       const unitPrice = parseFloat(priceInput.value);
       const platform = platformSelect.value;
       const note = noteInput.value.trim();
+
+      isSubmittingOnlineSale = true;
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.classList.add('btn-loading');
+        submitBtn.innerHTML = `
+          <span style="display:inline-flex; align-items:center; justify-content:center; gap:8px;">
+            <svg style="animation: btnSpin 0.7s linear infinite; width:16px; height:16px; display:inline-block;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle>
+              <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"></path>
+            </svg>
+            İşleniyor...
+          </span>
+        `;
+      }
 
       try {
         const res = await fetchWithAuth('/api/sales/online', {
@@ -4532,6 +4622,13 @@
         }
       } catch (err) {
         showToast("⚠️ Sunucu bağlantı hatası!");
+      } finally {
+        isSubmittingOnlineSale = false;
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.classList.remove('btn-loading');
+          submitBtn.innerHTML = '🚀 Satışı Onayla & Stoktan Düş';
+        }
       }
     }
     function switchAuthTab(tab) {

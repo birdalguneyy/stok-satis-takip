@@ -33,6 +33,41 @@ try:
 except ImportError:
     HAS_ZXING = False
 
+try:
+    from PIL import Image, ImageOps
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
+
+
+def is_valid_barcode(code: str) -> bool:
+    """Barkodun biçimini ve varsa kontrol basamağını (checksum) doğrular."""
+    if not code:
+        return False
+    code = code.strip()
+    if len(code) < 3:
+        return False
+
+    # EAN-13 kontrol basamağı doğrulaması
+    if len(code) == 13 and code.isdigit():
+        checksum = sum(int(code[i]) * (1 if i % 2 == 0 else 3) for i in range(12))
+        check_digit = (10 - (checksum % 10)) % 10
+        return check_digit == int(code[12])
+
+    # EAN-8 kontrol basamağı doğrulaması
+    if len(code) == 8 and code.isdigit():
+        checksum = sum(int(code[i]) * (3 if i % 2 == 0 else 1) for i in range(7))
+        check_digit = (10 - (checksum % 10)) % 10
+        return check_digit == int(code[7])
+
+    # UPC-A kontrol basamağı doğrulaması
+    if len(code) == 12 and code.isdigit():
+        checksum = sum(int(code[i]) * (3 if i % 2 == 0 else 1) for i in range(11))
+        check_digit = (10 - (checksum % 10)) % 10
+        return check_digit == int(code[11])
+
+    return True
+
 
 class VideoStream:
     """Kamera I/O işlemini ana arayüzden ayıran arka plan Daemon Thread sınıfı."""
@@ -155,7 +190,35 @@ def _sharpen_for_barcode(gray):
 
 
 def decode_barcode_from_frame(frame) -> List[Tuple[str, Optional[list]]]:
-    """Ultra-hızlı (sub-millisecond) hibrit C++ zxing-cpp ve pyzbar barkod çözücü."""
+    """Ultra-hızlı hibrit C++ zxing-cpp, PIL ve pyzbar barkod çözücü."""
+    if frame is None:
+        return []
+
+    # Eğer PIL Image nesnesi geldiyse
+    if HAS_PIL and isinstance(frame, Image.Image):
+        # 1. Doğrudan PIL Image ile zxingcpp dene
+        if HAS_ZXING:
+            try:
+                detected = zxingcpp.read_barcodes(
+                    frame,
+                    try_rotate=True,
+                    try_downscale=True,
+                    try_invert=True,
+                )
+                for item in detected:
+                    txt = (item.text or "").strip()
+                    is_valid = getattr(item, "is_valid", True)
+                    if txt and is_valid and is_valid_barcode(txt):
+                        return [(txt, None)]
+            except Exception:
+                pass
+
+        if HAS_OPENCV:
+            np_arr = np.array(frame.convert("RGB"))
+            frame = cv2.cvtColor(np_arr, cv2.COLOR_RGB2BGR)
+        else:
+            return []
+
     if not HAS_OPENCV or frame is None:
         return []
 
@@ -163,9 +226,9 @@ def decode_barcode_from_frame(frame) -> List[Tuple[str, Optional[list]]]:
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if len(frame.shape) == 3 else frame
     h, w = gray.shape[:2]
 
-    # Aşırı büyük fotoğrafları hız için optimize boyuta indir (Max 1280px)
-    if max(h, w) > 1280:
-        scale = 1280.0 / max(h, w)
+    # Aşırı büyük fotoğrafları hız için optimize boyuta indir (Max 1600px - barkod çizgilerini koruyarak)
+    if max(h, w) > 1600:
+        scale = 1600.0 / max(h, w)
         gray = cv2.resize(gray, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
         h, w = gray.shape[:2]
 
@@ -183,8 +246,10 @@ def decode_barcode_from_frame(frame) -> List[Tuple[str, Optional[list]]]:
                 try_invert=True,
             )
             for item in detected:
-                if item.text and item.text.strip():
-                    results.append((item.text.strip(), None))
+                txt = (item.text or "").strip()
+                is_valid = getattr(item, "is_valid", True)
+                if txt and is_valid and is_valid_barcode(txt):
+                    results.append((txt, None))
             if results:
                 return results
         except Exception:
@@ -194,8 +259,9 @@ def decode_barcode_from_frame(frame) -> List[Tuple[str, Optional[list]]]:
     # PASS 2: Orijinal Gri Kareyi pyzbar ile tara
     # ════════════════════════════════════════════════
     found = _pyzbar_scan(gray)
-    if found:
-        return [(t, None) for t in found]
+    valid_found = [t for t in found if is_valid_barcode(t)]
+    if valid_found:
+        return [(t, None) for t in valid_found]
 
     # ════════════════════════════════════════════════
     # PASS 3: Keskinleştirilmiş kareyi tara (zxingcpp + pyzbar)
@@ -205,59 +271,96 @@ def decode_barcode_from_frame(frame) -> List[Tuple[str, Optional[list]]]:
         try:
             detected = zxingcpp.read_barcodes(sharpened, try_rotate=True, try_downscale=True)
             for item in detected:
-                if item.text and item.text.strip():
-                    results.append((item.text.strip(), None))
+                txt = (item.text or "").strip()
+                is_valid = getattr(item, "is_valid", True)
+                if txt and is_valid and is_valid_barcode(txt):
+                    results.append((txt, None))
             if results:
                 return results
         except Exception:
             pass
 
     found = _pyzbar_scan(sharpened)
-    if found:
-        return [(t, None) for t in found]
+    valid_found = [t for t in found if is_valid_barcode(t)]
+    if valid_found:
+        return [(t, None) for t in valid_found]
 
     # ════════════════════════════════════════════════
-    # PASS 4: Otsu Binarization
+    # PASS 4: Rotasyonlu Tarama (90, 180, 270 derece dikey/yan telefon çekimleri)
+    # ════════════════════════════════════════════════
+    for rot in [cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_90_COUNTERCLOCKWISE, cv2.ROTATE_180]:
+        try:
+            rotated = cv2.rotate(gray, rot)
+            if HAS_ZXING:
+                detected = zxingcpp.read_barcodes(rotated, try_rotate=True, try_downscale=True)
+                for item in detected:
+                    txt = (item.text or "").strip()
+                    is_valid = getattr(item, "is_valid", True)
+                    if txt and is_valid and is_valid_barcode(txt):
+                        return [(txt, None)]
+            found = _pyzbar_scan(rotated)
+            valid_found = [t for t in found if is_valid_barcode(t)]
+            if valid_found:
+                return [(t, None) for t in valid_found]
+        except Exception:
+            pass
+
+    # ════════════════════════════════════════════════
+    # PASS 5: Otsu & Adaptive Binarization
     # ════════════════════════════════════════════════
     try:
         _, otsu = cv2.threshold(sharpened, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        if HAS_ZXING:
+            detected = zxingcpp.read_barcodes(otsu, try_rotate=True, try_downscale=True)
+            for item in detected:
+                txt = (item.text or "").strip()
+                is_valid = getattr(item, "is_valid", True)
+                if txt and is_valid and is_valid_barcode(txt):
+                    return [(txt, None)]
         found = _pyzbar_scan(otsu)
-        if found:
-            return [(t, None) for t in found]
+        valid_found = [t for t in found if is_valid_barcode(t)]
+        if valid_found:
+            return [(t, None) for t in valid_found]
     except Exception:
         pass
 
-    # ════════════════════════════════════════════════
-    # PASS 5: Adaptive Thresholding
-    # ════════════════════════════════════════════════
     try:
         adapt = cv2.adaptiveThreshold(
             sharpened, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 25, 5
         )
+        if HAS_ZXING:
+            detected = zxingcpp.read_barcodes(adapt, try_rotate=True, try_downscale=True)
+            for item in detected:
+                txt = (item.text or "").strip()
+                is_valid = getattr(item, "is_valid", True)
+                if txt and is_valid and is_valid_barcode(txt):
+                    return [(txt, None)]
         found = _pyzbar_scan(adapt)
-        if found:
-            return [(t, None) for t in found]
+        valid_found = [t for t in found if is_valid_barcode(t)]
+        if valid_found:
+            return [(t, None) for t in valid_found]
     except Exception:
         pass
 
     # ════════════════════════════════════════════════
     # PASS 6: Upscale (Düşük çözünürlüklü küçük barkodlar için)
     # ════════════════════════════════════════════════
-    if w < 600 or h < 600:
+    if w < 700 or h < 700:
         try:
             upscaled = cv2.resize(gray, (w * 2, h * 2), interpolation=cv2.INTER_CUBIC)
             if HAS_ZXING:
                 detected = zxingcpp.read_barcodes(upscaled, try_rotate=True, try_downscale=True)
                 for item in detected:
-                    if item.text and item.text.strip():
-                        results.append((item.text.strip(), None))
-                if results:
-                    return results
+                    txt = (item.text or "").strip()
+                    is_valid = getattr(item, "is_valid", True)
+                    if txt and is_valid and is_valid_barcode(txt):
+                        return [(txt, None)]
 
             upscaled_sharp = _sharpen_for_barcode(upscaled)
             found = _pyzbar_scan(upscaled_sharp)
-            if found:
-                return [(t, None) for t in found]
+            valid_found = [t for t in found if is_valid_barcode(t)]
+            if valid_found:
+                return [(t, None) for t in valid_found]
         except Exception:
             pass
 

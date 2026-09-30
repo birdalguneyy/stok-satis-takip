@@ -14,7 +14,7 @@ from app.config import DATA_DIR
 from app.database.cloud_db import CloudDatabase
 from app.services.ai_package_service import AIPackageService
 from app.services.forecast_service import ForecastService
-from app.utils.camera import decode_barcode_from_frame
+from app.utils.camera import decode_barcode_from_frame, is_valid_barcode
 
 logger = logging.getLogger(__name__)
 
@@ -862,19 +862,37 @@ def handle_store_hours():
 
 @app.route("/api/barcode/decode", methods=["POST"])
 def api_decode_barcode():
-    """Yüklenen yüksek çözünürlüklü fotoğraftan pyzbar + zxingcpp ile 7 aşamalı barkod çözer."""
+    """Yüklenen fotoğraftan EXIF oryantasyonunu düzelterek ve çok aşamalı motorla barkod çözer."""
     if "file" not in request.files:
         return jsonify({"ok": False, "message": "Resim bulunamadı!"}), 400
 
     file = request.files["file"]
     image_bytes = file.read()
+    if not image_bytes:
+        return jsonify({"ok": False, "message": "Geçersiz veya boş resim dosyası!"}), 400
+
     try:
-        np_arr = np.frombuffer(image_bytes, np.uint8)
-        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-        if frame is not None:
-            results = decode_barcode_from_frame(frame)
-            if results:
+        import io
+        from PIL import Image, ImageOps
+        pil_img = Image.open(io.BytesIO(image_bytes))
+        # Telefon kamerası dikey/yatay EXIF oryantasyonunu düzelt
+        pil_img = ImageOps.exif_transpose(pil_img)
+
+        # 1. PIL görseliyle doğrudan C++ zxingcpp taraması
+        results = decode_barcode_from_frame(pil_img)
+        if results and results[0][0] and is_valid_barcode(results[0][0]):
+            return jsonify({"ok": True, "barcode": results[0][0]})
+
+        # 2. NumPy / OpenCV çok katmanlı filtreleme ve tarama
+        try:
+            rgb_arr = np.array(pil_img.convert("RGB"))
+            bgr_frame = cv2.cvtColor(rgb_arr, cv2.COLOR_RGB2BGR)
+            results = decode_barcode_from_frame(bgr_frame)
+            if results and results[0][0] and is_valid_barcode(results[0][0]):
                 return jsonify({"ok": True, "barcode": results[0][0]})
+        except Exception:
+            pass
+
     except Exception as exc:
         logger.error(f"Mobil barkod çözme hatası: {exc}")
 

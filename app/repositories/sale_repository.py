@@ -115,19 +115,44 @@ class SaleRepository:
             if not valid_ids:
                 return False, "Seçilen satışlar bulunamadı", 0
 
+            affected_product_ids = set()
             if restore_stock:
                 v_placeholders = ",".join("?" for _ in valid_ids)
-                items = conn.execute(f"SELECT product_id, quantity FROM sale_items WHERE sale_id IN ({v_placeholders})", valid_ids).fetchall()
+                items = conn.execute(f"SELECT product_id, barcode, quantity FROM sale_items WHERE sale_id IN ({v_placeholders})", valid_ids).fetchall()
                 for it in items:
-                    if it["product_id"]:
-                        conn.execute(
+                    pid = it["product_id"]
+                    barcode = it["barcode"]
+                    qty = float(it["quantity"] or 0)
+                    if qty <= 0:
+                        continue
+
+                    updated = False
+                    if pid:
+                        cur = conn.execute(
                             """
                             UPDATE products
-                            SET stock_quantity = stock_quantity + ?, updated_at = datetime('now', 'localtime')
+                            SET stock_quantity = stock_quantity + ?, updated_at = datetime('now', 'localtime'), synced_to_cloud = 0
                             WHERE id = ?
                             """,
-                            (it["quantity"], it["product_id"]),
+                            (qty, pid),
                         )
+                        if cur.rowcount > 0:
+                            updated = True
+                            affected_product_ids.add(pid)
+
+                    if not updated and barcode:
+                        cur = conn.execute(
+                            """
+                            UPDATE products
+                            SET stock_quantity = stock_quantity + ?, updated_at = datetime('now', 'localtime'), synced_to_cloud = 0
+                            WHERE barcode = ?
+                            """,
+                            (qty, barcode),
+                        )
+                        if cur.rowcount > 0:
+                            p_row = conn.execute("SELECT id FROM products WHERE barcode = ?", (barcode,)).fetchone()
+                            if p_row:
+                                affected_product_ids.add(p_row["id"])
 
             v_placeholders = ",".join("?" for _ in valid_ids)
             conn.execute(f"DELETE FROM sale_items WHERE sale_id IN ({v_placeholders})", valid_ids)
@@ -143,6 +168,21 @@ class SaleRepository:
                         cloud_db.firestore_db.collection("sales").document(str(sid)).delete()
                     except Exception:
                         pass
+
+                if restore_stock and affected_product_ids:
+                    with self.db.get_connection() as conn:
+                        for pid in affected_product_ids:
+                            p_row = conn.execute("SELECT stock_quantity, unit FROM products WHERE id = ?", (pid,)).fetchone()
+                            if p_row:
+                                try:
+                                    cloud_db.firestore_db.collection("products").document(f"u1_p{pid}").update({
+                                        "stock_quantity": float(p_row["stock_quantity"]),
+                                        "unit": p_row["unit"],
+                                        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                    })
+                                    conn.execute("UPDATE products SET synced_to_cloud = 1 WHERE id = ?", (pid,))
+                                except Exception:
+                                    pass
         except Exception:
             pass
 

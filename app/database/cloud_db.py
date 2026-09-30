@@ -1132,13 +1132,14 @@ class CloudDatabase:
         user_id: Optional[int] = None,
         restore_stock: bool = True,
     ) -> tuple[bool, str]:
-        uid = user_id or 1
+        uid = self._resolve_user_id(user_id)
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        affected_product_ids = set()
 
         with self.db.get_connection() as conn:
-            # Satışın bu kullanıcıya ait olduğunu doğrula
+            # Satışın bu kullanıcıya ait olduğunu doğrula (veya genel kullanıcı)
             sale = conn.execute(
-                "SELECT id, total_amount FROM sales WHERE id = ? AND user_id = ?",
+                "SELECT id, total_amount FROM sales WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
                 (sale_id, uid)
             ).fetchone()
 
@@ -1148,25 +1149,50 @@ class CloudDatabase:
             if restore_stock:
                 # Satıştaki ürünlerin stoklarını geri yükle (aktif ürünler için)
                 items = conn.execute(
-                    "SELECT product_id, quantity FROM sale_items WHERE sale_id = ?",
+                    "SELECT product_id, barcode, quantity FROM sale_items WHERE sale_id = ?",
                     (sale_id,)
                 ).fetchall()
                 for it in items:
                     pid = it["product_id"]
-                    qty = it["quantity"]
+                    barcode = it["barcode"]
+                    qty = float(it["quantity"] or 0)
+                    if qty <= 0:
+                        continue
+
+                    updated = False
                     if pid:
-                        conn.execute(
+                        cur = conn.execute(
                             """
                             UPDATE products
-                            SET stock_quantity = stock_quantity + ?, updated_at = ?
-                            WHERE id = ? AND user_id = ? AND is_active = 1
+                            SET stock_quantity = stock_quantity + ?, updated_at = ?, synced_to_cloud = 0
+                            WHERE id = ? AND (user_id = ? OR user_id IS NULL)
                             """,
                             (qty, now, pid, uid),
                         )
+                        if cur.rowcount > 0:
+                            updated = True
+                            affected_product_ids.add(pid)
+
+                    if not updated and barcode:
+                        cur = conn.execute(
+                            """
+                            UPDATE products
+                            SET stock_quantity = stock_quantity + ?, updated_at = ?, synced_to_cloud = 0
+                            WHERE barcode = ? AND (user_id = ? OR user_id IS NULL)
+                            """,
+                            (qty, now, barcode, uid),
+                        )
+                        if cur.rowcount > 0:
+                            p_row = conn.execute(
+                                "SELECT id FROM products WHERE barcode = ? AND (user_id = ? OR user_id IS NULL)",
+                                (barcode, uid),
+                            ).fetchone()
+                            if p_row:
+                                affected_product_ids.add(p_row["id"])
 
             # Satış kalemlerini ve ana satış kaydını sil
             conn.execute("DELETE FROM sale_items WHERE sale_id = ?", (sale_id,))
-            conn.execute("DELETE FROM sales WHERE id = ? AND user_id = ?", (sale_id, uid))
+            conn.execute("DELETE FROM sales WHERE id = ? AND (user_id = ? OR user_id IS NULL)", (sale_id, uid))
 
         if self.firestore_db:
             try:
@@ -1177,7 +1203,24 @@ class CloudDatabase:
             except Exception as e:
                 logger.warning(f"Firestore satış silme uyarısı: {e}")
 
-        return True, "Satış başarıyla silindi ve ürün stokları geri yüklendi."
+            if restore_stock and affected_product_ids:
+                with self.db.get_connection() as conn:
+                    for pid in affected_product_ids:
+                        p_row = conn.execute(
+                            "SELECT stock_quantity, unit FROM products WHERE id = ?", (pid,)
+                        ).fetchone()
+                        if p_row:
+                            try:
+                                self.firestore_db.collection("products").document(f"u{uid}_p{pid}").update({
+                                    "stock_quantity": float(p_row["stock_quantity"]),
+                                    "unit": p_row["unit"],
+                                    "updated_at": now,
+                                })
+                                conn.execute("UPDATE products SET synced_to_cloud = 1 WHERE id = ?", (pid,))
+                            except Exception as ex:
+                                logger.warning(f"Firestore ürün stok güncelleme uyarısı ({pid}): {ex}")
+
+        return True, "Satış başarıyla silindi ve ürün stokları depoya geri yüklendi."
 
     def delete_sales_bulk(
         self,
@@ -1195,6 +1238,8 @@ class CloudDatabase:
         if not cleaned_ids:
             return False, "Geçersiz satış listesi!", 0
 
+        affected_product_ids = set()
+
         with self.db.get_connection() as conn:
             placeholders = ",".join("?" for _ in cleaned_ids)
             valid_sales = conn.execute(
@@ -1209,21 +1254,46 @@ class CloudDatabase:
             if restore_stock:
                 v_placeholders = ",".join("?" for _ in valid_ids)
                 items = conn.execute(
-                    f"SELECT product_id, quantity FROM sale_items WHERE sale_id IN ({v_placeholders})",
+                    f"SELECT product_id, barcode, quantity FROM sale_items WHERE sale_id IN ({v_placeholders})",
                     valid_ids,
                 ).fetchall()
                 for it in items:
                     pid = it["product_id"]
-                    qty = it["quantity"]
+                    barcode = it["barcode"]
+                    qty = float(it["quantity"] or 0)
+                    if qty <= 0:
+                        continue
+
+                    updated = False
                     if pid:
-                        conn.execute(
+                        cur = conn.execute(
                             """
                             UPDATE products
-                            SET stock_quantity = stock_quantity + ?, updated_at = ?
-                            WHERE id = ? AND (user_id = ? OR user_id IS NULL) AND is_active = 1
+                            SET stock_quantity = stock_quantity + ?, updated_at = ?, synced_to_cloud = 0
+                            WHERE id = ? AND (user_id = ? OR user_id IS NULL)
                             """,
                             (qty, now, pid, uid),
                         )
+                        if cur.rowcount > 0:
+                            updated = True
+                            affected_product_ids.add(pid)
+
+                    if not updated and barcode:
+                        cur = conn.execute(
+                            """
+                            UPDATE products
+                            SET stock_quantity = stock_quantity + ?, updated_at = ?, synced_to_cloud = 0
+                            WHERE barcode = ? AND (user_id = ? OR user_id IS NULL)
+                            """,
+                            (qty, now, barcode, uid),
+                        )
+                        if cur.rowcount > 0:
+                            p_row = conn.execute(
+                                "SELECT id FROM products WHERE barcode = ? AND (user_id = ? OR user_id IS NULL)",
+                                (barcode, uid),
+                            ).fetchone()
+                            if p_row:
+                                affected_product_ids.add(p_row["id"])
 
             v_placeholders = ",".join("?" for _ in valid_ids)
             conn.execute(f"DELETE FROM sale_items WHERE sale_id IN ({v_placeholders})", valid_ids)
@@ -1238,7 +1308,24 @@ class CloudDatabase:
                 except Exception:
                     pass
 
-        return True, f"{deleted_count} adet satış başarıyla silindi ve ürün stokları geri yüklendi.", deleted_count
+            if restore_stock and affected_product_ids:
+                with self.db.get_connection() as conn:
+                    for pid in affected_product_ids:
+                        p_row = conn.execute(
+                            "SELECT stock_quantity, unit FROM products WHERE id = ?", (pid,)
+                        ).fetchone()
+                        if p_row:
+                            try:
+                                self.firestore_db.collection("products").document(f"u{uid}_p{pid}").update({
+                                    "stock_quantity": float(p_row["stock_quantity"]),
+                                    "unit": p_row["unit"],
+                                    "updated_at": now,
+                                })
+                                conn.execute("UPDATE products SET synced_to_cloud = 1 WHERE id = ?", (pid,))
+                            except Exception as ex:
+                                logger.warning(f"Firestore ürün stok güncelleme uyarısı ({pid}): {ex}")
+
+        return True, f"{deleted_count} adet satış başarıyla silindi ve ürün stokları depoya geri yüklendi.", deleted_count
 
     def get_sales_history(
         self,

@@ -1719,60 +1719,132 @@
     }
 
     // ════════════════════════════════════════════════════════════════════
-    // ULTRA-HIZLI DONANIM HIZLANDIRMALI (NATIVE / ZXING) BARKOD ÇÖZÜCÜ
+    // ULTRA-HIZLI DONANIM HIZLANDIRMALI (CIHAZ GPU/CPU / ZXING) BARKOD MOTORU
     // ════════════════════════════════════════════════════════════════════
     let nativeBarcodeDetector = null;
-    if ('BarcodeDetector' in window) {
-      try {
-        nativeBarcodeDetector = new BarcodeDetector({
-          formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'code_93', 'qr_code', 'itf', 'data_matrix']
-        });
-      } catch (e) {
-        nativeBarcodeDetector = null;
+
+    async function initNativeBarcodeDetector() {
+      if ('BarcodeDetector' in window) {
+        try {
+          const supported = await BarcodeDetector.getSupportedFormats();
+          const desired = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'code_93', 'qr_code', 'itf', 'data_matrix'];
+          const formats = desired.filter(f => supported.includes(f));
+          if (formats.length > 0) {
+            nativeBarcodeDetector = new BarcodeDetector({ formats });
+          } else {
+            nativeBarcodeDetector = new BarcodeDetector();
+          }
+        } catch (e) {
+          try {
+            nativeBarcodeDetector = new BarcodeDetector();
+          } catch(err) {
+            nativeBarcodeDetector = null;
+          }
+        }
       }
     }
+    initNativeBarcodeDetector();
 
-    async function scanBarcodeFromSourceClientSide(source) {
-      // 1. Hardware Native BarcodeDetector (Chrome/Android/Edge GPU/CPU - Sub-5ms)
+    let zxingReader = null;
+    function getZXingReader() {
+      if (!window.ZXing) return null;
+      if (!zxingReader) {
+        try {
+          const hints = new Map();
+          const formats = [
+            ZXing.BarcodeFormat.EAN_13,
+            ZXing.BarcodeFormat.EAN_8,
+            ZXing.BarcodeFormat.CODE_128,
+            ZXing.BarcodeFormat.UPC_A,
+            ZXing.BarcodeFormat.UPC_E,
+            ZXing.BarcodeFormat.CODE_39,
+            ZXing.BarcodeFormat.CODE_93,
+            ZXing.BarcodeFormat.ITF,
+            ZXing.BarcodeFormat.QR_CODE
+          ];
+          hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
+          hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+          zxingReader = new ZXing.BrowserMultiFormatReader(hints);
+        } catch(e) {
+          zxingReader = new ZXing.BrowserMultiFormatReader();
+        }
+      }
+      return zxingReader;
+    }
+
+    function isValidBarcode(rawCode) {
+      if (!rawCode) return false;
+      const code = String(rawCode).trim();
+      if (code.length < 3) return false;
+
+      // EAN-13 kontrol basamağı
+      if (code.length === 13 && /^\d{13}$/.test(code)) {
+        let sum = 0;
+        for (let i = 0; i < 12; i++) {
+          sum += parseInt(code[i], 10) * (i % 2 === 0 ? 1 : 3);
+        }
+        const check = (10 - (sum % 10)) % 10;
+        return check === parseInt(code[12], 10);
+      }
+      // EAN-8 kontrol basamağı
+      if (code.length === 8 && /^\d{8}$/.test(code)) {
+        let sum = 0;
+        for (let i = 0; i < 7; i++) {
+          sum += parseInt(code[i], 10) * (i % 2 === 0 ? 3 : 1);
+        }
+        const check = (10 - (sum % 10)) % 10;
+        return check === parseInt(code[7], 10);
+      }
+      // UPC-A kontrol basamağı
+      if (code.length === 12 && /^\d{12}$/.test(code)) {
+        let sum = 0;
+        for (let i = 0; i < 11; i++) {
+          sum += parseInt(code[i], 10) * (i % 2 === 0 ? 3 : 1);
+        }
+        const check = (10 - (sum % 10)) % 10;
+        return check === parseInt(code[11], 10);
+      }
+      return true;
+    }
+
+    async function scanBarcodeFromCanvas(canvas) {
+      if (!canvas) return null;
+      // 1. Cihaz Donanımı (GPU / NPU Native BarcodeDetector) - Sub-5ms
       if (nativeBarcodeDetector) {
         try {
-          const results = await nativeBarcodeDetector.detect(source);
+          const results = await nativeBarcodeDetector.detect(canvas);
           if (results && results.length > 0) {
             for (const r of results) {
-              if (r.rawValue && r.rawValue.trim()) {
-                return r.rawValue.trim();
-              }
+              const val = (r.rawValue || '').trim();
+              if (val && isValidBarcode(val)) return val;
             }
           }
         } catch (e) {}
       }
 
-      // 2. ZXing BrowserMultiFormatReader Fallback on Client
-      if (window.ZXing) {
+      // 2. ZXing Cihaz İçi JS Çözücü
+      const reader = getZXingReader();
+      if (reader) {
         try {
-          if (!codeReader) codeReader = new ZXing.BrowserMultiFormatReader();
-          let result = null;
-          if (source instanceof HTMLImageElement || source instanceof HTMLCanvasElement || source instanceof ImageBitmap) {
-            result = await codeReader.decodeFromImageElement(source);
-          } else if (source instanceof HTMLVideoElement) {
-            result = codeReader.decodeFromVideoElement(source);
-          }
-          if (result && result.getText && result.getText().trim()) {
-            return result.getText().trim();
+          const res = await reader.decodeFromCanvas(canvas);
+          if (res) {
+            const val = (res.getText ? res.getText() : String(res)).trim();
+            if (val && isValidBarcode(val)) return val;
           }
         } catch (e) {}
       }
-
       return null;
     }
 
     let liveScanInterval = null;
+    let isDecodingBusy = false;
+    let liveCanvas = null;
 
     async function startMobileBarcodeScanner(targetInputId = null) {
       playBeep();
 
       const videoBox = document.getElementById('pos-video-box');
-      videoBox.style.display = 'block';
+      if (videoBox) videoBox.style.display = 'block';
       const videoEl = document.getElementById('pos-video');
 
       isScanning = true;
@@ -1780,7 +1852,9 @@
 
       try {
         if (videoEl.srcObject) {
-          videoEl.srcObject.getTracks().forEach(t => t.stop());
+          try {
+            videoEl.srcObject.getTracks().forEach(t => t.stop());
+          } catch(e) {}
         }
 
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -1795,6 +1869,10 @@
         videoEl.srcObject = stream;
         await videoEl.play();
 
+        if (!liveCanvas) {
+          liveCanvas = document.createElement('canvas');
+        }
+
         const onBarcodeFound = (code) => {
           const now = Date.now();
           if (code !== lastScannedCode || (now - lastScanTime) > 1200) {
@@ -1803,52 +1881,84 @@
             playBeep();
 
             if (targetInputId) {
-              document.getElementById(targetInputId).value = code;
+              const inp = document.getElementById(targetInputId);
+              if (inp) inp.value = code;
               showToast("⚡ Barkod okundu: " + code);
               stopMobileBarcodeScanner();
             } else {
-              document.getElementById('pos-barcode-input').value = code;
+              const inp = document.getElementById('pos-barcode-input');
+              if (inp) inp.value = code;
               handlePOSScan();
             }
           }
         };
 
         if (liveScanInterval) clearInterval(liveScanInterval);
+        isDecodingBusy = false;
+
         liveScanInterval = setInterval(async () => {
-          if (!isScanning || !videoEl || videoEl.paused || videoEl.ended) return;
+          if (!isScanning || !videoEl || videoEl.paused || videoEl.ended || videoEl.videoWidth === 0) return;
+          if (isDecodingBusy) return;
+          isDecodingBusy = true;
+
           try {
-            const detected = await scanBarcodeFromSourceClientSide(videoEl);
+            // 1. Doğrudan video kaynağından GPU BarcodeDetector dene (Sıfır kopyalama, 2-5ms)
+            if (nativeBarcodeDetector) {
+              try {
+                const results = await nativeBarcodeDetector.detect(videoEl);
+                if (results && results.length > 0) {
+                  for (const r of results) {
+                    const code = (r.rawValue || '').trim();
+                    if (code && isValidBarcode(code)) {
+                      onBarcodeFound(code);
+                      isDecodingBusy = false;
+                      return;
+                    }
+                  }
+                }
+              } catch(e) {}
+            }
+
+            // 2. Offscreen Canvas Buffer (800px optimum çözünürlük)
+            const vw = videoEl.videoWidth;
+            const vh = videoEl.videoHeight;
+            const targetW = 800;
+            const targetH = Math.round((vh * 800) / vw);
+            liveCanvas.width = targetW;
+            liveCanvas.height = targetH;
+            const ctx = liveCanvas.getContext('2d', { willReadFrequently: true });
+            ctx.drawImage(videoEl, 0, 0, targetW, targetH);
+
+            let detected = await scanBarcodeFromCanvas(liveCanvas);
+            if (detected) {
+              onBarcodeFound(detected);
+              isDecodingBusy = false;
+              return;
+            }
+
+            // 3. Merkez Odak Bölgesi (Center ROI %80 x %60)
+            const rw = Math.round(targetW * 0.80);
+            const rh = Math.round(targetH * 0.60);
+            const rx = Math.round((targetW - rw) / 2);
+            const ry = Math.round((targetH - rh) / 2);
+            const roiCanvas = document.createElement('canvas');
+            roiCanvas.width = rw;
+            roiCanvas.height = rh;
+            const roiCtx = roiCanvas.getContext('2d', { willReadFrequently: true });
+            roiCtx.drawImage(liveCanvas, rx, ry, rw, rh, 0, 0, rw, rh);
+
+            detected = await scanBarcodeFromCanvas(roiCanvas);
             if (detected) {
               onBarcodeFound(detected);
             }
-          } catch(e){}
-        }, 60);
+          } catch (e) {
+          } finally {
+            isDecodingBusy = false;
+          }
+        }, 80);
 
       } catch (err) {
-        if (window.ZXing) {
-          if (!codeReader) codeReader = new ZXing.BrowserMultiFormatReader();
-          codeReader.decodeFromVideoDevice(undefined, 'pos-video', (result, err) => {
-            if (result && isScanning) {
-              const code = result.getText();
-              const now = Date.now();
-              if (code !== lastScannedCode || (now - lastScanTime) > 1200) {
-                lastScannedCode = code;
-                lastScanTime = now;
-                playBeep();
-                if (targetInputId) {
-                  document.getElementById(targetInputId).value = code;
-                  showToast("⚡ Barkod okundu: " + code);
-                  stopMobileBarcodeScanner();
-                } else {
-                  document.getElementById('pos-barcode-input').value = code;
-                  handlePOSScan();
-                }
-              }
-            }
-          });
-        } else {
-          showToast("⚠️ Canlı video açılamadı! 'Fotoğraf Çek & Oku' butonunu kullanabilirsiniz.");
-        }
+        showToast("⚠️ Canlı video açılamadı! 'Fotoğraf Çek & Oku' butonunu kullanabilirsiniz.");
       }
     }
 
@@ -1858,6 +1968,7 @@
         clearInterval(liveScanInterval);
         liveScanInterval = null;
       }
+      isDecodingBusy = false;
       const videoEl = document.getElementById('pos-video');
       if (videoEl && videoEl.srcObject) {
         try {
@@ -1865,70 +1976,149 @@
           videoEl.srcObject = null;
         } catch(e){}
       }
-      if (codeReader) {
-        try { codeReader.reset(); } catch(e){}
-      }
       const videoBox = document.getElementById('pos-video-box');
       if (videoBox) videoBox.style.display = 'none';
     }
 
     // ════════════════════════════════════════════════════════════════════
-    // FOTOĞRAF ÇEKİP CPU / DONANIM İLE IŞIK HIZINDA BARKOD ÇÖZME
+    // FOTOĞRAF ÇEKİP DONANIM (GPU/CPU) + AKILLI SUNUCU İLE BARKOD ÇÖZME
     // ════════════════════════════════════════════════════════════════════
+    async function processBarcodePhoto(file) {
+      showToast("⚡ Cihaz donanımıyla taranıyor...");
+
+      // 1. Resmi DOM Image nesnesine yükle
+      const img = new Image();
+      const objUrl = URL.createObjectURL(file);
+      try {
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = reject;
+          img.src = objUrl;
+        });
+      } catch (err) {
+        URL.revokeObjectURL(objUrl);
+        return null;
+      }
+
+      const origW = img.naturalWidth || img.width;
+      const origH = img.naturalHeight || img.height;
+
+      // PASS 1: Native BarcodeDetector (Android/Chrome GPU 5ms)
+      if (nativeBarcodeDetector) {
+        try {
+          const results = await nativeBarcodeDetector.detect(img);
+          if (results && results.length > 0) {
+            for (const r of results) {
+              const val = (r.rawValue || '').trim();
+              if (val && isValidBarcode(val)) {
+                URL.revokeObjectURL(objUrl);
+                return val;
+              }
+            }
+          }
+        } catch (e) {}
+      }
+
+      // PASS 2: Canvas üzerinde barkod çizgilerini koruyarak ölçekleme (Max 1600px)
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      let targetW = origW;
+      let targetH = origH;
+      const maxDim = 1600;
+      if (Math.max(origW, origH) > maxDim) {
+        const ratio = maxDim / Math.max(origW, origH);
+        targetW = Math.round(origW * ratio);
+        targetH = Math.round(origH * ratio);
+      }
+      canvas.width = targetW;
+      canvas.height = targetH;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, targetW, targetH);
+
+      let found = await scanBarcodeFromCanvas(canvas);
+      if (found) {
+        URL.revokeObjectURL(objUrl);
+        return found;
+      }
+
+      // PASS 3: Kontrast ve Keskinleştirme Filtresi (Soluk/Kötü aydınlatmalı barkodlar)
+      ctx.filter = 'contrast(140%) grayscale(100%)';
+      ctx.drawImage(img, 0, 0, targetW, targetH);
+      ctx.filter = 'none';
+
+      found = await scanBarcodeFromCanvas(canvas);
+      if (found) {
+        URL.revokeObjectURL(objUrl);
+        return found;
+      }
+
+      // PASS 4: Merkez Kırpma (Barkod odaklı %70 ROI)
+      const cropW = Math.round(targetW * 0.70);
+      const cropH = Math.round(targetH * 0.70);
+      const cropX = Math.round((targetW - cropW) / 2);
+      const cropY = Math.round((targetH - cropH) / 2);
+      const cropCanvas = document.createElement('canvas');
+      cropCanvas.width = cropW;
+      cropCanvas.height = cropH;
+      const cropCtx = cropCanvas.getContext('2d', { willReadFrequently: true });
+      cropCtx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+
+      found = await scanBarcodeFromCanvas(cropCanvas);
+      if (found) {
+        URL.revokeObjectURL(objUrl);
+        return found;
+      }
+
+      // PASS 5: Rotasyon (90 derece - Dikey telefon fotoğrafları)
+      const rotCanvas = document.createElement('canvas');
+      rotCanvas.width = targetH;
+      rotCanvas.height = targetW;
+      const rotCtx = rotCanvas.getContext('2d', { willReadFrequently: true });
+      rotCtx.translate(targetH / 2, targetW / 2);
+      rotCtx.rotate((90 * Math.PI) / 180);
+      rotCtx.drawImage(canvas, -targetW / 2, -targetH / 2);
+
+      found = await scanBarcodeFromCanvas(rotCanvas);
+      if (found) {
+        URL.revokeObjectURL(objUrl);
+        return found;
+      }
+
+      URL.revokeObjectURL(objUrl);
+
+      // PASS 6: Sunucu C++ Zxingcpp / Pyzbar Fallback (Net 1600px JPEG kalitesinde)
+      showToast("⏳ Sunucu C++ motorunda çözümleniyor...");
+      try {
+        const highQualityBlob = await new Promise((resolve) => {
+          canvas.toBlob((b) => resolve(b || file), 'image/jpeg', 0.92);
+        });
+
+        const formData = new FormData();
+        formData.append('file', highQualityBlob, 'barcode.jpg');
+
+        const res = await fetch('/api/barcode/decode', { method: 'POST', body: formData });
+        const json = await res.json();
+        if (json.ok && json.barcode && isValidBarcode(json.barcode)) {
+          return json.barcode;
+        }
+      } catch (e) {}
+
+      return null;
+    }
+
     async function handlePOSPhotoUpload(input) {
       if (!input.files || !input.files[0]) return;
       const file = input.files[0];
-      showToast("⚡ Cihaz işlemcisiyle barkod taranıyor...");
-
-      // 1. Client-Side CPU/GPU Instant Decoding
-      let scannedCode = null;
-      try {
-        const imgBitmap = await createImageBitmap(file);
-        scannedCode = await scanBarcodeFromSourceClientSide(imgBitmap);
-      } catch (e) {}
-
-      if (!scannedCode) {
-        try {
-          const img = new Image();
-          const imgUrl = URL.createObjectURL(file);
-          await new Promise((resolve, reject) => {
-            img.onload = resolve;
-            img.onerror = reject;
-            img.src = imgUrl;
-          });
-          scannedCode = await scanBarcodeFromSourceClientSide(img);
-          URL.revokeObjectURL(imgUrl);
-        } catch(e){}
-      }
-
+      const scannedCode = await processBarcodePhoto(file);
       if (scannedCode) {
         playBeep();
-        document.getElementById('pos-barcode-input').value = scannedCode;
+        const inp = document.getElementById('pos-barcode-input');
+        if (inp) inp.value = scannedCode;
         showToast("⚡ Barkod anında okundu: " + scannedCode);
         handlePOSScan();
-        input.value = '';
-        return;
-      }
-
-      // 2. Client-Side CPU Image Compression before Server Fallback (Sub-50KB)
-      showToast("⏳ Sunucu C++ motorunda çözümleniyor...");
-      const compressedBlob = await compressImageClientSide(file, 800, 0.70);
-      const formData = new FormData();
-      formData.append('file', compressedBlob, 'barcode.jpg');
-
-      try {
-        const res = await fetch('/api/barcode/decode', { method: 'POST', body: formData });
-        const json = await res.json();
-        if (json.ok && json.barcode) {
-          playBeep();
-          document.getElementById('pos-barcode-input').value = json.barcode;
-          showToast("✅ Barkod okundu: " + json.barcode);
-          handlePOSScan();
-        } else {
-          showToast("❌ " + (json.message || "Barkod okunamadı!"));
-        }
-      } catch (e) {
-        showToast("⚠️ Bağlantı hatası!");
+      } else {
+        showToast("❌ Barkod okunamadı! Lütfen barkoda odaklanarak tekrar deneyin.");
       }
       input.value = '';
     }
@@ -1936,53 +2126,14 @@
     async function handleFormCameraUpload(input) {
       if (!input.files || !input.files[0]) return;
       const file = input.files[0];
-      showToast("⚡ Cihaz işlemcisiyle barkod taranıyor...");
-
-      let scannedCode = null;
-      try {
-        const imgBitmap = await createImageBitmap(file);
-        scannedCode = await scanBarcodeFromSourceClientSide(imgBitmap);
-      } catch (e) {}
-
-      if (!scannedCode) {
-        try {
-          const img = new Image();
-          const imgUrl = URL.createObjectURL(file);
-          await new Promise((resolve, reject) => {
-            img.onload = resolve;
-            img.onerror = reject;
-            img.src = imgUrl;
-          });
-          scannedCode = await scanBarcodeFromSourceClientSide(img);
-          URL.revokeObjectURL(imgUrl);
-        } catch(e){}
-      }
-
+      const scannedCode = await processBarcodePhoto(file);
       if (scannedCode) {
         playBeep();
-        document.getElementById('form-barcode').value = scannedCode;
+        const inp = document.getElementById('form-barcode');
+        if (inp) inp.value = scannedCode;
         showToast("⚡ Barkod anında okundu: " + scannedCode);
-        input.value = '';
-        return;
-      }
-
-      showToast("⏳ Sunucu C++ motorunda çözümleniyor...");
-      const compressedBlob = await compressImageClientSide(file, 800, 0.70);
-      const formData = new FormData();
-      formData.append('file', compressedBlob, 'barcode.jpg');
-
-      try {
-        const res = await fetch('/api/barcode/decode', { method: 'POST', body: formData });
-        const json = await res.json();
-        if (json.ok && json.barcode) {
-          playBeep();
-          document.getElementById('form-barcode').value = json.barcode;
-          showToast("✅ Barkod okundu: " + json.barcode);
-        } else {
-          showToast("❌ Barkod okunamadı, elle yazabilirsiniz.");
-        }
-      } catch (e) {
-        showToast("⚠️ Bağlantı hatası!");
+      } else {
+        showToast("❌ Barkod okunamadı, elle yazabilirsiniz.");
       }
       input.value = '';
     }

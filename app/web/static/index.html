@@ -3564,7 +3564,7 @@
         const img = new Image();
         img.onload = function() {
           const canvas = document.createElement('canvas');
-          const maxDim = 400;
+          const maxDim = 320;
           let w = img.width;
           let h = img.height;
           if (w > maxDim || h > maxDim) {
@@ -3580,7 +3580,7 @@
           canvas.height = h;
           const ctx = canvas.getContext('2d');
           ctx.drawImage(img, 0, 0, w, h);
-          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.75);
+          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.50);
 
           document.getElementById('edit-prod-img-preview').src = compressedDataUrl;
           document.getElementById('edit-prod-image-path').value = compressedDataUrl;

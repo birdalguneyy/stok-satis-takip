@@ -24,7 +24,8 @@ UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 def _save_base64_to_disk(image_str: Optional[str], uid: int, pid: int) -> str:
     """Base64 data URL formatındaki görseli disk üzerindeki uploads/products klasörüne kaydeder.
-    Veritabanını ve Firestore dokümanını yüzlerce kilobayt yerine kısa bir URL ile hafifletir.
+    Depolama alanından maksimum tasarruf sağlamak ve cihaz hafızasını şişirmemek için
+    görseller kompakt boyuta (max 320x320) ve düşük/optimum kaliteye (JPEG q=50) sıkıştırılarak kaydedilir (~10-20 KB).
     """
     if not image_str:
         return ""
@@ -37,9 +38,24 @@ def _save_base64_to_disk(image_str: Optional[str], uid: int, pid: int) -> str:
             else:
                 encoded = image_str
             img_bytes = base64.b64decode(encoded)
+            
+            # Depolama tasarrufu: PIL ile boyut küçültme ve düşük kalite sıkıştırma
+            try:
+                from PIL import Image, ImageOps
+                import io
+                pil_img = Image.open(io.BytesIO(img_bytes))
+                pil_img = ImageOps.exif_transpose(pil_img).convert("RGB")
+                pil_img.thumbnail((320, 320), Image.LANCZOS)
+                buf = io.BytesIO()
+                pil_img.save(buf, format="JPEG", quality=50, optimize=True)
+                final_bytes = buf.getvalue()
+            except Exception as pil_err:
+                logger.warning(f"Görsel sıkıştırma uyarısı: {pil_err}")
+                final_bytes = img_bytes
+
             filename = f"prod_{uid}_{pid}.jpg"
             target_file = UPLOADS_DIR / filename
-            target_file.write_bytes(img_bytes)
+            target_file.write_bytes(final_bytes)
             return f"/uploads/products/{filename}?v={int(time.time())}"
         except Exception as e:
             logger.warning(f"Görsel diske kaydedilemedi: {e}")

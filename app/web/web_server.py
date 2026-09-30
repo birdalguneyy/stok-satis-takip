@@ -432,9 +432,9 @@ def upload_product_image_route(product_id: int):
                 import io, base64
                 pil_img = Image.open(io.BytesIO(image_bytes))
                 pil_img = ImageOps.exif_transpose(pil_img).convert("RGB")
-                pil_img.thumbnail((400, 400), Image.LANCZOS)
+                pil_img.thumbnail((320, 320), Image.LANCZOS)
                 buf = io.BytesIO()
-                pil_img.save(buf, format="JPEG", quality=75, optimize=True)
+                pil_img.save(buf, format="JPEG", quality=50, optimize=True)
                 b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
                 image_path_str = f"data:image/jpeg;base64,{b64}"
             except Exception as e:

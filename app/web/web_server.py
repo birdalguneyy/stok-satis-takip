@@ -378,8 +378,7 @@ def update_product_route(product_id: int):
         return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
 
     data = request.json or {}
-    prods = cloud_db.get_products(user_id=user_id)
-    curr = next((p for p in prods if p["id"] == product_id), None)
+    curr = cloud_db.get_product_by_id(product_id, user_id=user_id)
     if not curr:
         return jsonify({"ok": False, "message": "Düzenlenecek ürün bulunamadı!"}), 404
 

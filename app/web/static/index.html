@@ -516,19 +516,29 @@
       position: fixed;
       top: 20px;
       left: 50%;
-      transform: translateX(-50%) translateY(-100px);
+      transform: translateX(-50%) translateY(-160px);
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
       background: var(--card);
       border: 1px solid var(--accent);
       color: var(--text);
-      padding: 12px 20px;
+      padding: 12px 24px;
       border-radius: 30px;
-      font-size: 0.9rem;
+      font-size: 0.92rem;
       font-weight: 600;
       box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-      z-index: 200;
-      transition: transform 0.3s ease;
+      z-index: 100000;
+      cursor: pointer;
+      user-select: none;
+      transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease, visibility 0.25s;
     }
-    #toast.show { transform: translateX(-50%) translateY(0); }
+    #toast.show {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
+    }
 
     .tab-content { display: none; }
     .tab-content.active { display: block; }
@@ -1011,7 +1021,7 @@
     </div>
   </header>
 
-  <div id="toast">✅ Bildirim</div>
+  <div id="toast" onclick="hideToast()" title="Kapatmak için dokunun">✅ Bildirim</div>
 
 
   <main>
@@ -1648,11 +1658,26 @@
       }
     }
 
-    function showToast(msg) {
+    let toastTimer = null;
+    function hideToast() {
       const toast = document.getElementById('toast');
+      if (toast) toast.classList.remove('show');
+      if (toastTimer) {
+        clearTimeout(toastTimer);
+        toastTimer = null;
+      }
+    }
+
+    function showToast(msg, duration = 2800) {
+      const toast = document.getElementById('toast');
+      if (!toast) return;
+      hideToast();
+      void toast.offsetWidth;
       toast.innerText = msg;
       toast.classList.add('show');
-      setTimeout(() => toast.classList.remove('show'), 3500);
+      toastTimer = setTimeout(() => {
+        hideToast();
+      }, duration);
     }
 
     function toggleKeyModal() {
@@ -3607,11 +3632,21 @@
           body: JSON.stringify(payload)
         });
         const json = await res.json();
-        showToast(json.message);
         if (json.ok) {
           closeEditProductModal();
-          loadProducts();
+          showToast(json.message || "✅ Ürün başarıyla güncellendi!");
+          if (json.product && Array.isArray(_allProductsCache)) {
+            const idx = _allProductsCache.findIndex(p => p.id === prodId);
+            if (idx !== -1) {
+              _allProductsCache[idx] = { ..._allProductsCache[idx], ...json.product };
+            }
+            renderProductList(_allProductsCache);
+          } else {
+            loadProducts();
+          }
           if (typeof loadPOSProductPicker === 'function') loadPOSProductPicker();
+        } else {
+          showToast("⚠️ " + (json.message || "Güncelleme başarısız!"));
         }
       } catch (err) {
         showToast("⚠️ Kaydetme hatası: " + err.message);

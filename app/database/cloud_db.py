@@ -4,6 +4,8 @@ import json
 import logging
 import os
 import secrets
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -18,6 +20,31 @@ logger = logging.getLogger(__name__)
 # Cloud storage & data directory setup
 UPLOADS_DIR = DATA_DIR / "uploads" / "products"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _save_base64_to_disk(image_str: Optional[str], uid: int, pid: int) -> str:
+    """Base64 data URL formatındaki görseli disk üzerindeki uploads/products klasörüne kaydeder.
+    Veritabanını ve Firestore dokümanını yüzlerce kilobayt yerine kısa bir URL ile hafifletir.
+    """
+    if not image_str:
+        return ""
+    if image_str == "__REMOVE__":
+        return ""
+    if image_str.startswith("data:image/"):
+        try:
+            if "," in image_str:
+                _, encoded = image_str.split(",", 1)
+            else:
+                encoded = image_str
+            img_bytes = base64.b64decode(encoded)
+            filename = f"prod_{uid}_{pid}.jpg"
+            target_file = UPLOADS_DIR / filename
+            target_file.write_bytes(img_bytes)
+            return f"/uploads/products/{filename}?v={int(time.time())}"
+        except Exception as e:
+            logger.warning(f"Görsel diske kaydedilemedi: {e}")
+            return image_str
+    return image_str
 
 
 class CloudDatabase:
@@ -679,38 +706,69 @@ class CloudDatabase:
         name_clean = name.strip()
         if not name_clean:
             return None
-        uid = user_id or 1
+        raw_uid = user_id or 1
         with self.db.get_connection() as conn:
-            cursor = conn.execute(
-                "INSERT OR IGNORE INTO categories (name, user_id, synced_to_cloud) VALUES (?, ?, 0)",
-                (name_clean, uid),
-            )
-            cat_id = cursor.lastrowid
-            if not cat_id:
-                row = conn.execute(
-                    "SELECT id FROM categories WHERE name = ? AND user_id = ?",
+            u_check = conn.execute("SELECT id FROM users WHERE id = ?", (raw_uid,)).fetchone()
+            uid = raw_uid if u_check else None
+
+            if uid is not None:
+                cursor = conn.execute(
+                    "INSERT OR IGNORE INTO categories (name, user_id, synced_to_cloud) VALUES (?, ?, 0)",
                     (name_clean, uid),
+                )
+                cat_id = cursor.lastrowid
+                if not cat_id:
+                    row = conn.execute(
+                        "SELECT id FROM categories WHERE name = ? AND user_id = ?",
+                        (name_clean, uid),
+                    ).fetchone()
+                    cat_id = row["id"] if row else None
+            else:
+                row = conn.execute(
+                    "SELECT id FROM categories WHERE name = ? AND (user_id IS NULL OR user_id = ?)",
+                    (name_clean, raw_uid),
                 ).fetchone()
-                cat_id = row["id"] if row else None
+                if row:
+                    cat_id = row["id"]
+                else:
+                    cursor = conn.execute(
+                        "INSERT OR IGNORE INTO categories (name, user_id, synced_to_cloud) VALUES (?, NULL, 0)",
+                        (name_clean,),
+                    )
+                    cat_id = cursor.lastrowid or 1
 
         if cat_id and self.firestore_db:
-            try:
-                doc_id = f"u{uid}_c{cat_id}"
-                self.firestore_db.collection("categories").document(doc_id).set({
-                    "id": cat_id,
-                    "name": name_clean,
-                    "user_id": uid,
-                    "synced_to_cloud": 1,
-                })
-                with self.db.get_connection() as conn:
-                    conn.execute("UPDATE categories SET synced_to_cloud = 1 WHERE id = ?", (cat_id,))
-            except Exception:
-                pass
+            def _sync_cat():
+                try:
+                    doc_id = f"u{raw_uid}_c{cat_id}"
+                    self.firestore_db.collection("categories").document(doc_id).set({
+                        "id": cat_id,
+                        "name": name_clean,
+                        "user_id": raw_uid,
+                        "synced_to_cloud": 1,
+                    })
+                    with self.db.get_connection() as c:
+                        c.execute("UPDATE categories SET synced_to_cloud = 1 WHERE id = ?", (cat_id,))
+                except Exception:
+                    pass
+            threading.Thread(target=_sync_cat, daemon=True).start()
         return cat_id
 
     # ════════════════════════════════════════════════════════════════════
     # ÜRÜN İŞLEMLERİ (KULLANICIYA ÖZEL İZOLE & STOK KORUMALI)
     # ════════════════════════════════════════════════════════════════════
+    def get_product_by_id(self, product_id: int, user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        """Tek bir ürünü ID üzerinden 0ms gecikmeyle getirir."""
+        uid = user_id or 1
+        query = """
+            SELECT p.*, c.name as category_name
+            FROM products p
+            LEFT JOIN categories c ON p.category_id = c.id
+            WHERE p.id = ? AND p.is_active = 1 AND (p.user_id = ? OR p.user_id IS NULL)
+        """
+        with self.db.get_connection() as conn:
+            row = conn.execute(query, (product_id, uid)).fetchone()
+            return dict(row) if row else None
     def get_products(self, user_id: Optional[int] = None, search: str = "") -> List[Dict[str, Any]]:
         uid = user_id or 1
         query = """
@@ -761,19 +819,22 @@ class CloudDatabase:
         unit: str = "adet",
     ) -> tuple[bool, str, Optional[Dict[str, Any]]]:
 
-        uid = user_id or 1
-        cat_id = self.add_category(category_name, user_id=uid) or 1
+        raw_uid = user_id or 1
+        cat_id = self.add_category(category_name, user_id=raw_uid) or 1
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         unit_clean = (unit or "adet").strip().lower()
         if unit_clean not in ("adet", "kg"):
             unit_clean = "adet"
 
         with self.db.get_connection() as conn:
+            u_check = conn.execute("SELECT id FROM users WHERE id = ?", (raw_uid,)).fetchone()
+            uid = raw_uid if u_check else None
+
             if product_id:
-                # Update existing product for this user
+                # Update existing product for this user (or legacy null user)
                 existing = conn.execute(
-                    "SELECT id, image_path, barcode FROM products WHERE id = ? AND user_id = ?",
-                    (product_id, uid)
+                    "SELECT id, image_path, barcode FROM products WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+                    (product_id, raw_uid)
                 ).fetchone()
 
                 if not existing:
@@ -781,8 +842,8 @@ class CloudDatabase:
 
                 # Check duplicate barcode for ANOTHER active product
                 dup = conn.execute(
-                    "SELECT id FROM products WHERE barcode = ? AND user_id = ? AND id != ? AND is_active = 1",
-                    (barcode, uid, product_id)
+                    "SELECT id FROM products WHERE barcode = ? AND (user_id = ? OR user_id IS NULL) AND id != ? AND is_active = 1",
+                    (barcode, raw_uid, product_id)
                 ).fetchone()
                 if dup:
                     return False, f"'{barcode}' barkodlu başka bir ürününüz zaten mevcut!", None
@@ -791,7 +852,7 @@ class CloudDatabase:
                 if image_path == "__REMOVE__":
                     final_image_path = ""
                 elif image_path is not None:
-                    final_image_path = image_path
+                    final_image_path = _save_base64_to_disk(image_path, raw_uid, product_id)
                 else:
                     final_image_path = existing["image_path"] or ""
 
@@ -801,7 +862,7 @@ class CloudDatabase:
                     SET category_id = ?, name = ?, barcode = ?, purchase_price = ?,
                         sale_price = ?, stock_quantity = ?, critical_stock_level = ?,
                         unit = ?, image_path = ?, updated_at = ?, is_active = 1
-                    WHERE id = ? AND user_id = ?
+                    WHERE id = ? AND (user_id = ? OR user_id IS NULL)
                     """,
                     (
                         cat_id,
@@ -815,7 +876,7 @@ class CloudDatabase:
                         final_image_path,
                         now,
                         product_id,
-                        uid,
+                        raw_uid,
                     ),
                 )
                 pid = product_id
@@ -824,8 +885,8 @@ class CloudDatabase:
                 final_image_path = image_path or ""
                 # Check duplicate barcode for this user
                 existing = conn.execute(
-                    "SELECT id FROM products WHERE barcode = ? AND user_id = ? AND is_active = 1",
-                    (barcode, uid)
+                    "SELECT id FROM products WHERE barcode = ? AND (user_id = ? OR user_id IS NULL) AND is_active = 1",
+                    (barcode, raw_uid)
                 ).fetchone()
 
                 if existing:
@@ -848,12 +909,15 @@ class CloudDatabase:
                         float(stock_quantity),
                         float(critical_stock_level),
                         unit_clean,
-                        final_image_path,
+                        "",
                         now,
                         now,
                     ),
                 )
                 pid = cursor.lastrowid
+                if final_image_path:
+                    final_image_path = _save_base64_to_disk(final_image_path, raw_uid, pid)
+                    conn.execute("UPDATE products SET image_path = ? WHERE id = ?", (final_image_path, pid))
                 msg = f"'{name}' ürünü başarıyla eklendi."
 
         prod_data = {
@@ -873,56 +937,64 @@ class CloudDatabase:
             "created_at": now,
             "updated_at": now,
         }
-        synced = 0
         if self.firestore_db:
-            try:
-                prod_data["synced_to_cloud"] = 1
-                doc_id = f"u{uid}_p{pid}"
-                self.firestore_db.collection("products").document(doc_id).set(prod_data)
-                synced = 1
-            except Exception as e:
-                logger.warning(f"Firestore ürün bulut kaydı uyarısı: {e}")
-                synced = 0
+            def _async_save():
+                try:
+                    doc_id = f"u{uid}_p{pid}"
+                    to_sync = dict(prod_data)
+                    to_sync["synced_to_cloud"] = 1
+                    self.firestore_db.collection("products").document(doc_id).set(to_sync)
+                    with self.db.get_connection() as c:
+                        c.execute("UPDATE products SET synced_to_cloud = 1 WHERE id = ?", (pid,))
+                except Exception as ex:
+                    logger.warning(f"Firestore ürün arka plan kaydı uyarısı: {ex}")
 
-        with self.db.get_connection() as conn:
-            conn.execute("UPDATE products SET synced_to_cloud = ? WHERE id = ?", (synced, pid))
+            threading.Thread(target=_async_save, daemon=True).start()
 
-        prod_data["synced_to_cloud"] = synced
+        prod_data["synced_to_cloud"] = 1 if self.firestore_db else 0
         return True, msg, prod_data
 
     def update_product_image(
         self, product_id: int, image_path: str, user_id: Optional[int] = None
     ) -> tuple[bool, str, Optional[str]]:
         """Bir ürünün fotoğrafını anında günceller veya temizler ve Firestore'a senkronize eder."""
-        uid = user_id or 1
+        raw_uid = user_id or 1
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         clean_img = "" if image_path == "__REMOVE__" else (image_path or "")
+        if clean_img:
+            clean_img = _save_base64_to_disk(clean_img, raw_uid, product_id)
 
         with self.db.get_connection() as conn:
             row = conn.execute(
-                "SELECT id, name FROM products WHERE id = ? AND user_id = ? AND is_active = 1",
-                (product_id, uid)
+                "SELECT id, name FROM products WHERE id = ? AND (user_id = ? OR user_id IS NULL) AND is_active = 1",
+                (product_id, raw_uid)
             ).fetchone()
             if not row:
                 return False, "Fotoğrafı güncellenecek ürün bulunamadı!", None
 
             conn.execute(
-                "UPDATE products SET image_path = ?, synced_to_cloud = 0, updated_at = ? WHERE id = ? AND user_id = ?",
-                (clean_img, now, product_id, uid)
+                "UPDATE products SET image_path = ?, synced_to_cloud = 0, updated_at = ? WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+                (clean_img, now, product_id, raw_uid)
             )
 
         if self.firestore_db:
-            try:
-                doc_id = f"u{uid}_p{product_id}"
-                self.firestore_db.collection("products").document(doc_id).update({
-                    "image_path": clean_img,
-                    "updated_at": now,
-                    "synced_to_cloud": 1
-                })
-                with self.db.get_connection() as conn:
-                    conn.execute("UPDATE products SET synced_to_cloud = 1 WHERE id = ?", (product_id,))
-            except Exception as e:
-                logger.warning(f"Firestore ürün görsel güncelleme uyarısı: {e}")
+            def _async_img():
+                try:
+                    doc_id = f"u{raw_uid}_p{product_id}"
+                    self.firestore_db.collection("products").document(doc_id).update({
+                        "image_path": clean_img,
+                        "updated_at": now,
+                        "synced_to_cloud": 1
+                    })
+                    with self.db.get_connection() as c:
+                        c.execute("UPDATE products SET synced_to_cloud = 1 WHERE id = ?", (product_id,))
+                except Exception as e:
+                    logger.warning(f"Firestore ürün görsel güncelleme uyarısı: {e}")
+
+            threading.Thread(target=_async_img, daemon=True).start()
+
+        msg = "Ürün görseli başarıyla kaldırıldı." if not clean_img else f"'{row['name']}' ürün fotoğrafı başarıyla güncellendi."
+        return True, msg, clean_img
 
         msg = "Ürün görseli başarıyla kaldırıldı." if not clean_img else f"'{row['name']}' ürün fotoğrafı başarıyla güncellendi."
         return True, msg, clean_img

@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import customtkinter as ctk
 
+from app.config import get_turkey_now
 from app.database.cloud_db import CloudDatabase
 from app.services.forecast_service import ForecastService
 from app.services.sale_service import SaleService
@@ -288,7 +289,7 @@ class ReportsView(ctk.CTkFrame):
 
     def _set_rev_date_preset(self, preset: str) -> None:
         self._rev_date_preset = preset
-        today = datetime.now().date()
+        today = get_turkey_now().date()
 
         if preset == "today":
             self._rev_start_date = today.strftime("%Y-%m-%d")

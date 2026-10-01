@@ -8,6 +8,8 @@ services:
     envVars:
       - key: PORT
         value: 10000
+      - key: TZ
+        value: Europe/Istanbul
       - key: GEMINI_API_KEY
         sync: false
       - key: FIREBASE_CREDENTIALS_JSON

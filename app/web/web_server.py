@@ -579,6 +579,7 @@ def record_sale():
     total_amount = data.get("total_amount")
     customer_name = data.get("customer_name")
     idempotency_key = data.get("idempotency_key")
+    sold_at = data.get("sold_at")
     if not items:
         return jsonify({"ok": False, "message": "Sepet boş!"}), 400
 
@@ -622,6 +623,7 @@ def record_sale():
             channel=channel,
             total_amount_override=total_override,
             customer_name=customer_name,
+            sold_at=sold_at,
         )
         if ok:
             notify_data_change(user_id)

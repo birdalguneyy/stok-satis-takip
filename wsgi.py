@@ -1,5 +1,15 @@
 import os
+import time
 import logging
+
+# Türkiye Saat Dilimi Ayarı (UTC+3)
+os.environ["TZ"] = "Europe/Istanbul"
+if hasattr(time, "tzset"):
+    try:
+        time.tzset()
+    except Exception:
+        pass
+
 from app.web.web_server import app
 
 logger = logging.getLogger(__name__)

@@ -1,5 +1,6 @@
 from typing import List, Optional, Tuple
 
+from app.config import get_turkey_now_str
 from app.database.connection import Database
 from app.models.cart_item import CartItem
 from app.models.sale import Sale, SaleItem
@@ -16,17 +17,19 @@ class SaleRepository:
         channel: str = "magaza",
         total_amount_override: Optional[float] = None,
         customer_name: Optional[str] = None,
+        sold_at: Optional[str] = None,
     ) -> Sale:
         calc_total = sum(item.subtotal for item in cart_items)
         total_amount = round(total_amount_override, 2) if total_amount_override is not None else round(calc_total, 2)
         item_count = sum(item.quantity for item in cart_items)
         ch = (channel or "magaza").strip().lower()
         cust_name = customer_name.strip() if customer_name and str(customer_name).strip() else None
+        now = sold_at.strip() if sold_at and str(sold_at).strip() else get_turkey_now_str()
 
         with self.db.get_connection() as conn:
             cursor = conn.execute(
-                "INSERT INTO sales (total_amount, item_count, note, channel, customer_name) VALUES (?, ?, ?, ?, ?)",
-                (total_amount, item_count, note, ch, cust_name),
+                "INSERT INTO sales (total_amount, item_count, sold_at, note, channel, customer_name) VALUES (?, ?, ?, ?, ?, ?)",
+                (total_amount, item_count, now, note, ch, cust_name),
             )
             sale_id = cursor.lastrowid
 
@@ -81,7 +84,7 @@ class SaleRepository:
         if customer_name and str(customer_name).strip():
             query += " AND customer_name LIKE ?"
             params.append(f"%{customer_name.strip()}%")
-        query += " ORDER BY id DESC LIMIT 500"
+        query += " ORDER BY sold_at DESC, id DESC LIMIT 500"
 
         sales = []
         with self.db.get_connection() as conn:

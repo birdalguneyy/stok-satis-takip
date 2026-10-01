@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from app.config import DATA_DIR, DB_PATH
+from app.config import DATA_DIR, DB_PATH, TURKEY_TZ, get_turkey_now, get_turkey_now_str
 from app.database.connection import Database
 from app.database.migrations import run_migrations
 from app.models.product import Product
@@ -185,7 +185,7 @@ class CloudDatabase:
             return 0
 
         pulled_count = 0
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = get_turkey_now_str()
 
         try:
             with self.db.get_connection() as conn:
@@ -316,6 +316,14 @@ class CloudDatabase:
                             continue
                         final_uid = doc_user_id if doc_user_id is not None else (user_id or 1)
                         if sid:
+                            raw_s_at = d.get("sold_at")
+                            if isinstance(raw_s_at, datetime):
+                                s_at = raw_s_at.astimezone(TURKEY_TZ).strftime("%Y-%m-%d %H:%M:%S") if raw_s_at.tzinfo else raw_s_at.strftime("%Y-%m-%d %H:%M:%S")
+                            elif isinstance(raw_s_at, str) and raw_s_at.strip():
+                                s_at = raw_s_at.strip()
+                            else:
+                                s_at = now
+
                             conn.execute(
                                 """
                                 INSERT OR REPLACE INTO sales (
@@ -327,7 +335,7 @@ class CloudDatabase:
                                     final_uid,
                                     float(d.get("total_amount", 0)),
                                     int(d.get("item_count", 0)),
-                                    d.get("sold_at", now),
+                                    s_at,
                                     d.get("note", "Satış"),
                                     d.get("channel", "magaza"),
                                 ),
@@ -576,7 +584,7 @@ class CloudDatabase:
                         if k:
                             self.firestore_db.collection("system_settings").document("gemini").set({
                                 "api_key": k,
-                                "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                "updated_at": get_turkey_now_str()
                             }, merge=True)
                             pushed_count += 1
                     except Exception as ex:
@@ -641,7 +649,7 @@ class CloudDatabase:
 
         uid = self._resolve_user_id(user_id) or 1
         pushed_count = 0
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = get_turkey_now_str()
 
         try:
             with self.db.get_connection() as conn:
@@ -837,7 +845,7 @@ class CloudDatabase:
 
         raw_uid = user_id or 1
         cat_id = self.add_category(category_name, user_id=raw_uid) or 1
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = get_turkey_now_str()
         unit_clean = (unit or "adet").strip().lower()
         if unit_clean not in ("adet", "kg"):
             unit_clean = "adet"
@@ -975,7 +983,7 @@ class CloudDatabase:
     ) -> tuple[bool, str, Optional[str]]:
         """Bir ürünün fotoğrafını anında günceller veya temizler ve Firestore'a senkronize eder."""
         raw_uid = user_id or 1
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = get_turkey_now_str()
         clean_img = "" if image_path == "__REMOVE__" else (image_path or "")
         if clean_img:
             clean_img = _save_base64_to_disk(clean_img, raw_uid, product_id)
@@ -1023,7 +1031,7 @@ class CloudDatabase:
             return False, "Satış fiyatı negatif olamaz!"
 
         uid = user_id or 1
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = get_turkey_now_str()
 
         with self.db.get_connection() as conn:
             row = conn.execute(
@@ -1057,7 +1065,7 @@ class CloudDatabase:
 
     def delete_product(self, product_id: int, user_id: Optional[int] = None) -> tuple[bool, str]:
         uid = user_id or 1
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = get_turkey_now_str()
         with self.db.get_connection() as conn:
             conn.execute(
                 "UPDATE products SET is_active = 0, synced_to_cloud = 0, updated_at = ? WHERE id = ? AND user_id = ?",
@@ -1084,7 +1092,7 @@ class CloudDatabase:
             return False, "Stok miktarı negatif olamaz!"
 
         uid = user_id or 1
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = get_turkey_now_str()
         with self.db.get_connection() as conn:
             conn.execute(
                 "UPDATE products SET stock_quantity = ?, synced_to_cloud = 0, updated_at = ? WHERE id = ? AND user_id = ? AND is_active = 1",
@@ -1119,6 +1127,7 @@ class CloudDatabase:
         channel: str = "magaza",
         total_amount_override: Optional[float] = None,
         customer_name: Optional[str] = None,
+        sold_at: Optional[str] = None,
     ) -> tuple[bool, str]:
         if not cart_items:
             return False, "Sepet boş!"
@@ -1140,7 +1149,7 @@ class CloudDatabase:
             total_amount = round(calculated_total, 2)
 
         item_count = len(cart_items)
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = sold_at.strip() if sold_at and str(sold_at).strip() else get_turkey_now_str()
 
         with self.db.get_connection() as conn:
             cursor = conn.execute(
@@ -1221,7 +1230,7 @@ class CloudDatabase:
         restore_stock: bool = True,
     ) -> tuple[bool, str]:
         uid = self._resolve_user_id(user_id)
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = get_turkey_now_str()
         affected_product_ids = set()
 
         with self.db.get_connection() as conn:
@@ -1321,7 +1330,7 @@ class CloudDatabase:
             return False, "Silinecek satış seçilmedi!", 0
 
         uid = self._resolve_user_id(user_id)
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = get_turkey_now_str()
         cleaned_ids = [int(sid) for sid in sale_ids if sid]
         if not cleaned_ids:
             return False, "Geçersiz satış listesi!", 0
@@ -1434,7 +1443,7 @@ class CloudDatabase:
         if customer_name and str(customer_name).strip():
             query += " AND customer_name LIKE ?"
             params.append(f"%{customer_name.strip()}%")
-        query += " ORDER BY id DESC LIMIT 500"
+        query += " ORDER BY sold_at DESC, id DESC LIMIT 500"
 
         sales = []
         with self.db.get_connection() as conn:
@@ -1671,8 +1680,8 @@ class CloudDatabase:
             return False, "Lütfen geçerli bir gider adı ve tutar giriniz!", None
 
         uid = user_id or 1
-        exp_date = expense_date or datetime.now().strftime("%Y-%m-%d")
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        exp_date = expense_date or get_turkey_now_str("%Y-%m-%d")
+        now = get_turkey_now_str()
 
         with self.db.get_connection() as conn:
             cursor = conn.execute(
@@ -1782,7 +1791,7 @@ class CloudDatabase:
             try:
                 self.firestore_db.collection("system_settings").document("gemini").set({
                     "api_key": clean_key,
-                    "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    "updated_at": get_turkey_now_str()
                 }, merge=True)
                 logger.info("Gemini API Key Firebase Firestore'a başarıyla kaydedildi.")
             except Exception as exc:
@@ -1850,7 +1859,7 @@ class CloudDatabase:
 
         pass_hash = self._hash_password(password)
         token = self._generate_token()
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = get_turkey_now_str()
 
         # 1. Firestore kontrolü
         if self.firestore_db:
@@ -1967,7 +1976,7 @@ class CloudDatabase:
             return False, "Lütfen telefon/e-posta ve şifrenizi giriniz!", None
 
         pass_hash = self._hash_password(password)
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = get_turkey_now_str()
         user_dict = None
 
         # 1. SQLite'da ara
@@ -2082,7 +2091,7 @@ class CloudDatabase:
                 if docs:
                     data = docs[0].to_dict()
                     uid = data.get("id") or (int(docs[0].id) if docs[0].id.isdigit() else 1)
-                    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    now = get_turkey_now_str()
                     with self.db.get_connection() as conn:
                         conn.execute(
                             """

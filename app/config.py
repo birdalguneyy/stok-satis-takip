@@ -1,6 +1,21 @@
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+# Türkiye Saati (UTC+3) - Türkiye kalıcı olarak UTC+3 kullanmaktadır
+TURKEY_TZ = timezone(timedelta(hours=3))
+
+
+def get_turkey_now() -> datetime:
+    """Türkiye yerel saatini (UTC+3) datetime nesnesi olarak döndürür."""
+    return datetime.now(TURKEY_TZ)
+
+
+def get_turkey_now_str(fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
+    """Türkiye yerel saatini (UTC+3) string olarak döndürür."""
+    return datetime.now(TURKEY_TZ).strftime(fmt)
+
 
 APP_NAME = "Stok & Satış Takip"
 APP_VERSION = "0.1.0"

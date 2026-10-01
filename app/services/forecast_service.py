@@ -6,6 +6,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
+from app.config import get_turkey_now
 from app.database.cloud_db import CloudDatabase
 
 
@@ -133,7 +134,7 @@ class ForecastService:
         hourly_distribution = [0] * 24
 
         unique_dates_per_day: List[set] = [set() for _ in range(7)]
-        now = datetime.now()
+        now = get_turkey_now().replace(tzinfo=None)
 
         for s in sales:
             try:
@@ -287,7 +288,7 @@ class ForecastService:
         """Tüm ürünlerin tüketim hızını (run-rate), ivmesini (momentum),
         gelecek 7/30 gün tahmini satışını ve stok tükenme gününü hesaplar.
         """
-        now = datetime.now()
+        now = get_turkey_now().replace(tzinfo=None)
 
         product_sales_stats: Dict[int, Dict[str, Any]] = {}
         for p in products:

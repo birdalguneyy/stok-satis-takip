@@ -8,9 +8,18 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-import cv2
-import numpy as np
+try:
+    import cv2
+except ImportError:
+    cv2 = None
+
+try:
+    import numpy as np
+except ImportError:
+    np = None
+
 from PIL import Image, ImageOps
+
 
 from app.config import DATA_DIR
 from app.utils.camera import decode_barcode_from_frame

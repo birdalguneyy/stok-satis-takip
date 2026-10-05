@@ -433,9 +433,122 @@ class CloudDatabase:
                 except Exception as e:
                     logger.warning(f"Firestore Gemini Key çekme uyarısı: {e}")
 
+                # 6.2 PULL FARM CUSTOMERS
+                try:
+
+                    fc_docs = self.firestore_db.collection("farm_customers").stream()
+                    for doc in fc_docs:
+                        d = doc.to_dict()
+                        fc_id = d.get("id") or (int(doc.id) if doc.id.isdigit() else None)
+                        doc_user_id = d.get("user_id")
+                        if user_id is not None and doc_user_id is not None and doc_user_id != user_id:
+                            continue
+                        final_uid = doc_user_id if doc_user_id is not None else (user_id or 1)
+                        if d.get("name"):
+                            conn.execute(
+                                """
+                                INSERT OR REPLACE INTO farm_customers (
+                                    id, user_id, name, phone, synced_to_cloud, created_at
+                                ) VALUES (?, ?, ?, ?, 1, ?)
+                                """,
+                                (fc_id, final_uid, d.get("name"), d.get("phone", ""), d.get("created_at", now)),
+                            )
+                            pulled_count += 1
+                except Exception as e:
+                    logger.warning(f"Çiftlik müşterilerini buluttan çekme hatası: {e}")
+
+                # 6.3 PULL FARM EGG SALES
+                try:
+                    es_docs = self.firestore_db.collection("farm_egg_sales").stream()
+                    for doc in es_docs:
+                        d = doc.to_dict()
+                        es_id = d.get("id")
+                        if not es_id and doc.id.isdigit():
+                            es_id = int(doc.id)
+                        elif not es_id and "_es" in doc.id:
+                            try:
+                                es_id = int(doc.id.split("_es")[-1])
+                            except Exception:
+                                pass
+                        doc_user_id = d.get("user_id")
+                        if user_id is not None and doc_user_id is not None and doc_user_id != user_id:
+                            continue
+                        final_uid = doc_user_id if doc_user_id is not None else (user_id or 1)
+                        if es_id and d.get("customer_name"):
+                            conn.execute(
+                                """
+                                INSERT OR REPLACE INTO farm_egg_sales (
+                                    id, user_id, customer_name, box_count, unit_price, total_amount,
+                                    source, sale_date, note, synced_to_cloud, created_at
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                                """,
+                                (
+                                    es_id,
+                                    final_uid,
+                                    d.get("customer_name"),
+                                    float(d.get("box_count", 1)),
+                                    float(d.get("unit_price", 0)),
+                                    float(d.get("total_amount", 0)),
+                                    d.get("source", "Ciftlik"),
+                                    d.get("sale_date", now),
+                                    d.get("note", ""),
+                                    d.get("created_at", now),
+                                ),
+                            )
+                            pulled_count += 1
+                except Exception as e:
+                    logger.warning(f"Çiftlik yumurta satışlarını buluttan çekme hatası: {e}")
+
+                # 6.4 PULL FARM FEED PURCHASES
+                try:
+                    fp_docs = self.firestore_db.collection("farm_feed_purchases").stream()
+                    for doc in fp_docs:
+                        d = doc.to_dict()
+                        fp_id = d.get("id")
+                        if not fp_id and doc.id.isdigit():
+                            fp_id = int(doc.id)
+                        elif not fp_id and "_fp" in doc.id:
+                            try:
+                                fp_id = int(doc.id.split("_fp")[-1])
+                            except Exception:
+                                pass
+                        doc_user_id = d.get("user_id")
+                        if user_id is not None and doc_user_id is not None and doc_user_id != user_id:
+                            continue
+                        final_uid = doc_user_id if doc_user_id is not None else (user_id or 1)
+                        if fp_id and d.get("bag_count"):
+                            bag_count = float(d.get("bag_count", 0))
+                            bag_weight = float(d.get("bag_weight_kg", 50.0))
+                            tot_kg = float(d.get("total_weight_kg", bag_count * bag_weight))
+                            tot_ton = float(d.get("total_weight_ton", tot_kg / 1000.0))
+                            conn.execute(
+                                """
+                                INSERT OR REPLACE INTO farm_feed_purchases (
+                                    id, user_id, bag_count, bag_weight_kg, total_weight_kg, total_weight_ton,
+                                    unit_price, total_amount, purchase_date, supplier, note, synced_to_cloud, created_at
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                                """,
+                                (
+                                    fp_id,
+                                    final_uid,
+                                    bag_count,
+                                    bag_weight,
+                                    tot_kg,
+                                    tot_ton,
+                                    float(d.get("unit_price", 0)),
+                                    float(d.get("total_amount", 0)),
+                                    d.get("purchase_date", now[:10]),
+                                    d.get("supplier", ""),
+                                    d.get("note", ""),
+                                    d.get("created_at", now),
+                                ),
+                            )
+                            pulled_count += 1
+                except Exception as e:
+                    logger.warning(f"Çiftlik yem alımlarını buluttan çekme hatası: {e}")
 
                 # 7. UPDATE SQLITE AUTOINCREMENT SEQUENCES
-                for tbl in ["users", "categories", "products", "sales", "expenses"]:
+                for tbl in ["users", "categories", "products", "sales", "expenses", "farm_customers", "farm_egg_sales", "farm_feed_purchases"]:
                     try:
                         max_row = conn.execute(f"SELECT MAX(id) as max_id FROM {tbl}").fetchone()
                         if max_row and max_row["max_id"] is not None:
@@ -575,6 +688,66 @@ class CloudDatabase:
                         pushed_count += 1
                     except Exception as ex:
                         logger.warning(f"Gider {e_id} bulut senkronizasyon hatası: {ex}")
+
+                # 5.1 PUSH UN-SYNCED FARM CUSTOMERS
+                fc_query = "SELECT * FROM farm_customers WHERE synced_to_cloud = 0"
+                fc_params = []
+                if user_id is not None:
+                    fc_query += " AND user_id = ?"
+                    fc_params.append(user_id)
+                un_fcs = conn.execute(fc_query, fc_params).fetchall()
+                for fc in un_fcs:
+                    fc_dict = dict(fc)
+                    fc_id = fc_dict["id"]
+                    fc_uid = fc_dict.get("user_id") or 1
+                    fc_dict["synced_to_cloud"] = 1
+                    doc_id = f"u{fc_uid}_fc{fc_id}"
+                    try:
+                        self.firestore_db.collection("farm_customers").document(doc_id).set(fc_dict)
+                        conn.execute("UPDATE farm_customers SET synced_to_cloud = 1 WHERE id = ?", (fc_id,))
+                        pushed_count += 1
+                    except Exception as ex:
+                        logger.warning(f"Çiftlik müşteri {fc_id} senkronizasyon hatası: {ex}")
+
+                # 5.2 PUSH UN-SYNCED FARM EGG SALES
+                es_query = "SELECT * FROM farm_egg_sales WHERE synced_to_cloud = 0"
+                es_params = []
+                if user_id is not None:
+                    es_query += " AND user_id = ?"
+                    es_params.append(user_id)
+                un_ess = conn.execute(es_query, es_params).fetchall()
+                for es in un_ess:
+                    es_dict = dict(es)
+                    es_id = es_dict["id"]
+                    es_uid = es_dict.get("user_id") or 1
+                    es_dict["synced_to_cloud"] = 1
+                    doc_id = f"u{es_uid}_es{es_id}"
+                    try:
+                        self.firestore_db.collection("farm_egg_sales").document(doc_id).set(es_dict)
+                        conn.execute("UPDATE farm_egg_sales SET synced_to_cloud = 1 WHERE id = ?", (es_id,))
+                        pushed_count += 1
+                    except Exception as ex:
+                        logger.warning(f"Çiftlik yumurta satış {es_id} senkronizasyon hatası: {ex}")
+
+                # 5.3 PUSH UN-SYNCED FARM FEED PURCHASES
+                fp_query = "SELECT * FROM farm_feed_purchases WHERE synced_to_cloud = 0"
+                fp_params = []
+                if user_id is not None:
+                    fp_query += " AND user_id = ?"
+                    fp_params.append(user_id)
+                un_fps = conn.execute(fp_query, fp_params).fetchall()
+                for fp in un_fps:
+                    fp_dict = dict(fp)
+                    fp_id = fp_dict["id"]
+                    fp_uid = fp_dict.get("user_id") or 1
+                    fp_dict["synced_to_cloud"] = 1
+                    doc_id = f"u{fp_uid}_fp{fp_id}"
+                    try:
+                        self.firestore_db.collection("farm_feed_purchases").document(doc_id).set(fp_dict)
+                        conn.execute("UPDATE farm_feed_purchases SET synced_to_cloud = 1 WHERE id = ?", (fp_id,))
+                        pushed_count += 1
+                    except Exception as ex:
+                        logger.warning(f"Çiftlik yem alım {fp_id} senkronizasyon hatası: {ex}")
 
                 # 6. PUSH GEMINI API KEY IF LOCAL EXISTS
                 key_file = DATA_DIR / "gemini_key.txt"
@@ -1185,7 +1358,31 @@ class CloudDatabase:
                     (float(item["quantity"]), now, item["product_id"], uid),
                 )
 
+        # Dükkan satışındaki yumurtaları otomatik Çiftlik kaydına aktar
+        try:
+            discount_ratio = (total_amount / calculated_total) if (total_amount_override is not None and calculated_total > 0) else 1.0
+            for item in cart_items:
+                p_name = str(item.get("product_name", "")).strip()
+                if "yumurta" in p_name.lower():
+                    orig_unit_price = float(item.get("unit_price", 0))
+                    effective_price = round(orig_unit_price * discount_ratio, 2)
+                    qty = float(item.get("quantity", 1))
+                    egg_cust = cust_name or "Dükkan Perakende"
+                    egg_note = f"Dükkan Satışı (Fiş #{sale_id}) - {p_name}"
+                    self.add_farm_egg_sale(
+                        customer_name=egg_cust,
+                        box_count=qty,
+                        unit_price=effective_price,
+                        sale_date=now,
+                        source="Dükkan",
+                        note=egg_note,
+                        user_id=uid,
+                    )
+        except Exception as e_egg:
+            logger.warning(f"Dükkan yumurta satış aktarımı uyarısı: {e_egg}")
+
         synced = 0
+
         if self.firestore_db:
             try:
                 doc_id = f"u{uid}_s{sale_id}"
@@ -2168,3 +2365,343 @@ class CloudDatabase:
                 return True, f"'{user_dict.get('company_name', '')}' mağazasına geçildi.", user_dict
         except Exception as e:
             return False, f"Mağaza geçiş hatası: {e}", None
+
+    # ════════════════════════════════════════════════════════════════════
+    # ÇİFTLİK YÖNETİMİ: YUMURTA SATIŞ, YEM ALIM & MÜŞTERİ METOTLARI
+    # ════════════════════════════════════════════════════════════════════
+
+    def save_farm_customer(self, name: str, phone: Optional[str] = None, user_id: Optional[int] = None) -> Optional[int]:
+        """Çiftlik müşterisini kaydeder veya varsa mevcut olanı döner."""
+        clean_name = name.strip()
+        if not clean_name:
+            return None
+        uid = self._resolve_user_id(user_id) or 1
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cid = None
+
+        with self.db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT id FROM farm_customers WHERE name = ? AND (user_id = ? OR user_id IS NULL)",
+                (clean_name, uid),
+            ).fetchone()
+            if row:
+                cid = row["id"]
+            else:
+                cursor = conn.execute(
+                    "INSERT INTO farm_customers (user_id, name, phone, synced_to_cloud, created_at) VALUES (?, ?, ?, 0, ?)",
+                    (uid, clean_name, (phone or "").strip(), now),
+                )
+                cid = cursor.lastrowid
+
+        if cid and self.firestore_db:
+            def _sync_fc():
+                try:
+                    doc_id = f"u{uid}_fc{cid}"
+                    self.firestore_db.collection("farm_customers").document(doc_id).set({
+                        "id": cid,
+                        "user_id": uid,
+                        "name": clean_name,
+                        "phone": (phone or "").strip(),
+                        "synced_to_cloud": 1,
+                        "created_at": now,
+                    })
+                    with self.db.get_connection() as c:
+                        c.execute("UPDATE farm_customers SET synced_to_cloud = 1 WHERE id = ?", (cid,))
+                except Exception as ex:
+                    logger.warning(f"Firestore farm customer sync error: {ex}")
+            threading.Thread(target=_sync_fc, daemon=True).start()
+
+        return cid
+
+    def get_farm_customers(self, user_id: Optional[int] = None) -> List[str]:
+        """Tüm kayıtlı ve geçmiş satışlardaki benzersiz müşteri isimlerini alfabetik sıralı döner."""
+        uid = self._resolve_user_id(user_id) or 1
+        names = set()
+        with self.db.get_connection() as conn:
+            # 1. farm_customers tablosundan
+            fc_rows = conn.execute(
+                "SELECT name FROM farm_customers WHERE (user_id = ? OR user_id IS NULL) AND name IS NOT NULL AND name != ''",
+                (uid,),
+            ).fetchall()
+            for r in fc_rows:
+                if r["name"] and r["name"].strip():
+                    names.add(r["name"].strip())
+
+            # 2. farm_egg_sales tablosundan
+            es_rows = conn.execute(
+                "SELECT DISTINCT customer_name FROM farm_egg_sales WHERE (user_id = ? OR user_id IS NULL) AND customer_name IS NOT NULL AND customer_name != ''",
+                (uid,),
+            ).fetchall()
+            for r in es_rows:
+                if r["customer_name"] and r["customer_name"].strip():
+                    names.add(r["customer_name"].strip())
+
+            # 3. sales tablosundaki müşteri isimlerinden de destek
+            s_rows = conn.execute(
+                "SELECT DISTINCT customer_name FROM sales WHERE (user_id = ? OR user_id IS NULL) AND customer_name IS NOT NULL AND customer_name != ''",
+                (uid,),
+            ).fetchall()
+            for r in s_rows:
+                if r["customer_name"] and r["customer_name"].strip():
+                    names.add(r["customer_name"].strip())
+
+        return sorted(list(names), key=lambda s: s.lower())
+
+    def add_farm_egg_sale(
+        self,
+        customer_name: str,
+        box_count: float,
+        unit_price: float,
+        sale_date: Optional[str] = None,
+        source: str = "Ciftlik",
+        note: Optional[str] = None,
+        user_id: Optional[int] = None,
+    ) -> tuple[bool, str, Optional[int]]:
+        """Yumurta satışını kaydeder (koli sayısı ve birim fiyat üzerinden)."""
+        clean_cust = customer_name.strip()
+        if not clean_cust:
+            return False, "Müşteri adı boş olamaz!", None
+
+        try:
+            b_count = float(box_count)
+            u_price = float(unit_price)
+            if b_count <= 0 or u_price < 0:
+                return False, "Koli adedi pozitif, birim fiyat 0 veya üzeri olmalıdır!", None
+        except (ValueError, TypeError):
+            return False, "Geçersiz koli adedi veya fiyat formatı!", None
+
+        total_amount = round(b_count * u_price, 2)
+        uid = self._resolve_user_id(user_id) or 1
+        now_dt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        s_date = sale_date.strip() if sale_date and sale_date.strip() else now_dt
+
+        # Müşteriyi farm_customers'a da kaydet / hatırla
+        self.save_farm_customer(clean_cust, user_id=uid)
+
+        with self.db.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO farm_egg_sales (
+                    user_id, customer_name, box_count, unit_price, total_amount,
+                    source, sale_date, note, synced_to_cloud, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                """,
+                (uid, clean_cust, b_count, u_price, total_amount, source, s_date, (note or "").strip(), now_dt),
+            )
+            sale_id = cursor.lastrowid
+
+        if sale_id and self.firestore_db:
+            def _sync_egg():
+                try:
+                    doc_id = f"u{uid}_es{sale_id}"
+                    self.firestore_db.collection("farm_egg_sales").document(doc_id).set({
+                        "id": sale_id,
+                        "user_id": uid,
+                        "customer_name": clean_cust,
+                        "box_count": b_count,
+                        "unit_price": u_price,
+                        "total_amount": total_amount,
+                        "source": source,
+                        "sale_date": s_date,
+                        "note": (note or "").strip(),
+                        "synced_to_cloud": 1,
+                        "created_at": now_dt,
+                    })
+                    with self.db.get_connection() as c:
+                        c.execute("UPDATE farm_egg_sales SET synced_to_cloud = 1 WHERE id = ?", (sale_id,))
+                except Exception as ex:
+                    logger.warning(f"Firestore farm egg sale sync error: {ex}")
+            threading.Thread(target=_sync_egg, daemon=True).start()
+
+        return True, f"Yumurta satışı kaydedildi ({b_count:g} Koli - {total_amount:.2f} ₺)", sale_id
+
+    def get_farm_egg_sales(
+        self,
+        user_id: Optional[int] = None,
+        customer_name: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        source: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Yumurta satış kayıtlarını filtreli ve tarih sırasına göre döner."""
+        uid = self._resolve_user_id(user_id) or 1
+        query = "SELECT * FROM farm_egg_sales WHERE (user_id = ? OR user_id IS NULL)"
+        params: list = [uid]
+
+        if customer_name and customer_name.strip():
+            query += " AND customer_name LIKE ?"
+            params.append(f"%{customer_name.strip()}%")
+
+        if start_date and start_date.strip():
+            query += " AND sale_date >= ?"
+            params.append(f"{start_date.strip()} 00:00:00" if len(start_date.strip()) == 10 else start_date.strip())
+
+        if end_date and end_date.strip():
+            query += " AND sale_date <= ?"
+            params.append(f"{end_date.strip()} 23:59:59" if len(end_date.strip()) == 10 else end_date.strip())
+
+        if source and source.strip() and source.strip().lower() != "tümü":
+            query += " AND source = ?"
+            params.append(source.strip())
+
+        query += " ORDER BY sale_date DESC, id DESC"
+
+        with self.db.get_connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [dict(r) for r in rows]
+
+    def delete_farm_egg_sale(self, sale_id: int, user_id: Optional[int] = None) -> tuple[bool, str]:
+        """Yumurta satışı kaydını siler."""
+        uid = self._resolve_user_id(user_id) or 1
+        with self.db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT id FROM farm_egg_sales WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+                (sale_id, uid),
+            ).fetchone()
+            if not row:
+                return False, "Satış kaydı bulunamadı!"
+            conn.execute("DELETE FROM farm_egg_sales WHERE id = ?", (sale_id,))
+
+        if self.firestore_db:
+            def _del_egg():
+                try:
+                    self.firestore_db.collection("farm_egg_sales").document(f"u{uid}_es{sale_id}").delete()
+                    self.firestore_db.collection("farm_egg_sales").document(str(sale_id)).delete()
+                except Exception:
+                    pass
+            threading.Thread(target=_del_egg, daemon=True).start()
+
+        return True, "Yumurta satışı kaydı silindi."
+
+    def add_farm_feed_purchase(
+        self,
+        bag_count: float,
+        unit_price: float = 0.0,
+        total_amount: float = 0.0,
+        purchase_date: Optional[str] = None,
+        supplier: Optional[str] = None,
+        note: Optional[str] = None,
+        user_id: Optional[int] = None,
+    ) -> tuple[bool, str, Optional[int]]:
+        """Yem alımını kaydeder (1 çuval = 50 kg -> Ton hesabı otomatik yapılır)."""
+        try:
+            b_count = float(bag_count)
+            if b_count <= 0:
+                return False, "Çuval adedi 0'dan büyük olmalıdır!", None
+        except (ValueError, TypeError):
+            return False, "Geçersiz çuval adedi formatı!", None
+
+        bag_weight_kg = 50.0
+        total_weight_kg = round(b_count * bag_weight_kg, 2)
+        total_weight_ton = round(total_weight_kg / 1000.0, 3)
+
+        u_price = float(unit_price or 0.0)
+        t_amount = float(total_amount or 0.0)
+        if t_amount <= 0.0 and u_price > 0.0:
+            t_amount = round(b_count * u_price, 2)
+        elif u_price <= 0.0 and t_amount > 0.0:
+            u_price = round(t_amount / b_count, 2)
+
+        uid = self._resolve_user_id(user_id) or 1
+        now_dt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        p_date = purchase_date.strip() if purchase_date and purchase_date.strip() else now_dt[:10]
+
+        with self.db.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO farm_feed_purchases (
+                    user_id, bag_count, bag_weight_kg, total_weight_kg, total_weight_ton,
+                    unit_price, total_amount, purchase_date, supplier, note, synced_to_cloud, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                """,
+                (
+                    uid,
+                    b_count,
+                    bag_weight_kg,
+                    total_weight_kg,
+                    total_weight_ton,
+                    u_price,
+                    t_amount,
+                    p_date,
+                    (supplier or "").strip(),
+                    (note or "").strip(),
+                    now_dt,
+                ),
+            )
+            purchase_id = cursor.lastrowid
+
+        if purchase_id and self.firestore_db:
+            def _sync_feed():
+                try:
+                    doc_id = f"u{uid}_fp{purchase_id}"
+                    self.firestore_db.collection("farm_feed_purchases").document(doc_id).set({
+                        "id": purchase_id,
+                        "user_id": uid,
+                        "bag_count": b_count,
+                        "bag_weight_kg": bag_weight_kg,
+                        "total_weight_kg": total_weight_kg,
+                        "total_weight_ton": total_weight_ton,
+                        "unit_price": u_price,
+                        "total_amount": t_amount,
+                        "purchase_date": p_date,
+                        "supplier": (supplier or "").strip(),
+                        "note": (note or "").strip(),
+                        "synced_to_cloud": 1,
+                        "created_at": now_dt,
+                    })
+                    with self.db.get_connection() as c:
+                        c.execute("UPDATE farm_feed_purchases SET synced_to_cloud = 1 WHERE id = ?", (purchase_id,))
+                except Exception as ex:
+                    logger.warning(f"Firestore farm feed purchase sync error: {ex}")
+            threading.Thread(target=_sync_feed, daemon=True).start()
+
+        return True, f"Yem alımı kaydedildi ({b_count:g} Çuval = {total_weight_ton:.2f} Ton)", purchase_id
+
+    def get_farm_feed_purchases(
+        self,
+        user_id: Optional[int] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Yem alım kayıtlarını tarih sırasına göre döner."""
+        uid = self._resolve_user_id(user_id) or 1
+        query = "SELECT * FROM farm_feed_purchases WHERE (user_id = ? OR user_id IS NULL)"
+        params: list = [uid]
+
+        if start_date and start_date.strip():
+            query += " AND purchase_date >= ?"
+            params.append(start_date.strip())
+
+        if end_date and end_date.strip():
+            query += " AND purchase_date <= ?"
+            params.append(end_date.strip())
+
+        query += " ORDER BY purchase_date DESC, id DESC"
+
+        with self.db.get_connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [dict(r) for r in rows]
+
+    def delete_farm_feed_purchase(self, purchase_id: int, user_id: Optional[int] = None) -> tuple[bool, str]:
+        """Yem alım kaydını siler."""
+        uid = self._resolve_user_id(user_id) or 1
+        with self.db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT id FROM farm_feed_purchases WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+                (purchase_id, uid),
+            ).fetchone()
+            if not row:
+                return False, "Yem alım kaydı bulunamadı!"
+            conn.execute("DELETE FROM farm_feed_purchases WHERE id = ?", (purchase_id,))
+
+        if self.firestore_db:
+            def _del_feed():
+                try:
+                    self.firestore_db.collection("farm_feed_purchases").document(f"u{uid}_fp{purchase_id}").delete()
+                    self.firestore_db.collection("farm_feed_purchases").document(str(purchase_id)).delete()
+                except Exception:
+                    pass
+            threading.Thread(target=_del_feed, daemon=True).start()
+
+        return True, "Yem alım kaydı silindi."
+

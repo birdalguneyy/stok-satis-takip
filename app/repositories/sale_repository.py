@@ -65,7 +65,31 @@ class SaleRepository:
 
             row = conn.execute("SELECT * FROM sales WHERE id = ?", (sale_id,)).fetchone()
 
+        # Dükkan satışındaki yumurtaları otomatik Çiftlik kaydına aktar
+        try:
+            from app.database.cloud_db import CloudDatabase
+            cloud_db = CloudDatabase()
+            discount_ratio = (total_amount / calc_total) if (total_amount_override is not None and calc_total > 0) else 1.0
+            for item in cart_items:
+                p_name = str(item.product_name or "").strip()
+                if "yumurta" in p_name.lower():
+                    orig_unit_price = float(item.unit_price)
+                    effective_price = round(orig_unit_price * discount_ratio, 2)
+                    qty = float(item.quantity)
+                    egg_cust = cust_name or "Dükkan Müşterisi"
+                    egg_note = f"Dükkan Satışı (Fiş #{sale_id}) - {p_name}"
+                    cloud_db.add_farm_egg_sale(
+                        customer_name=egg_cust,
+                        box_count=qty,
+                        unit_price=effective_price,
+                        source="Dükkan",
+                        note=egg_note,
+                    )
+        except Exception:
+            pass
+
         return Sale.from_row(row)
+
 
     def get_sales_history(
         self,

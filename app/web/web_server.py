@@ -6,9 +6,18 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-import cv2
-import numpy as np
+try:
+    import cv2
+except ImportError:
+    cv2 = None
+
+try:
+    import numpy as np
+except ImportError:
+    np = None
+
 from flask import Flask, jsonify, request, send_from_directory
+
 
 from app.config import DATA_DIR
 from app.database.cloud_db import CloudDatabase
@@ -915,7 +924,129 @@ def ai_scan_package():
     return jsonify({"ok": ok, "message": msg, "data": ai_data})
 
 
+# ════════════════════════════════════════════════════════════════════
+# ÇİFTLİK YÖNETİMİ REST API ENDPOINTS
+# ════════════════════════════════════════════════════════════════════
+@app.route("/api/farm/auth-check", methods=["POST"])
+def farm_auth_check():
+    data = request.json or {}
+    pin = str(data.get("password") or data.get("pin") or "").strip()
+    if pin == "2805":
+        return jsonify({"ok": True, "message": "Yetkilendirme başarılı!"})
+    return jsonify({"ok": False, "message": "Hatalı şifre!"}), 401
+
+
+@app.route("/api/farm/customers", methods=["GET"])
+def api_farm_customers():
+    uid = get_current_user_id()
+    customers = cloud_db.get_farm_customers(user_id=uid)
+    return jsonify({"ok": True, "customers": customers})
+
+
+@app.route("/api/farm/egg-sales", methods=["GET", "POST"])
+def api_farm_egg_sales():
+    uid = get_current_user_id()
+    if request.method == "POST":
+        data = request.json or {}
+        cust = data.get("customer_name", "").strip()
+        boxes = data.get("box_count")
+        price = data.get("unit_price")
+        s_date = data.get("sale_date")
+        source = data.get("source", "Ciftlik")
+        note = data.get("note")
+
+        ok, msg, sale_id = cloud_db.add_farm_egg_sale(
+            customer_name=cust,
+            box_count=boxes,
+            unit_price=price,
+            sale_date=s_date,
+            source=source,
+            note=note,
+            user_id=uid,
+        )
+        if not ok:
+            return jsonify({"ok": False, "message": msg}), 400
+        return jsonify({"ok": True, "message": msg, "sale_id": sale_id})
+
+    # GET
+    cust = request.args.get("customer_name")
+    start = request.args.get("start_date")
+    end = request.args.get("end_date")
+    source = request.args.get("source")
+    sales = cloud_db.get_farm_egg_sales(user_id=uid, customer_name=cust, start_date=start, end_date=end, source=source)
+    return jsonify({"ok": True, "sales": sales})
+
+
+@app.route("/api/farm/egg-sales/<int:sale_id>", methods=["DELETE"])
+def api_farm_delete_egg_sale(sale_id: int):
+    uid = get_current_user_id()
+    ok, msg = cloud_db.delete_farm_egg_sale(sale_id, user_id=uid)
+    return jsonify({"ok": ok, "message": msg}), (200 if ok else 400)
+
+
+@app.route("/api/farm/feed-purchases", methods=["GET", "POST"])
+def api_farm_feed_purchases():
+    uid = get_current_user_id()
+    if request.method == "POST":
+        data = request.json or {}
+        bags = data.get("bag_count")
+        price = data.get("unit_price", 0.0)
+        total = data.get("total_amount", 0.0)
+        p_date = data.get("purchase_date")
+        supplier = data.get("supplier")
+        note = data.get("note")
+
+        ok, msg, pid = cloud_db.add_farm_feed_purchase(
+            bag_count=bags,
+            unit_price=price,
+            total_amount=total,
+            purchase_date=p_date,
+            supplier=supplier,
+            note=note,
+            user_id=uid,
+        )
+        if not ok:
+            return jsonify({"ok": False, "message": msg}), 400
+        return jsonify({"ok": True, "message": msg, "purchase_id": pid})
+
+    # GET
+    start = request.args.get("start_date")
+    end = request.args.get("end_date")
+    purchases = cloud_db.get_farm_feed_purchases(user_id=uid, start_date=start, end_date=end)
+    return jsonify({"ok": True, "purchases": purchases})
+
+
+@app.route("/api/farm/feed-purchases/<int:purchase_id>", methods=["DELETE"])
+def api_farm_delete_feed_purchase(purchase_id: int):
+    uid = get_current_user_id()
+    ok, msg = cloud_db.delete_farm_feed_purchase(purchase_id, user_id=uid)
+    return jsonify({"ok": ok, "message": msg}), (200 if ok else 400)
+
+
+@app.route("/api/farm/analytics", methods=["GET"])
+def api_farm_analytics():
+    uid = get_current_user_id()
+    from app.services.farm_service import FarmService
+    f_svc = FarmService(cloud_db)
+    cust = request.args.get("customer_name")
+    period = request.args.get("period", "weekly")
+    start = request.args.get("start_date")
+    end = request.args.get("end_date")
+    source = request.args.get("source")
+
+    analysis = f_svc.get_egg_sales_analysis(
+        customer_name=cust,
+        period=period,
+        start_date=start,
+        end_date=end,
+        source=source,
+        user_id=uid,
+    )
+    return jsonify({"ok": True, "data": analysis})
+
+
 def _background_sync_loop():
+
     import time
     logger.info("Firebase 7/24 Arka Plan Otomatik Senkronizasyon Servisi başlatıldı.")
     while True:

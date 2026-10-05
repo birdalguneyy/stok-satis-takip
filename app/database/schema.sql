@@ -107,3 +107,52 @@ CREATE TABLE IF NOT EXISTS store_settings (
     weekend_hours   TEXT
 );
 
+CREATE TABLE IF NOT EXISTS farm_customers (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER REFERENCES users(id),
+    name            TEXT NOT NULL,
+    phone           TEXT,
+    synced_to_cloud INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_farm_customers_name ON farm_customers(name);
+CREATE INDEX IF NOT EXISTS idx_farm_customers_user ON farm_customers(user_id);
+
+CREATE TABLE IF NOT EXISTS farm_egg_sales (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER REFERENCES users(id),
+    customer_name   TEXT NOT NULL,
+    box_count       REAL NOT NULL CHECK (box_count > 0),
+    unit_price      REAL NOT NULL CHECK (unit_price >= 0),
+    total_amount    REAL NOT NULL CHECK (total_amount >= 0),
+    source          TEXT NOT NULL DEFAULT 'Ciftlik',
+    sale_date       TEXT NOT NULL,
+    note            TEXT,
+    synced_to_cloud INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_farm_egg_sales_user_date ON farm_egg_sales(user_id, sale_date);
+CREATE INDEX IF NOT EXISTS idx_farm_egg_sales_cust ON farm_egg_sales(customer_name);
+CREATE INDEX IF NOT EXISTS idx_farm_egg_sales_source ON farm_egg_sales(source);
+
+CREATE TABLE IF NOT EXISTS farm_feed_purchases (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER REFERENCES users(id),
+    bag_count       REAL NOT NULL CHECK (bag_count > 0),
+    bag_weight_kg   REAL NOT NULL DEFAULT 50.0,
+    total_weight_kg REAL NOT NULL,
+    total_weight_ton REAL NOT NULL,
+    unit_price      REAL NOT NULL DEFAULT 0.0,
+    total_amount    REAL NOT NULL DEFAULT 0.0,
+    purchase_date   TEXT NOT NULL,
+    supplier        TEXT,
+    note            TEXT,
+    synced_to_cloud INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_farm_feed_purchases_user_date ON farm_feed_purchases(user_id, purchase_date);
+
+

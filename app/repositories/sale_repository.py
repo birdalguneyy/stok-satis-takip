@@ -215,6 +215,44 @@ class SaleRepository:
 
         return True, f"{len(valid_ids)} satış silindi ve stoklar iade edildi", len(valid_ids)
 
+    def update_sale_datetime(self, sale_id: int, new_sold_at: str) -> Tuple[bool, str]:
+        """Satış kaydının tarih/saatini günceller ve buluta yansıtır."""
+        if not new_sold_at or not str(new_sold_at).strip():
+            return False, "Geçersiz tarih ve saat."
+
+        raw = str(new_sold_at).strip().replace("T", " ")
+        try:
+            if len(raw) == 10:
+                formatted_dt = f"{raw} 12:00:00"
+            elif len(raw) == 16:
+                formatted_dt = f"{raw}:00"
+            elif len(raw) >= 19:
+                formatted_dt = raw[:19]
+            else:
+                formatted_dt = raw
+        except Exception:
+            return False, "Geçersiz tarih formatı."
+
+        with self.db.get_connection() as conn:
+            cur = conn.execute("UPDATE sales SET sold_at = ?, synced_to_cloud = 0 WHERE id = ?", (formatted_dt, sale_id))
+            if cur.rowcount == 0:
+                return False, "Satış kaydı bulunamadı."
+
+        try:
+            from app.database.cloud_db import CloudDatabase
+            cloud_db = CloudDatabase()
+            if cloud_db.firestore_db:
+                cloud_db.firestore_db.collection("sales").document(f"u1_s{sale_id}").update({
+                    "sold_at": formatted_dt,
+                    "updated_at": get_turkey_now_str(),
+                })
+                with self.db.get_connection() as conn:
+                    conn.execute("UPDATE sales SET synced_to_cloud = 1 WHERE id = ?", (sale_id,))
+        except Exception:
+            pass
+
+        return True, "Satış tarihi güncellendi."
+
     def count_today_sales(self) -> int:
         with self.db.get_connection() as conn:
             row = conn.execute(

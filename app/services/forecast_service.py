@@ -102,10 +102,24 @@ class ForecastService:
         else:
             strategic_advice += "Mevcut stok seviyeleriniz öngörülen satış hızını karşılamak için dengeli görünmektedir."
 
+        hourly_info = busy_days_result.get("hourly_analysis") or {}
+        peak_hour_str = hourly_info.get("peak_window_label", "16:00 - 18:00")
+        peak_hour_share = hourly_info.get("peak_window_share", 0.0)
+        dominant_period = hourly_info.get("dominant_period_name", "Akşamüstü")
+
+        if peak_hour_share > 0:
+            strategic_advice += (
+                f" Gün içi saat analizine göre satış trafiğiniz en çok {peak_hour_str} saatleri arasında ({dominant_period} dilimi, "
+                f"payı %{peak_hour_share}) yoğunlaşmaktadır. Kasa ve personel hazırlığını bu saatlere yoğunlaştırmanız önerilir."
+            )
+
         ai_insights_data = {
             "strategic_advice": strategic_advice,
             "risk_count": risk_count,
             "recommended_focus": "Mağaza & İnternet Karma Satış",
+            "hourly_advice": hourly_info.get("hourly_strategy_advice", ""),
+            "peak_hour_window": peak_hour_str,
+            "peak_hour_share": peak_hour_share,
         }
 
         return {
@@ -254,11 +268,76 @@ class ForecastService:
                 ),
             })
 
-        # Saatlik Dağılım Grupları
-        morning_rush = sum(hourly_distribution[8:12])
-        noon_rush = sum(hourly_distribution[12:15])
-        afternoon_rush = sum(hourly_distribution[15:18])
-        evening_rush = sum(hourly_distribution[18:23])
+        # Saatlik Dağılım ve Zirve Saat Analizi
+        total_hourly_tx = sum(hourly_distribution)
+        max_h_count = max(hourly_distribution) if total_hourly_tx > 0 else 0
+
+        hourly_chart = []
+        for h in range(24):
+            cnt = hourly_distribution[h]
+            pct = round((cnt / total_hourly_tx * 100), 1) if total_hourly_tx > 0 else 0.0
+            rel_pct = round((cnt / max_h_count * 100), 1) if max_h_count > 0 else 0.0
+            hourly_chart.append({
+                "hour": h,
+                "label": f"{h:02d}:00",
+                "count": cnt,
+                "pct": pct,
+                "relative_pct": rel_pct,
+                "is_peak": (cnt == max_h_count and cnt > 0),
+            })
+
+        best_window_start = 16
+        best_window_count = 0
+        for h in range(7, 23):
+            w_cnt = hourly_distribution[h] + (hourly_distribution[h + 1] if h + 1 < 24 else 0)
+            if w_cnt > best_window_count:
+                best_window_count = w_cnt
+                best_window_start = h
+
+        peak_window_label = f"{best_window_start:02d}:00 - {best_window_start + 2:02d}:00"
+        peak_window_share = round((best_window_count / total_hourly_tx * 100), 1) if total_hourly_tx > 0 else 0.0
+
+        single_peak_hour = hourly_distribution.index(max_h_count) if max_h_count > 0 else 16
+        single_peak_label = f"{single_peak_hour:02d}:00"
+
+        # 4 Zaman Dilimi (Dayparts)
+        morning_rush = sum(hourly_distribution[7:12])
+        noon_rush = sum(hourly_distribution[12:16])
+        afternoon_rush = sum(hourly_distribution[16:20])
+        evening_rush = sum(hourly_distribution[20:24])
+
+        periods = [
+            {"id": "sabah", "name": "Sabah (07:00 - 12:00)", "short_name": "Sabah", "icon": "🌅", "count": morning_rush, "pct": round(morning_rush / total_hourly_tx * 100, 1) if total_hourly_tx > 0 else 0.0},
+            {"id": "ogle", "name": "Öğle (12:00 - 16:00)", "short_name": "Öğle", "icon": "☀️", "count": noon_rush, "pct": round(noon_rush / total_hourly_tx * 100, 1) if total_hourly_tx > 0 else 0.0},
+            {"id": "ikindi", "name": "İkindi / Akşamüstü (16:00 - 20:00)", "short_name": "Akşamüstü", "icon": "🌆", "count": afternoon_rush, "pct": round(afternoon_rush / total_hourly_tx * 100, 1) if total_hourly_tx > 0 else 0.0},
+            {"id": "gece", "name": "Gece (20:00 - 24:00)", "short_name": "Gece", "icon": "🌙", "count": evening_rush, "pct": round(evening_rush / total_hourly_tx * 100, 1) if total_hourly_tx > 0 else 0.0},
+        ]
+        periods_sorted = sorted(periods, key=lambda x: x["count"], reverse=True)
+        dominant_period = periods_sorted[0]
+
+        if total_hourly_tx > 0 and peak_window_share > 0:
+            hourly_strategy_advice = (
+                f"Satış trafiğiniz en belirgin şekilde {peak_window_label} saatleri arasında yoğunlaşmaktadır "
+                f"(Günün toplam satışının %{peak_window_share}'i). Bu saat diliminde ({dominant_period['short_name']}) "
+                f"kasa hızını artırmak ve raf kontrollerini saat {best_window_start:02d}:00 öncesi tamamlamak ciro kaybını önleyecektir."
+            )
+        else:
+            hourly_strategy_advice = (
+                "Henüz yeterli saatlik satış kaydı oluşmadığında perakende sektör ortalaması 16:00 - 19:00 arasındadır. "
+                "Satışlarınızı kaydettikçe yapay zeka işletmenize özel saat eğrilerini çıkaracaktır."
+            )
+
+        hourly_analysis = {
+            "total_transactions": total_hourly_tx,
+            "peak_window_label": peak_window_label,
+            "peak_window_share": peak_window_share,
+            "single_peak_hour": single_peak_hour,
+            "single_peak_label": single_peak_label,
+            "dominant_period_name": dominant_period["short_name"],
+            "periods": periods,
+            "hourly_chart": hourly_chart,
+            "hourly_strategy_advice": hourly_strategy_advice,
+        }
 
         peak_intensity = sorted_by_intensity[0]["intensity_pct"] if sorted_by_intensity else 100
 
@@ -275,8 +354,10 @@ class ForecastService:
                 "ogle_12_15": noon_rush,
                 "ikindi_15_18": afternoon_rush,
                 "aksam_18_23": evening_rush,
-                "peak_period": "Akşam (18:00 - 22:00)" if evening_rush >= max(morning_rush, noon_rush, afternoon_rush) else "Öğle (12:00 - 15:00)",
+                "peak_period": dominant_period["name"],
+                "peak_window": peak_window_label,
             },
+            "hourly_analysis": hourly_analysis,
         }
 
     # ════════════════════════════════════════════════════════════════════

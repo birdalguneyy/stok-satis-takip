@@ -1621,6 +1621,61 @@ class CloudDatabase:
 
         return True, f"{deleted_count} adet satış başarıyla silindi ve ürün stokları depoya geri yüklendi.", deleted_count
 
+    def update_sale_datetime(
+        self,
+        sale_id: int,
+        new_sold_at: str,
+        user_id: Optional[int] = None,
+    ) -> tuple[bool, str]:
+        """Satış kaydının tarih ve saatini günceller (geriye dönük satış düzenleme)."""
+        uid = self._resolve_user_id(user_id)
+        if not new_sold_at or not str(new_sold_at).strip():
+            return False, "Geçerli bir tarih ve saat belirtilmelidir."
+
+        raw = str(new_sold_at).strip().replace("T", " ")
+        try:
+            if len(raw) == 10:
+                formatted_dt = f"{raw} 12:00:00"
+            elif len(raw) == 16:
+                formatted_dt = f"{raw}:00"
+            elif len(raw) >= 19:
+                formatted_dt = raw[:19]
+            else:
+                datetime.strptime(raw, "%Y-%m-%d %H:%M:%S")
+                formatted_dt = raw
+        except Exception:
+            return False, "Tarih/saat formatı geçersiz (YYYY-MM-DD HH:MM:SS beklenir)."
+
+        now = get_turkey_now_str()
+
+        with self.db.get_connection() as conn:
+            sale = conn.execute(
+                "SELECT id FROM sales WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+                (sale_id, uid)
+            ).fetchone()
+
+            if not sale:
+                return False, "Satış kaydı bulunamadı veya bu hesaba ait değil!"
+
+            conn.execute(
+                "UPDATE sales SET sold_at = ?, synced_to_cloud = 0 WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+                (formatted_dt, sale_id, uid)
+            )
+
+        if self.firestore_db:
+            doc_id = f"u{uid}_s{sale_id}"
+            try:
+                self.firestore_db.collection("sales").document(doc_id).update({
+                    "sold_at": formatted_dt,
+                    "updated_at": now,
+                })
+                with self.db.get_connection() as conn:
+                    conn.execute("UPDATE sales SET synced_to_cloud = 1 WHERE id = ?", (sale_id,))
+            except Exception as ex:
+                logger.warning(f"Firestore satış tarihi güncelleme uyarısı ({doc_id}): {ex}")
+
+        return True, "Satış tarihi ve saati başarıyla güncellendi."
+
     def get_sales_history(
         self,
         user_id: Optional[int] = None,

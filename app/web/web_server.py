@@ -760,6 +760,33 @@ def delete_sale_route(sale_id):
     return jsonify({"ok": ok, "message": msg})
 
 
+@app.route("/api/sales/<int:sale_id>/datetime", methods=["POST", "PUT"])
+def update_sale_datetime_route(sale_id: int):
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
+
+    data = request.json or {}
+    new_dt = data.get("sold_at") or data.get("datetime") or data.get("date")
+    if not new_dt:
+        return jsonify({"ok": False, "message": "Geçerli bir tarih ve saat seçilmelidir!"}), 400
+
+    ok, msg = cloud_db.update_sale_datetime(sale_id, str(new_dt), user_id=user_id)
+    if ok:
+        notify_data_change(user_id)
+        raw = str(new_dt).strip().replace("T", " ")
+        if len(raw) == 10:
+            formatted_dt = f"{raw} 12:00:00"
+        elif len(raw) == 16:
+            formatted_dt = f"{raw}:00"
+        elif len(raw) >= 19:
+            formatted_dt = raw[:19]
+        else:
+            formatted_dt = raw
+        return jsonify({"ok": True, "message": msg, "sold_at": formatted_dt})
+    return jsonify({"ok": False, "message": msg}), 400
+
+
 @app.route("/api/sales/bulk-delete", methods=["POST"])
 def bulk_delete_sales_route():
     user_id = get_current_user_id()

@@ -807,6 +807,81 @@
     </div>
   </div>
 
+  <!-- POS INTERNET SATIŞI PLATFORM SEÇİM MODAL OVERLAY -->
+  <div id="pos-internet-modal-overlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(15,23,42,0.92); backdrop-filter:blur(12px); z-index:9999; justify-content:center; align-items:center; padding:16px;">
+    <div class="card" style="width:100%; max-width:480px; max-height:92vh; overflow-y:auto; box-shadow:0 20px 50px rgba(0,0,0,0.7); border:1px solid #38BDF8; border-radius:18px; padding:20px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:14px;">
+        <h3 style="margin:0; font-size:1.15rem; color:#38BDF8; display:flex; align-items:center; gap:8px; font-weight:800;">
+          <span>🌐 İnternet Satışı Platform Seçimi</span>
+        </h3>
+        <button type="button" style="background:none; border:none; color:var(--text-muted); font-size:1.6rem; cursor:pointer; line-height:1; padding:2px 8px;" onclick="closePosInternetModal()">&times;</button>
+      </div>
+
+      <!-- Sepet Özeti Kartı -->
+      <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:14px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+          <span style="font-size:0.8rem; color:var(--text-muted); font-weight:600;">Sepet Tutarı</span>
+          <span id="pos-net-summary-total" style="font-size:1.25rem; font-weight:900; color:var(--accent);">0.00 ₺</span>
+        </div>
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:8px;" id="pos-net-summary-items">0 ürün</div>
+        <div id="pos-net-items-preview" style="max-height:110px; overflow-y:auto; border-top:1px dashed var(--border); padding-top:6px;">
+          <!-- Items preview rendered dynamically -->
+        </div>
+      </div>
+
+      <form onsubmit="event.preventDefault(); submitInternetSaleFromPOS();" style="display:flex; flex-direction:column; gap:12px;">
+        <div>
+          <label style="font-size:0.82rem; font-weight:700; color:var(--text); display:block; margin-bottom:6px;">🏷️ Satış Yapılan Platformu Seçin:</label>
+          <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(100px, 1fr)); gap:6px; margin-bottom:8px;">
+            <button type="button" class="pos-platform-btn" data-platform="Trendyol" onclick="selectPosPlatform('Trendyol', this)" style="padding:8px 6px; border-radius:8px; border:2px solid #0284C7; background:rgba(2,132,199,0.12); color:#0284C7; font-size:0.8rem; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:4px; transition:all 0.15s;">
+              <span>🟠</span> Trendyol
+            </button>
+            <button type="button" class="pos-platform-btn" data-platform="Hepsiburada" onclick="selectPosPlatform('Hepsiburada', this)" style="padding:8px 6px; border-radius:8px; border:1px solid var(--border); background:var(--card-subtle); color:var(--text); font-size:0.8rem; font-weight:500; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:4px; transition:all 0.15s;">
+              <span>🟢</span> Hepsiburada
+            </button>
+            <button type="button" class="pos-platform-btn" data-platform="ÇiçekSepeti" onclick="selectPosPlatform('ÇiçekSepeti', this)" style="padding:8px 6px; border-radius:8px; border:1px solid var(--border); background:var(--card-subtle); color:var(--text); font-size:0.8rem; font-weight:500; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:4px; transition:all 0.15s;">
+              <span>🌸</span> ÇiçekSepeti
+            </button>
+            <button type="button" class="pos-platform-btn" data-platform="N11" onclick="selectPosPlatform('N11', this)" style="padding:8px 6px; border-radius:8px; border:1px solid var(--border); background:var(--card-subtle); color:var(--text); font-size:0.8rem; font-weight:500; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:4px; transition:all 0.15s;">
+              <span>🔴</span> N11
+            </button>
+            <button type="button" class="pos-platform-btn" data-platform="Amazon TR" onclick="selectPosPlatform('Amazon TR', this)" style="padding:8px 6px; border-radius:8px; border:1px solid var(--border); background:var(--card-subtle); color:var(--text); font-size:0.8rem; font-weight:500; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:4px; transition:all 0.15s;">
+              <span>🟡</span> Amazon TR
+            </button>
+            <button type="button" class="pos-platform-btn" data-platform="Pazarama" onclick="selectPosPlatform('Pazarama', this)" style="padding:8px 6px; border-radius:8px; border:1px solid var(--border); background:var(--card-subtle); color:var(--text); font-size:0.8rem; font-weight:500; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:4px; transition:all 0.15s;">
+              <span>🔵</span> Pazarama
+            </button>
+            <button type="button" class="pos-platform-btn" data-platform="Web Sitesi" onclick="selectPosPlatform('Web Sitesi', this)" style="padding:8px 6px; border-radius:8px; border:1px solid var(--border); background:var(--card-subtle); color:var(--text); font-size:0.8rem; font-weight:500; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:4px; transition:all 0.15s;">
+              <span>🌐</span> Web Sitesi
+            </button>
+            <button type="button" class="pos-platform-btn" data-platform="Diğer" onclick="selectPosPlatform('Diğer', this)" style="padding:8px 6px; border-radius:8px; border:1px solid var(--border); background:var(--card-subtle); color:var(--text); font-size:0.8rem; font-weight:500; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:4px; transition:all 0.15s;">
+              <span>✏️</span> Diğer
+            </button>
+          </div>
+          <input type="text" id="pos-net-platform-input" value="Trendyol" placeholder="Platform adı..." style="width:100%; padding:9px 12px; background:var(--input-bg); border:1px solid var(--border); color:var(--text); border-radius:8px; font-size:0.88rem; font-weight:600;">
+        </div>
+
+        <div style="display:flex; gap:10px;">
+          <div style="flex:1;">
+            <label style="font-size:0.78rem; font-weight:600; color:var(--text-muted); display:block; margin-bottom:4px;">Sipariş / Fatura No (Opsiyonel)</label>
+            <input type="text" id="pos-net-order-no" placeholder="Örn: #940129" style="width:100%; padding:9px 12px; background:var(--input-bg); border:1px solid var(--border); color:var(--text); border-radius:8px; font-size:0.85rem;">
+          </div>
+          <div style="flex:1;">
+            <label style="font-size:0.78rem; font-weight:600; color:var(--text-muted); display:block; margin-bottom:4px;">Müşteri / Alıcı Adı (Opsiyonel)</label>
+            <input type="text" id="pos-net-customer-name" placeholder="Alıcı adı..." style="width:100%; padding:9px 12px; background:var(--input-bg); border:1px solid var(--border); color:var(--text); border-radius:8px; font-size:0.85rem;">
+          </div>
+        </div>
+
+        <div style="display:flex; gap:10px; margin-top:8px;">
+          <button type="button" class="btn btn-secondary" style="flex:1; padding:12px;" onclick="closePosInternetModal()">Vazgeç</button>
+          <button type="submit" id="pos-net-submit-btn" class="btn" style="flex:2; background:linear-gradient(135deg, #0284C7, #0369A1); color:#fff; padding:12px; font-weight:700; box-shadow:0 4px 14px rgba(2,132,199,0.35);">
+            🚀 İnternet Satışını Tamamla
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- ÜRÜN DÜZENLEME & FOTOĞRAF GÜNCELLEME MODAL OVERLAY -->
   <div id="edit-product-modal-overlay" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(15,23,42,0.92); backdrop-filter:blur(14px); z-index:9999; justify-content:center; align-items:center; padding:16px;">
     <div class="card" style="width:100%; max-width:520px; max-height:92vh; overflow-y:auto; position:relative; box-shadow:0 25px 50px rgba(0,0,0,0.6); border:1px solid rgba(255,255,255,0.12); border-radius:18px; padding:20px;">
@@ -1409,7 +1484,25 @@
             <div id="pos-total-amount" style="font-size: 1.4rem; font-weight: 800; color: var(--accent);">0.00 ₺</div>
             <div id="pos-calc-total-note" style="display:none; font-size:0.75rem; color:var(--text-muted); text-decoration:line-through;"></div>
           </div>
-          <button id="pos-complete-sale-btn" class="btn" style="width: auto; min-width: 160px; padding: 12px 24px; font-weight: 700;" onclick="completePOSSale()">Satışı Tamamla</button>
+          <div style="position: relative; display: inline-flex; align-items: stretch; border-radius: 12px; box-shadow: 0 4px 14px rgba(180,83,9,0.25);">
+            <button id="pos-complete-sale-btn" class="btn" style="width: auto; min-width: 135px; padding: 12px 18px; font-weight: 700; border-top-right-radius: 0; border-bottom-right-radius: 0; border-right: 1px solid rgba(255,255,255,0.3);" onclick="completePOSSale()">
+              Satışı Tamamla
+            </button>
+            <button id="pos-sale-dropdown-btn" type="button" class="btn" style="width: auto; padding: 12px 14px; font-weight: 700; border-top-left-radius: 0; border-bottom-left-radius: 0; display: flex; align-items: center; justify-content: center; background: var(--accent); border-left: 1px solid rgba(0,0,0,0.15);" onclick="togglePosSaleDropdown(event)" title="Satış Seçenekleri (İnternet Satışı)">
+              <span id="pos-dropdown-arrow-icon" style="font-size: 0.75rem; display: inline-block; transition: transform 0.2s;">▼</span>
+            </button>
+
+            <!-- Dropdown Menu -->
+            <div id="pos-sale-dropdown-menu" style="display: none; position: absolute; right: 0; bottom: calc(100% + 8px); min-width: 250px; background: var(--card); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 12px 36px rgba(0,0,0,0.35); z-index: 1000; overflow: hidden; padding: 6px;">
+              <button type="button" onclick="startInternetSaleFromPOS()" style="width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: transparent; border: none; border-radius: 10px; color: var(--text); font-weight: 700; font-size: 0.9rem; cursor: pointer; text-align: left; transition: background 0.15s;" onmouseover="this.style.background='var(--card-subtle)'" onmouseout="this.style.background='transparent'">
+                <span style="font-size: 1.3rem;">🌐</span>
+                <div>
+                  <div style="color: var(--text); font-weight: 700;">İnternet Satışı</div>
+                  <div style="font-size: 0.72rem; color: var(--text-muted); font-weight: 500;">Trendyol, Hepsiburada vb. platform</div>
+                </div>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -3516,6 +3609,7 @@
       }
 
       const btn = document.getElementById('pos-complete-sale-btn');
+      const dropBtn = document.getElementById('pos-sale-dropdown-btn');
       const cartContainer = document.getElementById('pos-cart-list');
       const custNameInput = document.getElementById('pos-customer-name');
       const customerName = custNameInput ? custNameInput.value.trim() : '';
@@ -3537,6 +3631,9 @@
             İşleniyor...
           </span>
         `;
+      }
+      if (dropBtn) {
+        dropBtn.disabled = true;
       }
       if (cartContainer) {
         cartContainer.style.opacity = '0.5';
@@ -3587,9 +3684,223 @@
           btn.classList.remove('btn-loading');
           btn.innerHTML = 'Satışı Tamamla';
         }
+        if (dropBtn) {
+          dropBtn.disabled = false;
+        }
         if (cartContainer) {
           cartContainer.style.opacity = '1';
           cartContainer.style.pointerEvents = 'auto';
+        }
+      }
+    }
+
+    // ── POS SEPETİ İLE İNTERNET SATIŞI AÇILIR MENÜSÜ & PLATFORM SEÇİMİ ──
+    function togglePosSaleDropdown(event) {
+      if (event) {
+        event.stopPropagation();
+        event.preventDefault();
+      }
+      const menu = document.getElementById('pos-sale-dropdown-menu');
+      const icon = document.getElementById('pos-dropdown-arrow-icon');
+      if (!menu) return;
+      const isOpen = (menu.style.display === 'block');
+      if (isOpen) {
+        menu.style.display = 'none';
+        if (icon) icon.style.transform = 'rotate(0deg)';
+      } else {
+        menu.style.display = 'block';
+        if (icon) icon.style.transform = 'rotate(180deg)';
+      }
+    }
+
+    function closePosSaleDropdown() {
+      const menu = document.getElementById('pos-sale-dropdown-menu');
+      const icon = document.getElementById('pos-dropdown-arrow-icon');
+      if (menu) menu.style.display = 'none';
+      if (icon) icon.style.transform = 'rotate(0deg)';
+    }
+
+    // Dropdown dışına tıklandığında menüyü kapat
+    document.addEventListener('click', function(e) {
+      const menu = document.getElementById('pos-sale-dropdown-menu');
+      const dropBtn = document.getElementById('pos-sale-dropdown-btn');
+      if (menu && menu.style.display === 'block') {
+        if (!menu.contains(e.target) && (!dropBtn || !dropBtn.contains(e.target))) {
+          closePosSaleDropdown();
+        }
+      }
+    });
+
+    function startInternetSaleFromPOS() {
+      closePosSaleDropdown();
+      if (!posCart || posCart.length === 0) {
+        showToast("⚠️ Sepetiniz boş! Önce satılan ürünleri sepete ekleyin.");
+        return;
+      }
+
+      const modal = document.getElementById('pos-internet-modal-overlay');
+      const totalEl = document.getElementById('pos-net-summary-total');
+      const itemsEl = document.getElementById('pos-net-summary-items');
+      const listEl = document.getElementById('pos-net-items-preview');
+      const custNamePOS = document.getElementById('pos-customer-name');
+      const custNameNet = document.getElementById('pos-net-customer-name');
+      const orderNoInput = document.getElementById('pos-net-order-no');
+
+      const calcTotal = Math.round(posCart.reduce((sum, item) => sum + item.subtotal, 0) * 100) / 100;
+      const finalTotal = posCustomTotal !== null ? posCustomTotal : calcTotal;
+      const totalQuantity = posCart.reduce((sum, item) => sum + (parseFloat(item.quantity) || 0), 0);
+
+      if (totalEl) totalEl.textContent = `${finalTotal.toFixed(2)} ₺`;
+      if (itemsEl) itemsEl.textContent = `${posCart.length} çeşit ürün (Toplam: ${totalQuantity} adet/kg)`;
+
+      if (listEl) {
+        listEl.innerHTML = posCart.map(i => {
+          const isKg = (i.unit === 'kg');
+          const qtyLabel = isKg ? Number(i.quantity).toFixed(3) + ' kg' : i.quantity + ' adet';
+          return `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 0; border-bottom:1px dashed var(--border); font-size:0.8rem;">
+              <span style="font-weight:700; color:var(--text);">${i.product_name}</span>
+              <span style="color:var(--text-muted); font-size:0.75rem;">${qtyLabel} × ${Number(i.unit_price).toFixed(2)} ₺ = <b style="color:var(--text);">${Number(i.subtotal).toFixed(2)} ₺</b></span>
+            </div>
+          `;
+        }).join('');
+      }
+
+      if (custNameNet && custNamePOS) {
+        custNameNet.value = custNamePOS.value.trim();
+      }
+      if (orderNoInput) {
+        orderNoInput.value = '';
+      }
+
+      selectPosPlatform('Trendyol');
+
+      if (modal) modal.style.display = 'flex';
+    }
+
+    function closePosInternetModal() {
+      const modal = document.getElementById('pos-internet-modal-overlay');
+      if (modal) modal.style.display = 'none';
+    }
+
+    function selectPosPlatform(platformName, btnEl) {
+      const platformInput = document.getElementById('pos-net-platform-input');
+      if (platformInput) {
+        if (platformName === 'Diğer') {
+          platformInput.value = '';
+          platformInput.focus();
+        } else {
+          platformInput.value = platformName;
+        }
+      }
+
+      const buttons = document.querySelectorAll('.pos-platform-btn');
+      buttons.forEach(btn => {
+        btn.style.borderColor = 'var(--border)';
+        btn.style.background = 'var(--card-subtle)';
+        btn.style.color = 'var(--text)';
+        btn.style.fontWeight = '500';
+      });
+
+      const targetBtn = btnEl || document.querySelector(`.pos-platform-btn[data-platform="${platformName}"]`);
+      if (targetBtn) {
+        targetBtn.style.borderColor = '#0284C7';
+        targetBtn.style.background = 'rgba(2, 132, 199, 0.14)';
+        targetBtn.style.color = '#0284C7';
+        targetBtn.style.fontWeight = '700';
+      }
+    }
+
+    let isSubmittingPOSInternetSale = false;
+
+    async function submitInternetSaleFromPOS() {
+      if (isSubmittingPOSInternetSale) return;
+      if (!posCart || posCart.length === 0) {
+        showToast("⚠️ Sepetiniz boş!");
+        closePosInternetModal();
+        return;
+      }
+
+      const platformInput = document.getElementById('pos-net-platform-input');
+      const orderNoInput = document.getElementById('pos-net-order-no');
+      const custNameInput = document.getElementById('pos-net-customer-name');
+      const submitBtn = document.getElementById('pos-net-submit-btn');
+
+      const platform = (platformInput ? platformInput.value.trim() : '') || 'İnternet';
+      const orderNo = orderNoInput ? orderNoInput.value.trim() : '';
+      const customerName = custNameInput ? custNameInput.value.trim() : '';
+
+      const calcTotal = Math.round(posCart.reduce((sum, item) => sum + item.subtotal, 0) * 100) / 100;
+      const finalTotal = posCustomTotal !== null ? posCustomTotal : calcTotal;
+
+      let note = `${platform} Satışı`;
+      if (orderNo) {
+        note += ` (Sipariş #${orderNo})`;
+      }
+
+      isSubmittingPOSInternetSale = true;
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.classList.add('btn-loading');
+        submitBtn.innerHTML = `
+          <span style="display:inline-flex; align-items:center; justify-content:center; gap:8px;">
+            <svg style="animation: btnSpin 0.7s linear infinite; width:16px; height:16px; display:inline-block;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle>
+              <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"></path>
+            </svg>
+            İşleniyor...
+          </span>
+        `;
+      }
+
+      const idempotencyKey = 'netpos_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+
+      try {
+        const res = await fetchWithAuth('/api/sales', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            items: posCart,
+            note: note,
+            channel: 'internet',
+            total_amount: finalTotal,
+            customer_name: customerName || null,
+            idempotency_key: idempotencyKey
+          })
+        });
+
+        const json = await res.json();
+        if (json.ok) {
+          playBeep();
+          showToast(`✅ ${platform} satışı başarıyla tamamlandı!`);
+          closePosInternetModal();
+
+          // Sepeti ve toplamı anında sıfırla
+          posCart = [];
+          posCustomTotal = null;
+          const posCustInput = document.getElementById('pos-customer-name');
+          if (posCustInput) posCustInput.value = '';
+          renderPOSCart();
+
+          // Verileri güncelle
+          loadProducts();
+          loadPOSProductPicker();
+          loadSalesHistory();
+          loadSalesAnalytics();
+          loadForecastData();
+          triggerManualSync();
+        } else {
+          showToast("❌ " + (json.message || "Satış kaydedilemedi!"));
+        }
+      } catch (err) {
+        console.error("submitInternetSaleFromPOS hatası:", err);
+        showToast("⚠️ Satış işlenirken bağlantı hatası oluştu!");
+      } finally {
+        isSubmittingPOSInternetSale = false;
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.classList.remove('btn-loading');
+          submitBtn.innerHTML = '🚀 İnternet Satışını Tamamla';
         }
       }
     }
@@ -5253,6 +5564,10 @@
     let onlineProductsCache = [];
 
     async function openOnlineSaleModal() {
+      if (posCart && posCart.length > 0) {
+        startInternetSaleFromPOS();
+        return;
+      }
       const modal = document.getElementById('online-sale-modal-overlay');
       const select = document.getElementById('online-sale-product-select');
       const hint = document.getElementById('online-sale-stock-hint');

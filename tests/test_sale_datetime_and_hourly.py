@@ -96,6 +96,55 @@ class TestSaleDatetimeAndHourly(unittest.TestCase):
         advice = forecast["ai_insights"]["strategic_advice"]
         self.assertIn("saat analizine göre", advice.lower())
 
+    def test_pos_internet_sale_with_platform(self):
+        """Test internet sale via POS cart with platform name in note and stock deduction."""
+        with self.db.get_connection() as conn:
+            conn.execute("INSERT OR IGNORE INTO categories (id, user_id, name) VALUES (1, 1, 'Genel')")
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO products (id, user_id, category_id, name, barcode, purchase_price, sale_price, stock_quantity, unit, is_active)
+                VALUES (999, 1, 1, 'Kedi Maması 15kg', '8690001122334', 300.0, 450.0, 50.0, 'adet', 1)
+                """
+            )
+
+        cart_items = [
+            {
+                "product_id": 999,
+                "product_name": "Kedi Maması 15kg",
+                "barcode": "8690001122334",
+                "unit_price": 450.0,
+                "quantity": 2,
+                "subtotal": 900.0,
+                "unit": "adet",
+            }
+        ]
+
+        platform_note = "Trendyol Satışı (Sipariş #TR-94812)"
+        ok, msg = self.cloud_db.add_sale(
+            cart_items=cart_items,
+            note=platform_note,
+            user_id=1,
+            channel="internet",
+            total_amount_override=900.0,
+            customer_name="Ayşe Demir",
+        )
+        self.assertTrue(ok, msg)
+
+        # Check sales table record
+        with self.db.get_connection() as conn:
+            sale_row = conn.execute(
+                "SELECT * FROM sales WHERE note = ?", (platform_note,)
+            ).fetchone()
+            self.assertIsNotNone(sale_row)
+            self.assertEqual(sale_row["channel"], "internet")
+            self.assertEqual(sale_row["customer_name"], "Ayşe Demir")
+            self.assertEqual(sale_row["total_amount"], 900.0)
+
+            # Check stock deduction
+            prod_row = conn.execute("SELECT stock_quantity FROM products WHERE id = 999").fetchone()
+            self.assertEqual(prod_row["stock_quantity"], 48.0)
+
 
 if __name__ == "__main__":
     unittest.main()
+

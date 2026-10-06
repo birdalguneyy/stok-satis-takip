@@ -981,6 +981,9 @@ def api_farm_egg_sales():
         s_date = data.get("sale_date")
         source = data.get("source", "Ciftlik")
         note = data.get("note")
+        unit_type = data.get("unit_type", "koli")
+        piece_count = data.get("piece_count")
+        tot_amount = data.get("total_amount")
 
         ok, msg, sale_id = cloud_db.add_farm_egg_sale(
             customer_name=cust,
@@ -990,6 +993,9 @@ def api_farm_egg_sales():
             source=source,
             note=note,
             user_id=uid,
+            unit_type=unit_type,
+            piece_count=piece_count,
+            total_amount=tot_amount,
         )
         if not ok:
             return jsonify({"ok": False, "message": msg}), 400

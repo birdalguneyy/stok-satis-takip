@@ -124,6 +124,8 @@ CREATE TABLE IF NOT EXISTS farm_egg_sales (
     user_id         INTEGER REFERENCES users(id),
     customer_name   TEXT NOT NULL,
     box_count       REAL NOT NULL CHECK (box_count > 0),
+    unit_type       TEXT NOT NULL DEFAULT 'koli',
+    piece_count     REAL NOT NULL DEFAULT 0,
     unit_price      REAL NOT NULL CHECK (unit_price >= 0),
     total_amount    REAL NOT NULL CHECK (total_amount >= 0),
     source          TEXT NOT NULL DEFAULT 'Ciftlik',

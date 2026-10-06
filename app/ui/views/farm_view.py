@@ -365,6 +365,15 @@ class FarmView(ctk.CTkFrame):
             src = s.get("source", "Ciftlik")
             note = s.get("note", "")
 
+            u_type = s.get("unit_type", "koli")
+            p_cnt = s.get("piece_count")
+            if u_type == "adet":
+                disp_qty = f"{int(round(p_cnt or (boxes * 30)))} Adet"
+                qty_color = "#0284C7"
+            else:
+                disp_qty = f"{boxes:g} Koli"
+                qty_color = ACCENT
+
             src_color = ACCENT if src == "Ciftlik" else "#0284C7"
 
             del_btn = ctk.CTkButton(
@@ -383,7 +392,7 @@ class FarmView(ctk.CTkFrame):
                 values=[
                     date_str,
                     cust_name,
-                    f"{boxes:g} Koli",
+                    disp_qty,
                     format_currency(price),
                     format_currency(total),
                     f"🏷️ {src}",
@@ -391,7 +400,7 @@ class FarmView(ctk.CTkFrame):
                     "",
                 ],
                 row_id=sid,
-                text_colors=[None, None, ACCENT, None, None, src_color, None, None],
+                text_colors=[None, None, qty_color, None, None, src_color, None, None],
                 custom_widgets={7: del_btn},
             )
 
@@ -844,11 +853,16 @@ class FarmView(ctk.CTkFrame):
 
         # KPI Güncellemeleri
         total_boxes = data.get("total_boxes", 0)
+        pure_koli = data.get("pure_koli_boxes", total_boxes)
+        pieces = data.get("total_pieces", 0)
         total_rev = data.get("total_revenue", 0)
         avg_price = data.get("avg_box_price", 0)
         cust_count = data.get("customer_count", 0)
 
-        self.stat_boxes.set_value(f"{total_boxes:g} Koli")
+        if pieces > 0:
+            self.stat_boxes.set_value(f"{total_boxes:g} Koli\n({pure_koli:g} Koli + {int(pieces)} Adet)")
+        else:
+            self.stat_boxes.set_value(f"{total_boxes:g} Koli")
         self.stat_revenue.set_value(format_currency(total_rev))
         self.stat_avg_price.set_value(format_currency(avg_price))
         self.stat_customers.set_value(f"{cust_count} Müşteri")
@@ -903,6 +917,15 @@ class FarmView(ctk.CTkFrame):
                 src = s.get("source", "Ciftlik")
                 note = s.get("note", "")
 
+                u_type = s.get("unit_type", "koli")
+                p_cnt = s.get("piece_count")
+                if u_type == "adet":
+                    disp_qty = f"{int(round(p_cnt or (boxes * 30)))} Adet"
+                    qty_color = "#0284C7"
+                else:
+                    disp_qty = f"{boxes:g} Koli"
+                    qty_color = ACCENT
+
                 src_color = ACCENT if src == "Ciftlik" else "#0284C7"
 
                 del_btn = ctk.CTkButton(
@@ -921,7 +944,7 @@ class FarmView(ctk.CTkFrame):
                     values=[
                         date_str,
                         c_name,
-                        f"{boxes:g} Koli",
+                        disp_qty,
                         format_currency(price),
                         format_currency(total),
                         f"🏷️ {src}",
@@ -929,7 +952,7 @@ class FarmView(ctk.CTkFrame):
                         "",
                     ],
                     row_id=sid,
-                    text_colors=[None, None, ACCENT, None, None, src_color, None, None],
+                    text_colors=[None, None, qty_color, None, None, src_color, None, None],
                     custom_widgets={7: del_btn},
                 )
 

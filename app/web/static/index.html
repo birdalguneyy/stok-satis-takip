@@ -549,13 +549,34 @@
       left: 0;
       right: 0;
       bottom: 0;
-      background: rgba(15, 23, 42, 0.92);
-      backdrop-filter: blur(16px);
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(14px);
       z-index: 999;
       display: flex;
       justify-content: center;
       align-items: center;
       padding: 16px;
+    }
+
+    .modal-card {
+      background: var(--card) !important;
+      color: var(--text) !important;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--border);
+      position: relative;
+    }
+
+    .modal-card table {
+      color: var(--text);
+    }
+    .modal-card table th {
+      background: var(--card-subtle);
+      color: var(--text-muted);
+      font-weight: 700;
+    }
+    .modal-card table tr:hover td {
+      background: var(--card-hover);
     }
   </style>
 </head>
@@ -1052,7 +1073,7 @@
   </div>
 
   <!-- ═══ MODAL: ÇİFTLİK YÖNETİM MODÜLÜ (YUMURTA, YEM & ANALİZ) ═══ -->
-  <div id="farm-modal-overlay" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(15,23,42,0.95); backdrop-filter:blur(16px); z-index:9998; justify-content:center; align-items:center; padding:16px;">
+  <div id="farm-modal-overlay" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(15,23,42,0.85); backdrop-filter:blur(14px); z-index:9998; justify-content:center; align-items:center; padding:16px;">
     <div class="modal-card" style="max-width:960px; width:100%; max-height:92vh; overflow-y:auto; display:flex; flex-direction:column; padding:20px;">
       
       <!-- Farm Header -->
@@ -1085,11 +1106,17 @@
               <datalist id="farm-customers-datalist"></datalist>
             </div>
             <div>
-              <label style="font-size:0.75rem; color:var(--text-muted); display:block; margin-bottom:4px;">📦 Kaç Koli (Adet):</label>
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <label style="font-size:0.75rem; color:var(--text-muted);">📦 Satış Miktarı:</label>
+                <select id="farm-egg-unit" onchange="onFarmUnitChanged()" style="font-size:0.72rem; padding:2px 6px; border-radius:6px; background:var(--card); color:var(--text); border:1px solid var(--border); cursor:pointer;">
+                  <option value="koli">Koli (30'lu)</option>
+                  <option value="adet">Adet</option>
+                </select>
+              </div>
               <input type="number" id="farm-egg-boxes" placeholder="Örn: 2" min="0.1" step="any" oninput="calcFarmEggTotal('boxes')" style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--border); background:var(--input-bg); color:var(--text);">
             </div>
             <div>
-              <label style="font-size:0.75rem; color:var(--text-muted); display:block; margin-bottom:4px;">💰 Birim Fiyat (TL/Koli):</label>
+              <label id="farm-egg-price-label" style="font-size:0.75rem; color:var(--text-muted); display:block; margin-bottom:4px;">💰 Birim Fiyat (TL/Koli):</label>
               <input type="number" id="farm-egg-price" placeholder="Örn: 180" min="0" step="any" oninput="calcFarmEggTotal('price')" style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--border); background:var(--input-bg); color:var(--text);">
             </div>
             <div>
@@ -1119,7 +1146,7 @@
               <tr style="border-bottom:1px solid var(--border); color:var(--text-muted);">
                 <th style="padding:8px 6px;">Tarih</th>
                 <th style="padding:8px 6px;">Müşteri</th>
-                <th style="padding:8px 6px;">Koli</th>
+                <th style="padding:8px 6px;">Miktar</th>
                 <th style="padding:8px 6px;">Fiyat</th>
                 <th style="padding:8px 6px;">Tutar</th>
                 <th style="padding:8px 6px;">Kaynak</th>
@@ -1232,6 +1259,7 @@
           <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:10px; padding:10px; text-align:center;">
             <div style="font-size:0.72rem; color:var(--text-muted);">TOPLAM SATILAN KOLİ</div>
             <div id="farm-kpi-boxes" style="font-size:1.2rem; font-weight:800; color:#10B981;">0 Koli</div>
+            <div id="farm-kpi-boxes-sub" style="font-size:0.72rem; color:var(--text-muted); margin-top:2px;"></div>
           </div>
           <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:10px; padding:10px; text-align:center;">
             <div style="font-size:0.72rem; color:var(--text-muted);">TOPLAM CİRO</div>
@@ -1275,7 +1303,7 @@
               <tr style="border-bottom:1px solid var(--border); color:var(--text-muted);">
                 <th style="padding:8px 6px;">Tarih</th>
                 <th style="padding:8px 6px;">Müşteri Adı</th>
-                <th style="padding:8px 6px;">Koli Adedi</th>
+                <th style="padding:8px 6px;">Miktar</th>
                 <th style="padding:8px 6px;">Birim Fiyat</th>
                 <th style="padding:8px 6px;">Toplam Tutar</th>
                 <th style="padding:8px 6px;">Kaynak</th>
@@ -4670,16 +4698,16 @@
       const isNet = (s.channel === 'internet');
       const isFarm = (s.channel === 'ciftlik');
 
-      let chBadge = `<span style="font-size:0.75rem; background:rgba(16,185,129,0.15); color:#10B981; border:1px solid rgba(16,185,129,0.3); padding:3px 8px; border-radius:8px; font-weight:700;">🏬 Mağaza</span>`;
+      let chBadge = `<span style="font-size:0.75rem; background:rgba(16,185,129,0.12); color:#059669; border:1px solid rgba(16,185,129,0.25); padding:3px 8px; border-radius:8px; font-weight:700;">🏬 Mağaza</span>`;
       if (isNet) {
-        chBadge = `<span style="font-size:0.75rem; background:rgba(56,189,248,0.15); color:#38BDF8; border:1px solid rgba(56,189,248,0.3); padding:3px 8px; border-radius:8px; font-weight:700;">🌐 İnternet</span>`;
+        chBadge = `<span style="font-size:0.75rem; background:rgba(14,165,233,0.12); color:#0284C7; border:1px solid rgba(14,165,233,0.25); padding:3px 8px; border-radius:8px; font-weight:700;">🌐 İnternet</span>`;
       } else if (isFarm) {
-        chBadge = `<span style="font-size:0.75rem; background:rgba(245,158,11,0.15); color:#F59E0B; border:1px solid rgba(245,158,11,0.3); padding:3px 8px; border-radius:8px; font-weight:700;">🚜 Çiftlik</span>`;
+        chBadge = `<span style="font-size:0.75rem; background:rgba(245,158,11,0.12); color:#D97706; border:1px solid rgba(245,158,11,0.25); padding:3px 8px; border-radius:8px; font-weight:700;">🚜 Çiftlik</span>`;
       }
 
       const custBadge = (s.customer_name && s.customer_name.trim())
-        ? `<span style="font-size:0.75rem; background:rgba(129,140,248,0.18); color:#A5B4FC; border:1px solid rgba(129,140,248,0.35); padding:3px 8px; border-radius:8px; font-weight:700;">👤 ${s.customer_name}</span>`
-        : `<span style="font-size:0.75rem; color:var(--text-dim); background:rgba(255,255,255,0.04); padding:3px 6px; border-radius:6px;">👤 İsimsiz</span>`;
+        ? `<span style="font-size:0.75rem; background:var(--accent-soft); color:var(--accent); border:1px solid var(--badge-border); padding:3px 8px; border-radius:8px; font-weight:700;">👤 ${s.customer_name}</span>`
+        : `<span style="font-size:0.75rem; color:var(--text-muted); background:var(--card-subtle); border:1px solid var(--border); padding:3px 6px; border-radius:6px;">👤 İsimsiz</span>`;
 
       const rawDt = s.sold_at || '';
       const dtParts = rawDt.split(' ');
@@ -4692,13 +4720,13 @@
         const unitLabel = isKg ? 'kg' : 'adet';
         const qtyLabel = isKg ? Number(i.quantity).toFixed(3) : i.quantity;
         return `
-          <div style="display:flex; justify-content:space-between; align-items:center; padding:5px 0; border-bottom:1px dashed rgba(255,255,255,0.06); font-size:0.82rem;">
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:5px 0; border-bottom:1px dashed var(--border); font-size:0.82rem;">
             <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
               <span style="font-weight:700; color:var(--text);">${i.product_name}</span>
-              <span style="font-size:0.72rem; background:var(--card); border:1px solid var(--border); padding:1px 6px; border-radius:4px; color:var(--text-muted); font-weight:700;">${qtyLabel} ${unitLabel}</span>
-              <span style="font-size:0.72rem; color:var(--text-dim);">(Birim: ${Number(i.unit_price).toFixed(2)} ₺)</span>
+              <span style="font-size:0.72rem; background:var(--card); border:1px solid var(--border); padding:1px 6px; border-radius:4px; color:var(--text); font-weight:700;">${qtyLabel} ${unitLabel}</span>
+              <span style="font-size:0.72rem; color:var(--text-muted);">(Birim: ${Number(i.unit_price).toFixed(2)} ₺)</span>
             </div>
-            <span style="font-weight:700; color:var(--text); font-size:0.85rem;">${Number(i.subtotal).toFixed(2)} ₺</span>
+            <span style="font-weight:800; color:var(--text); font-size:0.85rem;">${Number(i.subtotal).toFixed(2)} ₺</span>
           </div>
         `;
       }).join('');
@@ -4706,17 +4734,17 @@
       const safeCustName = (s.customer_name || '').replace(/'/g, "\\'");
 
       return `
-        <div id="sale-card-${s.id}" class="sale-card-item" style="content-visibility:auto; contain-intrinsic-size:0 100px; background:var(--card-subtle); border:${isSelected ? '2px solid var(--accent)' : '1px solid var(--border)'}; border-radius:14px; padding:12px 14px; margin-bottom:12px; box-shadow:0 3px 10px rgba(0,0,0,0.12); transition:all 0.2s;">
+        <div id="sale-card-${s.id}" class="sale-card-item" style="content-visibility:auto; contain-intrinsic-size:0 100px; background:var(--card); border:${isSelected ? '2px solid var(--accent)' : '1px solid var(--border)'}; border-radius:14px; padding:12px 14px; margin-bottom:12px; box-shadow:var(--card-shadow); transition:all 0.2s;">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
             <div style="display:flex; align-items:flex-start; gap:10px; flex:1;">
               <input type="checkbox" class="sale-select-cb" ${isSelected ? 'checked' : ''} onchange="toggleSaleSelection(${s.id}, this.checked)" style="width:18px; height:18px; cursor:pointer; margin-top:4px;">
               <div style="flex:1;">
                 <div style="display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin-bottom:4px;">
-                  <span style="display:inline-flex; align-items:center; gap:6px; background:rgba(255,255,255,0.06); padding:3px 8px; border-radius:8px; border:1px solid var(--border-subtle); font-size:0.82rem;">
+                  <span style="display:inline-flex; align-items:center; gap:6px; background:var(--card-subtle); padding:3px 8px; border-radius:8px; border:1px solid var(--border); font-size:0.82rem;">
                     <span>📅</span>
                     <b style="color:var(--text); font-weight:700;">${dStr}</b>
                     <span style="color:var(--text-dim);">|</span>
-                    <b style="color:#38BDF8; font-weight:800;">⏱️ ${tStr || '--:--'}</b>
+                    <b style="color:var(--accent); font-weight:800;">⏱️ ${tStr || '--:--'}</b>
                   </span>
                   ${chBadge}
                   ${custBadge}
@@ -4731,21 +4759,21 @@
           </div>
 
           ${items.length > 0 ? `
-            <div style="background:rgba(15,23,42,0.45); border:1px solid var(--border-subtle); border-radius:10px; padding:6px 12px; margin-top:8px;">
+            <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:10px; padding:6px 12px; margin-top:8px;">
               ${itemDetails}
             </div>
           ` : ''}
 
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; padding-top:6px; border-top:1px solid var(--border-subtle); flex-wrap:wrap; gap:6px;">
-            <div style="font-size:0.72rem; color:var(--text-dim); display:flex; align-items:center; gap:6px;">
-              <span style="background:var(--card); padding:2px 6px; border-radius:4px; border:1px solid var(--border-subtle); font-weight:700;">#${s.id}</span>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; padding-top:6px; border-top:1px solid var(--border); flex-wrap:wrap; gap:6px;">
+            <div style="font-size:0.72rem; color:var(--text-muted); display:flex; align-items:center; gap:6px;">
+              <span style="background:var(--card-subtle); padding:2px 6px; border-radius:4px; border:1px solid var(--border); font-weight:700; color:var(--text);">#${s.id}</span>
               ${s.note ? `<span>• <i>${s.note}</i></span>` : ''}
             </div>
             <div style="display:flex; gap:6px;">
-              <button type="button" class="btn" style="padding:4px 10px; font-size:0.75rem; font-weight:700; background:rgba(56,189,248,0.15); color:#38BDF8; border:1px solid rgba(56,189,248,0.35); border-radius:6px; cursor:pointer;" onclick="openEditSaleDatetimeModal(${s.id}, '${s.sold_at}', ${s.total_amount}, '${safeCustName}')">
+              <button type="button" class="btn" style="padding:4px 10px; font-size:0.75rem; font-weight:700; background:rgba(14,165,233,0.12); color:#0284C7; border:1px solid rgba(14,165,233,0.3); border-radius:6px; cursor:pointer;" onclick="openEditSaleDatetimeModal(${s.id}, '${s.sold_at}', ${s.total_amount}, '${safeCustName}')">
                 ✏️ Tarih/Saat Düzenle
               </button>
-              <button type="button" class="btn" style="padding:4px 10px; font-size:0.75rem; font-weight:700; background:rgba(239,68,68,0.15); color:var(--danger); border:1px solid rgba(239,68,68,0.35); border-radius:6px; cursor:pointer;" onclick="promptDeleteSale(${s.id}, '${s.sold_at}', ${s.total_amount})">
+              <button type="button" class="btn" style="padding:4px 10px; font-size:0.75rem; font-weight:700; background:var(--danger-soft); color:var(--danger); border:1px solid rgba(239,68,68,0.25); border-radius:6px; cursor:pointer;" onclick="promptDeleteSale(${s.id}, '${s.sold_at}', ${s.total_amount})">
                 🗑️ Satışı Sil
               </button>
             </div>
@@ -5832,6 +5860,15 @@
       }
     }
 
+    function onFarmUnitChanged() {
+      const u = document.getElementById('farm-egg-unit')?.value || 'koli';
+      const lbl = document.getElementById('farm-egg-price-label');
+      if (lbl) {
+        lbl.innerText = u === 'adet' ? '💰 Birim Fiyat (TL/Adet):' : '💰 Birim Fiyat (TL/Koli):';
+      }
+      calcFarmEggTotal('price');
+    }
+
     function calcFarmEggTotal(source = 'price') {
       const b = parseFloat(document.getElementById('farm-egg-boxes').value) || 0;
       const pInput = document.getElementById('farm-egg-price');
@@ -5855,22 +5892,32 @@
 
     async function saveFarmEggSaleWeb() {
       const cust = document.getElementById('farm-egg-cust').value.trim();
-      const b = parseFloat(document.getElementById('farm-egg-boxes').value);
+      const unitType = document.getElementById('farm-egg-unit')?.value || 'koli';
+      const bInput = parseFloat(document.getElementById('farm-egg-boxes').value);
       let p = parseFloat(document.getElementById('farm-egg-price').value);
       const t = parseFloat(document.getElementById('farm-egg-total')?.value);
       const d = document.getElementById('farm-egg-date').value;
       const note = document.getElementById('farm-egg-note').value.trim();
 
       if (!cust) { showToast("Lütfen müşteri adı giriniz!", "warning"); return; }
-      if (!b || b <= 0) { showToast("Koli adedi 0'dan büyük olmalıdır!", "warning"); return; }
+      if (!bInput || bInput <= 0) { showToast("Miktar 0'dan büyük olmalıdır!", "warning"); return; }
 
       // Kullanıcı birim fiyat yerine toplam tutar girmişse birim fiyatı hesapla
       if ((isNaN(p) || p <= 0) && (!isNaN(t) && t > 0)) {
-        p = t / b;
+        p = t / bInput;
         document.getElementById('farm-egg-price').value = p.toFixed(2);
       }
 
       if (isNaN(p) || p < 0) { showToast("Lütfen birim fiyat veya toplam tutar giriniz!", "warning"); return; }
+
+      let boxCount = bInput;
+      let pieceCount = bInput * 30.0;
+      if (unitType === 'adet') {
+        pieceCount = bInput;
+        boxCount = Math.round((bInput / 30.0) * 1000) / 1000;
+      }
+
+      const totAmount = (!isNaN(t) && t > 0) ? t : (bInput * p);
 
       try {
         const res = await apiFetch('/api/farm/egg-sales', {
@@ -5878,11 +5925,14 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             customer_name: cust,
-            box_count: b,
+            box_count: boxCount,
             unit_price: p,
             sale_date: d,
             source: 'Ciftlik',
             note: note,
+            unit_type: unitType,
+            piece_count: pieceCount,
+            total_amount: totAmount,
           })
         });
         const json = await res.json();
@@ -5914,18 +5964,25 @@
           tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:16px; color:var(--text-muted);">Henüz kayıtlı yumurta satışı yok.</td></tr>';
           return;
         }
-        tbody.innerHTML = json.sales.slice(0, 50).map(s => `
-          <tr style="border-bottom:1px solid var(--border);">
-            <td style="padding:8px 6px;">${(s.sale_date || '').substring(0, 16)}</td>
-            <td style="padding:8px 6px; font-weight:700;">${s.customer_name}</td>
-            <td style="padding:8px 6px; color:#10B981; font-weight:700;">${s.box_count} Koli</td>
-            <td style="padding:8px 6px;">${Number(s.unit_price).toFixed(2)} ₺</td>
-            <td style="padding:8px 6px; font-weight:700;">${Number(s.total_amount).toFixed(2)} ₺</td>
-            <td style="padding:8px 6px;"><span class="badge" style="background:${s.source === 'Ciftlik' ? '#10B981' : '#0284C7'}; color:#fff; font-size:0.75rem;">${s.source}</span></td>
-            <td style="padding:8px 6px; color:var(--text-muted);">${s.note || '-'}</td>
-            <td style="padding:8px 6px; text-align:center;"><button class="btn btn-secondary" style="padding:2px 8px; font-size:0.75rem; color:var(--danger);" onclick="deleteFarmEggSaleWeb(${s.id})">🗑️</button></td>
-          </tr>
-        `).join('');
+        tbody.innerHTML = json.sales.slice(0, 50).map(s => {
+          const isAdet = (s.unit_type === 'adet');
+          const pCnt = s.piece_count || Math.round(s.box_count * 30);
+          const qtyBadge = isAdet
+            ? `<span style="color:#0284C7; font-weight:800; font-size:0.85rem;">${Math.round(pCnt)} Adet</span>`
+            : `<span style="color:#10B981; font-weight:800; font-size:0.85rem;">${s.box_count} Koli</span>`;
+          return `
+            <tr style="border-bottom:1px solid var(--border); color:var(--text);">
+              <td style="padding:8px 6px; color:var(--text);">${(s.sale_date || '').substring(0, 16)}</td>
+              <td style="padding:8px 6px; font-weight:700; color:var(--text);">${s.customer_name}</td>
+              <td style="padding:8px 6px;">${qtyBadge}</td>
+              <td style="padding:8px 6px; color:var(--text);">${Number(s.unit_price).toFixed(2)} ₺${isAdet ? '<span style="font-size:0.7rem; color:var(--text-muted);">/ad</span>' : '<span style="font-size:0.7rem; color:var(--text-muted);">/kl</span>'}</td>
+              <td style="padding:8px 6px; font-weight:700; color:#10B981;">${Number(s.total_amount).toFixed(2)} ₺</td>
+              <td style="padding:8px 6px;"><span class="badge" style="background:${s.source === 'Ciftlik' ? '#10B981' : '#0284C7'}; color:#fff; font-size:0.75rem;">${s.source}</span></td>
+              <td style="padding:8px 6px; color:var(--text-muted);">${s.note || '-'}</td>
+              <td style="padding:8px 6px; text-align:center;"><button class="btn btn-secondary" style="padding:2px 8px; font-size:0.75rem; color:var(--danger);" onclick="deleteFarmEggSaleWeb(${s.id})">🗑️</button></td>
+            </tr>
+          `;
+        }).join('');
       } catch (e) {
         console.warn('Egg sales fetch error:', e);
       }
@@ -6020,12 +6077,12 @@
         }
 
         tbody.innerHTML = purchases.map(p => `
-          <tr style="border-bottom:1px solid var(--border);">
-            <td style="padding:8px 6px;">${(p.purchase_date || '').substring(0, 10)}</td>
-            <td style="padding:8px 6px; font-weight:700;">${p.bag_count} Adet</td>
+          <tr style="border-bottom:1px solid var(--border); color:var(--text);">
+            <td style="padding:8px 6px; color:var(--text);">${(p.purchase_date || '').substring(0, 10)}</td>
+            <td style="padding:8px 6px; font-weight:700; color:var(--text);">${p.bag_count} Adet</td>
             <td style="padding:8px 6px; color:#0284C7; font-weight:700;">${Number(p.total_weight_ton).toFixed(2)} Ton</td>
-            <td style="padding:8px 6px;">${Number(p.total_weight_kg).toLocaleString('tr-TR')} kg</td>
-            <td style="padding:8px 6px;">${p.unit_price > 0 ? Number(p.unit_price).toFixed(2) + ' ₺' : '-'}</td>
+            <td style="padding:8px 6px; color:var(--text);">${Number(p.total_weight_kg).toLocaleString('tr-TR')} kg</td>
+            <td style="padding:8px 6px; color:var(--text);">${p.unit_price > 0 ? Number(p.unit_price).toFixed(2) + ' ₺' : '-'}</td>
             <td style="padding:8px 6px; font-weight:700; color:#10B981;">${p.total_amount > 0 ? Number(p.total_amount).toFixed(2) + ' ₺' : '-'}</td>
             <td style="padding:8px 6px; color:var(--text-muted);">${p.supplier || p.note || '-'}</td>
             <td style="padding:8px 6px; text-align:center;"><button class="btn btn-secondary" style="padding:2px 8px; font-size:0.75rem; color:var(--danger);" onclick="deleteFarmFeedPurchaseWeb(${p.id})">🗑️</button></td>
@@ -6087,7 +6144,18 @@
         }
 
         // KPIs
+        const pureKoli = (d.pure_koli_boxes !== undefined) ? d.pure_koli_boxes : d.total_boxes;
+        const pieces = d.total_pieces || 0;
         document.getElementById('farm-kpi-boxes').innerText = d.total_boxes + ' Koli';
+        const subBoxEl = document.getElementById('farm-kpi-boxes-sub');
+        if (subBoxEl) {
+          if (pieces > 0) {
+            subBoxEl.innerText = `${pureKoli} Koli + ${pieces} Adet (30 Adet = 1 Koli)`;
+          } else {
+            subBoxEl.innerText = `${pureKoli} Koli`;
+          }
+        }
+
         document.getElementById('farm-kpi-revenue').innerText = d.total_revenue.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺';
         document.getElementById('farm-kpi-avg').innerText = d.avg_box_price.toFixed(2) + ' ₺';
         document.getElementById('farm-kpi-custs').innerText = d.customer_count + ' Müşteri';
@@ -6097,16 +6165,19 @@
         if (d.customer_summary.length === 0) {
           sTbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:16px; color:var(--text-muted);">Bu dönemde müşteri satışı yok.</td></tr>';
         } else {
-          sTbody.innerHTML = d.customer_summary.map(cs => `
-            <tr style="border-bottom:1px solid var(--border);">
-              <td style="padding:8px 6px; font-weight:700;">${cs.customer_name}</td>
-              <td style="padding:8px 6px; color:#10B981; font-weight:700;">${cs.total_boxes} Koli</td>
-              <td style="padding:8px 6px;">${Number(cs.total_revenue).toFixed(2)} ₺</td>
-              <td style="padding:8px 6px;">${Number(cs.avg_price).toFixed(2)} ₺</td>
-              <td style="padding:8px 6px;">${cs.sale_count} adet</td>
-              <td style="padding:8px 6px; color:var(--text-muted);">${cs.last_sale_date || '-'}</td>
-            </tr>
-          `).join('');
+          sTbody.innerHTML = d.customer_summary.map(cs => {
+            const extra = (cs.piece_count > 0) ? `<div style="font-size:0.7rem; color:var(--text-muted); font-weight:normal;">${cs.pure_koli} Koli + ${cs.piece_count} Adet</div>` : '';
+            return `
+              <tr style="border-bottom:1px solid var(--border); color:var(--text);">
+                <td style="padding:8px 6px; font-weight:700; color:var(--text);">${cs.customer_name}</td>
+                <td style="padding:8px 6px; color:#10B981; font-weight:700;">${cs.total_boxes} Koli${extra}</td>
+                <td style="padding:8px 6px; color:var(--text);">${Number(cs.total_revenue).toFixed(2)} ₺</td>
+                <td style="padding:8px 6px; color:var(--text);">${Number(cs.avg_price).toFixed(2)} ₺</td>
+                <td style="padding:8px 6px; color:var(--text);">${cs.sale_count} adet</td>
+                <td style="padding:8px 6px; color:var(--text-muted);">${cs.last_sale_date || '-'}</td>
+              </tr>
+            `;
+          }).join('');
         }
 
         // Details Table
@@ -6114,18 +6185,25 @@
         if (d.sales.length === 0) {
           dTbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:16px; color:var(--text-muted);">Satış hareketi bulunamadı.</td></tr>';
         } else {
-          dTbody.innerHTML = d.sales.map(s => `
-            <tr style="border-bottom:1px solid var(--border);">
-              <td style="padding:8px 6px;">${(s.sale_date || '').substring(0, 16)}</td>
-              <td style="padding:8px 6px; font-weight:700;">${s.customer_name}</td>
-              <td style="padding:8px 6px; color:#10B981; font-weight:700;">${s.box_count} Koli</td>
-              <td style="padding:8px 6px;">${Number(s.unit_price).toFixed(2)} ₺</td>
-              <td style="padding:8px 6px; font-weight:700;">${Number(s.total_amount).toFixed(2)} ₺</td>
-              <td style="padding:8px 6px;"><span class="badge" style="background:${s.source === 'Ciftlik' ? '#10B981' : '#0284C7'}; color:#fff; font-size:0.75rem;">${s.source}</span></td>
-              <td style="padding:8px 6px; color:var(--text-muted);">${s.note || '-'}</td>
-              <td style="padding:8px 6px; text-align:center;"><button class="btn btn-secondary" style="padding:2px 8px; font-size:0.75rem; color:var(--danger);" onclick="deleteFarmEggSaleWeb(${s.id})">🗑️</button></td>
-            </tr>
-          `).join('');
+          dTbody.innerHTML = d.sales.map(s => {
+            const isAdet = (s.unit_type === 'adet');
+            const pCnt = s.piece_count || Math.round(s.box_count * 30);
+            const qtyBadge = isAdet
+              ? `<span style="color:#0284C7; font-weight:800; font-size:0.85rem;">${Math.round(pCnt)} Adet</span>`
+              : `<span style="color:#10B981; font-weight:800; font-size:0.85rem;">${s.box_count} Koli</span>`;
+            return `
+              <tr style="border-bottom:1px solid var(--border); color:var(--text);">
+                <td style="padding:8px 6px; color:var(--text);">${(s.sale_date || '').substring(0, 16)}</td>
+                <td style="padding:8px 6px; font-weight:700; color:var(--text);">${s.customer_name}</td>
+                <td style="padding:8px 6px;">${qtyBadge}</td>
+                <td style="padding:8px 6px; color:var(--text);">${Number(s.unit_price).toFixed(2)} ₺${isAdet ? '<span style="font-size:0.7rem; color:var(--text-muted);">/ad</span>' : '<span style="font-size:0.7rem; color:var(--text-muted);">/kl</span>'}</td>
+                <td style="padding:8px 6px; font-weight:700; color:#10B981;">${Number(s.total_amount).toFixed(2)} ₺</td>
+                <td style="padding:8px 6px;"><span class="badge" style="background:${s.source === 'Ciftlik' ? '#10B981' : '#0284C7'}; color:#fff; font-size:0.75rem;">${s.source}</span></td>
+                <td style="padding:8px 6px; color:var(--text-muted);">${s.note || '-'}</td>
+                <td style="padding:8px 6px; text-align:center;"><button class="btn btn-secondary" style="padding:2px 8px; font-size:0.75rem; color:var(--danger);" onclick="deleteFarmEggSaleWeb(${s.id})">🗑️</button></td>
+              </tr>
+            `;
+          }).join('');
         }
       } catch (e) {
         console.warn('Analytics fetch error:', e);

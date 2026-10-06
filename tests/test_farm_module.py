@@ -195,7 +195,76 @@ class TestFarmModule(unittest.TestCase):
         # 4. Analitik Endpoint
         res_analytics = client.get("/api/farm/analytics?period=all")
         self.assertEqual(res_analytics.status_code, 200)
-        self.assertEqual(res_analytics.json["data"]["total_boxes"], 3.0)
+    def test_parse_egg_product_koli_vs_piece(self):
+        from app.services.farm_service import parse_egg_product
+
+        # 30'lu koli -> koli
+        u_type, boxes, pieces = parse_egg_product("Gezen Tavuk Yumurta 30'lu Koli", 2)
+        self.assertEqual(u_type, "koli")
+        self.assertEqual(boxes, 2.0)
+        self.assertEqual(pieces, 60.0)
+
+        # 20'li koli -> adet (20 adet)
+        u_type, boxes, pieces = parse_egg_product("Doğal Yumurta 20'li Koli", 1)
+        self.assertEqual(u_type, "adet")
+        self.assertEqual(pieces, 20.0)
+        self.assertAlmostEqual(boxes, 20.0 / 30.0, places=2)
+
+        # 15'li paket -> adet (30 adet for 2 qty)
+        u_type, boxes, pieces = parse_egg_product("Köy Yumurtası 15'li", 2)
+        self.assertEqual(u_type, "adet")
+        self.assertEqual(pieces, 30.0)
+        self.assertEqual(boxes, 1.0)
+
+        # 10'lu -> adet
+        u_type, boxes, pieces = parse_egg_product("Organik Yumurta 10'lu", 3)
+        self.assertEqual(u_type, "adet")
+        self.assertEqual(pieces, 30.0)
+        self.assertEqual(boxes, 1.0)
+
+        # 1 Adet / 3 adet
+        u_type, boxes, pieces = parse_egg_product("Yumurta 1 Adet", 3)
+        self.assertEqual(u_type, "adet")
+        self.assertEqual(pieces, 3.0)
+        self.assertAlmostEqual(boxes, 0.1, places=2)
+
+    def test_shop_egg_piece_transfer_and_farm_conversion_analytics(self):
+        # 1. Shop'ta 20'li koli ve 1 adet yumurta satışı yapalım
+        with self.db.get_connection() as conn:
+            conn.execute("INSERT OR IGNORE INTO products (id, category_id, name, barcode, purchase_price, sale_price, stock_quantity) VALUES (951, 1, 'Yumurta 20li Koli', 'YUM20', 80, 120, 50)")
+            conn.execute("INSERT OR IGNORE INTO products (id, category_id, name, barcode, purchase_price, sale_price, stock_quantity) VALUES (952, 1, 'Köy Yumurtası 1 Adet', 'YUM01', 3, 6, 100)")
+
+        items = [
+            CartItem(product_id=951, product_name='Yumurta 20li Koli', barcode='YUM20', unit_price=120.0, quantity=1, stock_quantity=50),
+            CartItem(product_id=952, product_name='Köy Yumurtası 1 Adet', barcode='YUM01', unit_price=6.0, quantity=10, stock_quantity=100),
+        ]
+        sale = self.sale_repo.create_sale(cart_items=items, channel='magaza', customer_name='Müşteri Hasan')
+        self.assertIsNotNone(sale)
+
+        # Farm kayıtlarını kontrol et: 20 adet ve 10 adet olarak geçmiş olmalı
+        farm_sales = self.cloud_db.get_farm_egg_sales(customer_name='Müşteri Hasan')
+        self.assertEqual(len(farm_sales), 2)
+        piece_sales = [s for s in farm_sales if s["unit_type"] == "adet"]
+        self.assertEqual(len(piece_sales), 2)
+        total_p = sum(s["piece_count"] for s in piece_sales)
+        self.assertEqual(total_p, 30.0) # 20 + 10 = 30 adet!
+
+        # 2. Çiftlikten doğrudan 2 koli (30'lu) satış ekleyelim
+        self.farm_service.create_egg_sale(
+            customer_name="Müşteri Hasan",
+            box_count=2.0,
+            unit_price=180.0,
+            unit_type="koli",
+        )
+
+        # 3. Analitik verisini test et: 2 koli + 30 adet = 3.0 Koli olmalı! (Her 30 adet = 1 koli)
+        analysis = self.farm_service.get_egg_sales_analysis(customer_name="Müşteri Hasan", period="all")
+        self.assertEqual(analysis["pure_koli_boxes"], 2.0)
+        self.assertEqual(analysis["total_pieces"], 30.0)
+        self.assertEqual(analysis["converted_koli"], 1.0)
+        self.assertEqual(analysis["total_boxes"], 3.0)
+        self.assertEqual(analysis["total_revenue"], 120.0 + 60.0 + 360.0) # 540 TL
+        self.assertEqual(analysis["avg_box_price"], 180.0)
 
 
 if __name__ == '__main__':

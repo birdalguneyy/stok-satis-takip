@@ -1,7 +1,55 @@
+import re
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.database.cloud_db import CloudDatabase
+
+
+def parse_egg_product(product_name: str, quantity: float = 1.0, default_unit: str = "koli") -> Tuple[str, float, float]:
+    """
+    Yumurta ürün ismini ve miktarını analiz eder:
+    - Sadece 30'lu koli (veya açıkça koli belirtilen ve 20, 15, 10, 6 içermeyenler) 'koli' olarak kaydedilir.
+    - Diğerleri (20'li koli -> 20 adet, 1 adet -> 1 adet, vb.) 'adet' olarak kaydedilir.
+    - Filtreleme ve analizde 30 adet = 1 koli hesabına baz teşkil edecek box_count ve piece_count hesaplanır.
+
+    Dönüş: (unit_type, box_count, piece_count)
+    Örnekler:
+      - 'Yumurta 30lu koli', qty 2 -> ('koli', 2.0, 60.0)
+      - 'Yumurta 20li koli', qty 1 -> ('adet', 0.667, 20.0)
+      - 'Yumurta 1 adet', qty 3   -> ('adet', 0.1, 3.0)
+      - 'Yumurta (Adet)', qty 15  -> ('adet', 0.5, 15.0)
+    """
+    p_lower = (product_name or "").lower().strip()
+    qty = float(quantity) if quantity else 1.0
+
+    # 1. Paket / koli boyutu kontrolü (örn: 30'lu, 30lu, 20'li, 20li, 15'li, 10'lu, 6'lı)
+    match = re.search(r"(\d+)\s*(?:['’`\-]?\s*(?:li|lı|lu|lü|lik|lık|luk|lük))", p_lower)
+    if match:
+        pack_size = int(match.group(1))
+        if pack_size == 30:
+            return "koli", round(qty, 3), round(qty * 30.0, 2)
+        else:
+            pieces = round(qty * pack_size, 2)
+            boxes = round(pieces / 30.0, 3)
+            return "adet", boxes, pieces
+
+    # 2. '1 adet', 'adet', 'tane' geçiyorsa doğrudan adet
+    if "adet" in p_lower or "tane" in p_lower:
+        pieces = round(qty, 2)
+        boxes = round(pieces / 30.0, 3)
+        return "adet", boxes, pieces
+
+    # 3. 'koli' geçiyorsa koli
+    if "koli" in p_lower:
+        return "koli", round(qty, 3), round(qty * 30.0, 2)
+
+    # 4. Varsayılan kontrol
+    if default_unit == "adet":
+        pieces = round(qty, 2)
+        boxes = round(pieces / 30.0, 3)
+        return "adet", boxes, pieces
+
+    return "koli", round(qty, 3), round(qty * 30.0, 2)
 
 
 class FarmService:
@@ -69,6 +117,8 @@ class FarmService:
         source: str = "Ciftlik",
         note: Optional[str] = None,
         user_id: Optional[int] = None,
+        unit_type: str = "koli",
+        piece_count: Optional[float] = None,
     ) -> Tuple[bool, str, Optional[int]]:
         """Yeni yumurta satışı kaydeder."""
         return self.cloud_db.add_farm_egg_sale(
@@ -79,6 +129,8 @@ class FarmService:
             source=source,
             note=note,
             user_id=user_id,
+            unit_type=unit_type,
+            piece_count=piece_count,
         )
 
     def delete_egg_sale(self, sale_id: int, user_id: Optional[int] = None) -> Tuple[bool, str]:
@@ -101,6 +153,7 @@ class FarmService:
         """Gelişmiş filtreleme ve müşteri analiz verilerini üretir:
         - Müşteri adı belirtilmişse: O müşteriye satılan toplam koli, ciro, ortalama koli fiyatı ve hareketler
         - Müşteri adı belirtilmemişse: Tüm müşterilere yapılan genel toplam, ciro ve müşteri bazında döküm özeti
+        - 30 adet = 1 koli formülüyle filtrelenen adetler koliye dönüştürülür.
         """
         if period != "custom":
             calc_start, calc_end = self.get_date_range_for_period(period)
@@ -115,8 +168,23 @@ class FarmService:
             source=source,
         )
 
-        total_boxes = round(sum(float(s.get("box_count", 0)) for s in sales), 2)
+        total_pure_koli = 0.0
+        total_pieces = 0.0
         total_revenue = round(sum(float(s.get("total_amount", 0)) for s in sales), 2)
+
+        for s in sales:
+            u_type = s.get("unit_type", "koli")
+            b_cnt = float(s.get("box_count", 0))
+            p_cnt = float(s.get("piece_count", 0))
+            if u_type == "adet":
+                actual_pieces = p_cnt if p_cnt > 0 else (b_cnt * 30.0)
+                total_pieces += actual_pieces
+            else:
+                total_pure_koli += b_cnt
+
+        # Her 30 adet filtrelendiğinde 1 koli sayılacak şekilde toplam koli hesaplanır
+        converted_koli = round(total_pieces / 30.0, 2)
+        total_boxes = round(total_pure_koli + (total_pieces / 30.0), 2)
         avg_box_price = round(total_revenue / total_boxes, 2) if total_boxes > 0 else 0.0
 
         # Müşteri bazında döküm (özet tablo)
@@ -126,12 +194,22 @@ class FarmService:
             if c_name not in customers_map:
                 customers_map[c_name] = {
                     "customer_name": c_name,
+                    "pure_koli": 0.0,
+                    "piece_count": 0.0,
                     "total_boxes": 0.0,
                     "total_revenue": 0.0,
                     "sale_count": 0,
                     "last_sale_date": s.get("sale_date", "")[:10],
                 }
-            customers_map[c_name]["total_boxes"] += float(s.get("box_count", 0))
+            u_type = s.get("unit_type", "koli")
+            b_cnt = float(s.get("box_count", 0))
+            p_cnt = float(s.get("piece_count", 0))
+            if u_type == "adet":
+                actual_p = p_cnt if p_cnt > 0 else (b_cnt * 30.0)
+                customers_map[c_name]["piece_count"] += actual_p
+            else:
+                customers_map[c_name]["pure_koli"] += b_cnt
+
             customers_map[c_name]["total_revenue"] += float(s.get("total_amount", 0))
             customers_map[c_name]["sale_count"] += 1
             curr_date = s.get("sale_date", "")[:10]
@@ -140,7 +218,9 @@ class FarmService:
 
         customer_summary = []
         for c_dict in customers_map.values():
-            c_dict["total_boxes"] = round(c_dict["total_boxes"], 2)
+            c_dict["pure_koli"] = round(c_dict["pure_koli"], 2)
+            c_dict["piece_count"] = round(c_dict["piece_count"], 0)
+            c_dict["total_boxes"] = round(c_dict["pure_koli"] + (c_dict["piece_count"] / 30.0), 2)
             c_dict["total_revenue"] = round(c_dict["total_revenue"], 2)
             c_dict["avg_price"] = (
                 round(c_dict["total_revenue"] / c_dict["total_boxes"], 2)
@@ -157,6 +237,9 @@ class FarmService:
             "end_date": calc_end,
             "filter_customer": customer_name or "",
             "total_boxes": total_boxes,
+            "pure_koli_boxes": round(total_pure_koli, 2),
+            "total_pieces": round(total_pieces, 0),
+            "converted_koli": converted_koli,
             "total_revenue": total_revenue,
             "avg_box_price": avg_box_price,
             "total_sales_count": len(sales),

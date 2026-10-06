@@ -478,15 +478,17 @@ class CloudDatabase:
                             conn.execute(
                                 """
                                 INSERT OR REPLACE INTO farm_egg_sales (
-                                    id, user_id, customer_name, box_count, unit_price, total_amount,
+                                    id, user_id, customer_name, box_count, unit_type, piece_count, unit_price, total_amount,
                                     source, sale_date, note, synced_to_cloud, created_at
-                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
                                 """,
                                 (
                                     es_id,
                                     final_uid,
                                     d.get("customer_name"),
                                     float(d.get("box_count", 1)),
+                                    d.get("unit_type", "koli"),
+                                    float(d.get("piece_count", 0)),
                                     float(d.get("unit_price", 0)),
                                     float(d.get("total_amount", 0)),
                                     d.get("source", "Ciftlik"),
@@ -1360,23 +1362,36 @@ class CloudDatabase:
 
         # Dükkan satışındaki yumurtaları otomatik Çiftlik kaydına aktar
         try:
+            from app.services.farm_service import parse_egg_product
             discount_ratio = (total_amount / calculated_total) if (total_amount_override is not None and calculated_total > 0) else 1.0
             for item in cart_items:
                 p_name = str(item.get("product_name", "")).strip()
                 if "yumurta" in p_name.lower():
                     orig_unit_price = float(item.get("unit_price", 0))
-                    effective_price = round(orig_unit_price * discount_ratio, 2)
                     qty = float(item.get("quantity", 1))
+                    effective_item_total = round(orig_unit_price * qty * discount_ratio, 2)
+
+                    u_type, egg_boxes, egg_pieces = parse_egg_product(p_name, qty)
+                    if u_type == "adet" and egg_pieces > 0:
+                        effective_price = round(effective_item_total / egg_pieces, 2)
+                    elif egg_boxes > 0:
+                        effective_price = round(effective_item_total / egg_boxes, 2)
+                    else:
+                        effective_price = round(orig_unit_price * discount_ratio, 2)
+
                     egg_cust = cust_name or "Dükkan Perakende"
                     egg_note = f"Dükkan Satışı (Fiş #{sale_id}) - {p_name}"
                     self.add_farm_egg_sale(
                         customer_name=egg_cust,
-                        box_count=qty,
+                        box_count=egg_boxes,
                         unit_price=effective_price,
                         sale_date=now,
                         source="Dükkan",
                         note=egg_note,
                         user_id=uid,
+                        unit_type=u_type,
+                        piece_count=egg_pieces,
+                        total_amount=effective_item_total,
                     )
         except Exception as e_egg:
             logger.warning(f"Dükkan yumurta satış aktarımı uyarısı: {e_egg}")
@@ -2511,8 +2526,11 @@ class CloudDatabase:
         source: str = "Ciftlik",
         note: Optional[str] = None,
         user_id: Optional[int] = None,
+        unit_type: str = "koli",
+        piece_count: Optional[float] = None,
+        total_amount: Optional[float] = None,
     ) -> tuple[bool, str, Optional[int]]:
-        """Yumurta satışını kaydeder (koli sayısı ve birim fiyat üzerinden)."""
+        """Yumurta satışını kaydeder (koli/adet sayısı ve birim fiyat üzerinden)."""
         clean_cust = customer_name.strip()
         if not clean_cust:
             return False, "Müşteri adı boş olamaz!", None
@@ -2521,11 +2539,17 @@ class CloudDatabase:
             b_count = float(box_count)
             u_price = float(unit_price)
             if b_count <= 0 or u_price < 0:
-                return False, "Koli adedi pozitif, birim fiyat 0 veya üzeri olmalıdır!", None
+                return False, "Koli/adet miktarı pozitif, birim fiyat 0 veya üzeri olmalıdır!", None
         except (ValueError, TypeError):
-            return False, "Geçersiz koli adedi veya fiyat formatı!", None
+            return False, "Geçersiz miktar veya fiyat formatı!", None
 
-        total_amount = round(b_count * u_price, 2)
+        u_type = "adet" if str(unit_type).lower().strip() == "adet" else "koli"
+        if piece_count is not None:
+            p_count = round(float(piece_count), 2)
+        else:
+            p_count = round(b_count * 30.0, 2) if u_type == "koli" else round(b_count, 2)
+
+        tot_amount = round(float(total_amount), 2) if total_amount is not None else round(b_count * u_price, 2)
         uid = self._resolve_user_id(user_id) or 1
         now_dt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         s_date = sale_date.strip() if sale_date and sale_date.strip() else now_dt
@@ -2537,11 +2561,11 @@ class CloudDatabase:
             cursor = conn.execute(
                 """
                 INSERT INTO farm_egg_sales (
-                    user_id, customer_name, box_count, unit_price, total_amount,
+                    user_id, customer_name, box_count, unit_type, piece_count, unit_price, total_amount,
                     source, sale_date, note, synced_to_cloud, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
                 """,
-                (uid, clean_cust, b_count, u_price, total_amount, source, s_date, (note or "").strip(), now_dt),
+                (uid, clean_cust, b_count, u_type, p_count, u_price, tot_amount, source, s_date, (note or "").strip(), now_dt),
             )
             sale_id = cursor.lastrowid
 
@@ -2554,8 +2578,10 @@ class CloudDatabase:
                         "user_id": uid,
                         "customer_name": clean_cust,
                         "box_count": b_count,
+                        "unit_type": u_type,
+                        "piece_count": p_count,
                         "unit_price": u_price,
-                        "total_amount": total_amount,
+                        "total_amount": tot_amount,
                         "source": source,
                         "sale_date": s_date,
                         "note": (note or "").strip(),
@@ -2568,7 +2594,8 @@ class CloudDatabase:
                     logger.warning(f"Firestore farm egg sale sync error: {ex}")
             threading.Thread(target=_sync_egg, daemon=True).start()
 
-        return True, f"Yumurta satışı kaydedildi ({b_count:g} Koli - {total_amount:.2f} ₺)", sale_id
+        qty_str = f"{int(p_count)} Adet" if u_type == "adet" else f"{b_count:g} Koli"
+        return True, f"Yumurta satışı kaydedildi ({qty_str} - {tot_amount:.2f} ₺)", sale_id
 
     def get_farm_egg_sales(
         self,

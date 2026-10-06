@@ -276,12 +276,37 @@ def run_migrations() -> None:
             )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_farm_feed_purchases_user_date ON farm_feed_purchases(user_id, purchase_date)")
 
+            # farm_egg_sales koli/adet sütunları ve veri güncellemesi
+            cols_egg = [c["name"] for c in conn.execute("PRAGMA table_info(farm_egg_sales)").fetchall()]
+            if "unit_type" not in cols_egg:
+                conn.execute("ALTER TABLE farm_egg_sales ADD COLUMN unit_type TEXT DEFAULT 'koli'")
+            if "piece_count" not in cols_egg:
+                conn.execute("ALTER TABLE farm_egg_sales ADD COLUMN piece_count REAL DEFAULT 0")
 
+            # Geçmiş dükkan kayıtlarını düzelt (30'lu koli dışındakileri adet yap)
+            conn.execute("""
+                UPDATE farm_egg_sales
+                SET unit_type = 'adet',
+                    piece_count = box_count,
+                    box_count = ROUND(box_count / 30.0, 3)
+                WHERE source = 'Dükkan' AND (note LIKE '%1 adet%' OR note LIKE '%adet%') AND (unit_type IS NULL OR unit_type = 'koli')
+            """)
+            conn.execute("""
+                UPDATE farm_egg_sales
+                SET unit_type = 'adet',
+                    piece_count = box_count * 20.0,
+                    box_count = ROUND((box_count * 20.0) / 30.0, 3)
+                WHERE source = 'Dükkan' AND (note LIKE '%20''li%' OR note LIKE '%20li%') AND (unit_type IS NULL OR unit_type = 'koli')
+            """)
+            conn.execute("""
+                UPDATE farm_egg_sales
+                SET unit_type = 'koli',
+                    piece_count = box_count * 30.0
+                WHERE (unit_type IS NULL OR unit_type = 'koli') AND (piece_count = 0 OR piece_count IS NULL)
+            """)
 
-
-def _seed_categories(conn) -> None:
-    for name in DEFAULT_CATEGORIES:
-        conn.execute(
-            "INSERT OR IGNORE INTO categories (name) VALUES (?)",
-            (name,),
-        )
+        for name in DEFAULT_CATEGORIES:
+            conn.execute(
+                "INSERT OR IGNORE INTO categories (name) VALUES (?)",
+                (name,),
+            )

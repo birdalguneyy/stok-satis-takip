@@ -3687,6 +3687,7 @@
           loadSalesHistory();
           loadSalesAnalytics();
           loadForecastData();
+          triggerManualSync();
         } else {
           showToast("❌ " + (json.message || "Satış kaydedilemedi!"));
         }
@@ -6139,6 +6140,7 @@
       try { loadProducts(); } catch(e) {}
       try { loadSalesHistory(); } catch(e) {}
       try { checkSyncStatus(); } catch(e) {}
+      try { triggerManualSync(); } catch(e) {}
     }
 
 
@@ -6511,6 +6513,7 @@
           calcFarmEggTotal('price');
           loadFarmCustomersWeb();
           loadFarmEggSalesWeb();
+          triggerManualSync();
         } else {
           showToast("❌ " + (json.message || "Kayıt başarısız!"), "danger");
         }

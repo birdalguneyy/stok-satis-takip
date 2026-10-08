@@ -1090,6 +1090,20 @@ def _background_sync_loop():
             logger.debug(f"Arka plan senkronizasyon uyarısı: {exc}")
 
 
+_bg_sync_started = False
+_bg_sync_lock = threading.Lock()
+
+def start_background_sync_if_needed():
+    global _bg_sync_started
+    with _bg_sync_lock:
+        if not _bg_sync_started:
+            _bg_sync_started = True
+            t_sync = threading.Thread(target=_background_sync_loop, daemon=True)
+            t_sync.start()
+            logger.info("Firebase 7/24 Arka Plan Otomatik Senkronizasyon Servisi başlatıldı.")
+
+start_background_sync_if_needed()
+
 def run_web_server_in_thread(host: str = "0.0.0.0", port: Optional[int] = None) -> list:
     """Flask Web sunucusunu HTTP (Port 5000) ve HTTPS (Port 5001) modlarında çalıştırır."""
     server_port = port or int(os.environ.get("PORT", 5000))
@@ -1099,9 +1113,7 @@ def run_web_server_in_thread(host: str = "0.0.0.0", port: Optional[int] = None) 
     threads = []
 
     # 0. Arka Plan Firebase Otomatik Senkronizasyon Servisi
-    t_sync = threading.Thread(target=_background_sync_loop, daemon=True)
-    t_sync.start()
-    threads.append(t_sync)
+    start_background_sync_if_needed()
 
     # 1. Standart HTTP Sunucusu (Port 5000 - PC ve Mobil için Kolay Erişim)
     t_http = threading.Thread(

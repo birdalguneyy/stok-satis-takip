@@ -104,6 +104,15 @@ class SaleRepository:
         except Exception:
             pass
 
+        # Satışı Firebase Firestore'a anında eşitle
+        try:
+            from app.database.cloud_db import CloudDatabase
+            cloud_db = CloudDatabase()
+            if cloud_db.ensure_firebase():
+                cloud_db.sync_offline_data_with_firebase()
+        except Exception:
+            pass
+
         return Sale.from_row(row)
 
 

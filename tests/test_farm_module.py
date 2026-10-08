@@ -28,6 +28,7 @@ class TestFarmModule(unittest.TestCase):
             conn.execute("DELETE FROM farm_customers")
             conn.execute("DELETE FROM sale_items")
             conn.execute("DELETE FROM sales")
+            conn.execute("DELETE FROM products WHERE barcode LIKE 'EGGTEST%'")
 
     def test_egg_sale_creation_and_customer_remembering(self):
         # 1. Yeni yumurta satışı kaydet
@@ -294,10 +295,10 @@ class TestFarmModule(unittest.TestCase):
         self.assertEqual(analysis["total_revenue"], 120.0 + 60.0 + 360.0) # 540 TL
         self.assertEqual(analysis["avg_box_price"], 180.0)
 
-    def test_farm_egg_sales_appear_in_shop_history_and_sync(self):
+    def test_shop_egg_sales_transferred_to_farm_and_farm_isolated_from_shop(self):
         # 1. Çiftlikten yumurta satışı yapalım
         ok, msg, f_sale_id = self.cloud_db.add_farm_egg_sale(
-            customer_name="Çiftlik Müşterisi Selim",
+            customer_name="Özel Çiftlik Müşterisi",
             box_count=3.0,
             unit_price=160.0,
             sale_date="2026-10-08 10:15:00",
@@ -308,31 +309,95 @@ class TestFarmModule(unittest.TestCase):
         self.assertTrue(ok)
         self.assertIsNotNone(f_sale_id)
 
-        # 2. Dükkan satış geçmişini çekelim
-        history = self.cloud_db.get_sales_history(customer_name="Çiftlik Müşterisi Selim")
-        self.assertTrue(any(s["customer_name"] == "Çiftlik Müşterisi Selim" for s in history))
-        selim_sale = next(s for s in history if s["customer_name"] == "Çiftlik Müşterisi Selim")
-        self.assertEqual(selim_sale["id"], f"farm_{f_sale_id}")
-        self.assertEqual(selim_sale["channel"], "ciftlik")
-        self.assertEqual(selim_sale["total_amount"], 480.0)
-        self.assertEqual(len(selim_sale["items"]), 1)
-        self.assertIn("3 Koli", selim_sale["items"][0]["product_name"])
+        # 2. Çiftlik satışı DÜKKAN satış geçmişinde YER ALMAMALIDIR (Çiftlik dükkana dahil edilmez)
+        cloud_history = self.cloud_db.get_sales_history(customer_name="Özel Çiftlik Müşterisi")
+        self.assertFalse(any(s.get("customer_name") == "Özel Çiftlik Müşterisi" for s in cloud_history))
 
-        # 3. sale_repository üzerinden de kontrol edelim (Masaüstü için)
-        repo_history = self.sale_repo.get_sales_history(customer_name="Çiftlik Müşterisi Selim")
-        self.assertTrue(any(s["customer_name"] == "Çiftlik Müşterisi Selim" for s in repo_history))
+        repo_history = self.sale_repo.get_sales_history(customer_name="Özel Çiftlik Müşterisi")
+        self.assertFalse(any(s.get("customer_name") == "Özel Çiftlik Müşterisi" for s in repo_history))
 
-        # 4. Tarih ve saat güncelleme testi (farm_ id ile)
-        ok_dt, msg_dt = self.cloud_db.update_sale_datetime(f"farm_{f_sale_id}", "2026-10-08 16:30:00")
-        self.assertTrue(ok_dt)
-        f_sales = self.cloud_db.get_farm_egg_sales(customer_name="Çiftlik Müşterisi Selim")
-        self.assertEqual(f_sales[0]["sale_date"], "2026-10-08 16:30:00")
+        # 3. Dükkandan yumurta satışı yapalım
+        shop_items = [
+            {
+                "product_id": 999,
+                "product_name": "Gezen Tavuk Yumurtası 30'lu Koli",
+                "barcode": "YUM30",
+                "unit_price": 150.0,
+                "quantity": 2.0,
+                "subtotal": 300.0,
+                "unit": "koli",
+            }
+        ]
+        ok_shop, msg_shop = self.cloud_db.add_sale(
+            cart_items=shop_items,
+            note="Dükkan Kasa Satışı",
+            customer_name="Dükkan Yumurta Alıcısı",
+            sold_at="2026-10-08 11:00:00",
+        )
+        self.assertTrue(ok_shop)
 
-        # 5. Dükkan üzerinden çiftlik satışını silme testi (farm_ id ile)
-        ok_del, msg_del = self.cloud_db.delete_sale(f"farm_{f_sale_id}")
+        # 4. Dükkan satışı DÜKKAN satış geçmişinde bulunmalıdır
+        shop_hist = self.cloud_db.get_sales_history(customer_name="Dükkan Yumurta Alıcısı")
+        self.assertEqual(len(shop_hist), 1)
+        shop_sale = shop_hist[0]
+        shop_sale_id = shop_sale["id"]
+        self.assertEqual(shop_sale["total_amount"], 300.0)
+
+        # 5. Dükkandan satılan bu yumurta ÇİFTLİK modülüne dahil edilmiş olmalıdır
+        farm_records = self.cloud_db.get_farm_egg_sales(customer_name="Dükkan Yumurta Alıcısı")
+        self.assertEqual(len(farm_records), 1)
+        egg_mirror = farm_records[0]
+        self.assertEqual(egg_mirror["source"], "Dükkan")
+        self.assertEqual(egg_mirror["box_count"], 2.0)
+        self.assertEqual(egg_mirror["total_amount"], 300.0)
+        self.assertIn(f"Fiş #{shop_sale_id}", egg_mirror["note"])
+
+        # 6. Dükkan satış tarihi güncellendiğinde çiftlikteki kaydın da tarihi güncellenmelidir
+        ok_upd, _ = self.cloud_db.update_sale_datetime(shop_sale_id, "2026-10-08 14:45:00")
+        self.assertTrue(ok_upd)
+        upd_farm_records = self.cloud_db.get_farm_egg_sales(customer_name="Dükkan Yumurta Alıcısı")
+        self.assertEqual(upd_farm_records[0]["sale_date"], "2026-10-08 14:45:00")
+
+        # 7. Dükkan satışı silindiğinde çiftlikteki kaydı da silinmelidir
+        ok_del, _ = self.cloud_db.delete_sale(shop_sale_id)
         self.assertTrue(ok_del)
-        f_sales_after = self.cloud_db.get_farm_egg_sales(customer_name="Çiftlik Müşterisi Selim")
-        self.assertEqual(len(f_sales_after), 0)
+        del_farm_records = self.cloud_db.get_farm_egg_sales(customer_name="Dükkan Yumurta Alıcısı")
+        self.assertEqual(len(del_farm_records), 0)
+
+    def test_sync_shop_egg_sales_to_farm(self):
+        # Dükkan veritabanına doğrudan bir yumurta satışı ekleyelim (farm_egg_sales olmadan)
+        ok_p, _, prod_dict = self.cloud_db.save_product(
+            name="Organik Yumurta 30lu",
+            barcode="EGGTEST123",
+            category_name="Gıda",
+            purchase_price=100.0,
+            sale_price=150.0,
+            stock_quantity=10.0,
+            unit="koli",
+            user_id=1,
+        )
+        self.assertTrue(ok_p)
+        pid = prod_dict["id"]
+
+        with self.cloud_db.db.get_connection() as conn:
+            cur = conn.execute(
+                "INSERT INTO sales (user_id, total_amount, item_count, sold_at, note, channel, customer_name) VALUES (1, 150.0, 1, '2026-10-08 12:00:00', 'Geçmiş Satış', 'magaza', 'Eski Müşteri')"
+            )
+            sid = cur.lastrowid
+            conn.execute(
+                "INSERT INTO sale_items (sale_id, product_id, product_name, barcode, unit_price, quantity, subtotal, unit) VALUES (?, ?, 'Organik Yumurta 30lu', 'EGGTEST123', 150.0, 1.0, 150.0, 'koli')",
+                (sid, pid)
+            )
+
+        # Senkronizasyonu çalıştır
+        count = self.cloud_db.sync_shop_egg_sales_to_farm()
+        self.assertGreaterEqual(count, 1)
+
+        # Çiftlik kayıtlarında görünmeli
+        records = self.cloud_db.get_farm_egg_sales(customer_name="Eski Müşteri")
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["source"], "Dükkan")
+        self.assertEqual(records[0]["total_amount"], 150.0)
 
 
 if __name__ == '__main__':

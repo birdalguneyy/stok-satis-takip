@@ -74,7 +74,8 @@ class SaleRepository:
             discount_ratio = (total_amount / calc_total) if (total_amount_override is not None and calc_total > 0) else 1.0
             for item in cart_items:
                 p_name = str(item.product_name or "").strip()
-                if "yumurta" in p_name.lower():
+                p_norm = p_name.replace("İ", "i").replace("I", "ı").lower()
+                if "yumurta" in p_norm:
                     orig_unit_price = float(item.unit_price)
                     qty = float(item.quantity)
                     effective_item_total = round(orig_unit_price * qty * discount_ratio, 2)
@@ -93,6 +94,7 @@ class SaleRepository:
                         customer_name=egg_cust,
                         box_count=egg_boxes,
                         unit_price=effective_price,
+                        sale_date=now,
                         source="Dükkan",
                         note=egg_note,
                         unit_type=u_type,
@@ -134,72 +136,7 @@ class SaleRepository:
                 ).fetchall()
                 s_dict["items"] = [dict(i) for i in items_rows]
                 sales.append(s_dict)
-
-            existing_shop_sale_ids = {s["id"] for s in sales}
-
-            # Çiftlik yumurta satışlarını da satış geçmişine ekle
-            f_query = "SELECT * FROM farm_egg_sales WHERE 1=1"
-            f_params: list = []
-            if start_date:
-                f_query += " AND sale_date >= ?"
-                f_params.append(start_date + " 00:00:00")
-            if end_date:
-                f_query += " AND sale_date <= ?"
-                f_params.append(end_date + " 23:59:59")
-            if customer_name and str(customer_name).strip():
-                f_query += " AND customer_name LIKE ?"
-                f_params.append(f"%{customer_name.strip()}%")
-            f_query += " ORDER BY sale_date DESC, id DESC LIMIT 500"
-
-            farm_rows = conn.execute(f_query, f_params).fetchall()
-            for f_row in farm_rows:
-                fes = dict(f_row)
-                note_str = str(fes.get("note") or "")
-                source_str = str(fes.get("source") or "")
-
-                # Eğer dükkan fişinden kopyalanmışsa ve dükkan fişi halen mevcutsa atla
-                if "dükkan" in source_str.lower() and "Fiş #" in note_str:
-                    m = re.search(r"Fiş #(\d+)", note_str)
-                    if m and int(m.group(1)) in existing_shop_sale_ids:
-                        continue
-
-                fid = fes["id"]
-                u_type = fes.get("unit_type") or "koli"
-                b_cnt = float(fes.get("box_count") or 0)
-                p_cnt = float(fes.get("piece_count") or 0) if fes.get("piece_count") else (b_cnt * 30.0 if u_type == "koli" else b_cnt)
-                qty = b_cnt if u_type == "koli" else p_cnt
-                u_str = "koli" if u_type == "koli" else "adet"
-                p_name = f"Yumurta ({b_cnt:g} Koli)" if u_type == "koli" else f"Yumurta ({int(p_cnt)} Adet)"
-                u_price = float(fes.get("unit_price") or 0)
-                t_amt = float(fes.get("total_amount") or (b_cnt * u_price))
-
-                sales.append({
-                    "id": f"farm_{fid}",
-                    "raw_id": fid,
-                    "is_farm": True,
-                    "user_id": fes.get("user_id"),
-                    "total_amount": t_amt,
-                    "item_count": 1,
-                    "sold_at": fes.get("sale_date"),
-                    "note": fes.get("note") or "Çiftlik Yumurta Satışı",
-                    "channel": "ciftlik",
-                    "customer_name": fes.get("customer_name"),
-                    "items": [
-                        {
-                            "sale_id": f"farm_{fid}",
-                            "product_id": None,
-                            "product_name": p_name,
-                            "barcode": "",
-                            "unit_price": u_price,
-                            "quantity": qty,
-                            "unit": u_str,
-                            "subtotal": t_amt,
-                        }
-                    ],
-                })
-
-        sales.sort(key=lambda s: str(s.get("sold_at") or ""), reverse=True)
-        return sales[:500]
+            return sales
 
     def delete_sale(self, sale_id: Union[int, str], restore_stock: bool = True) -> Tuple[bool, str]:
         ok, msg, _ = self.delete_sales_bulk([sale_id], restore_stock=restore_stock)
@@ -375,6 +312,10 @@ class SaleRepository:
             cur = conn.execute("UPDATE sales SET sold_at = ?, synced_to_cloud = 0 WHERE id = ?", (formatted_dt, numeric_id))
             if cur.rowcount == 0:
                 return False, "Satış kaydı bulunamadı."
+            conn.execute(
+                "UPDATE farm_egg_sales SET sale_date = ?, synced_to_cloud = 0 WHERE note LIKE ? OR note LIKE ?",
+                (formatted_dt, f"%Fiş #{numeric_id}%", f"%Fiş #{numeric_id})%")
+            )
 
         try:
             from app.database.cloud_db import CloudDatabase

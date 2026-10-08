@@ -5183,8 +5183,6 @@
       let todayStoreCount = 0;
       let todayInternetRev = 0;
       let todayInternetCount = 0;
-      let todayFarmRev = 0;
-      let todayFarmCount = 0;
 
       let todayShopPureKoli = 0;
       let todayShopPieces = 0;
@@ -5196,9 +5194,6 @@
         if (s.channel === 'internet') {
           todayInternetRev += amt;
           todayInternetCount++;
-        } else if (s.channel === 'ciftlik') {
-          todayFarmRev += amt;
-          todayFarmCount++;
         } else {
           todayStoreRev += amt;
           todayStoreCount++;
@@ -5217,22 +5212,11 @@
         });
       });
 
-      // Yumurta Toplamı: Eğer çiftlik modülü verisi varsa onu veya yerel toplamı kullan
-      let todayTotalKoli = 0;
-      let todayPureKoli = 0;
-      let todayPieces = 0;
-      let todayEggRev = todayShopEggRev;
-
-      if (_todayFarmEggData && _todayFarmEggData.total_boxes !== undefined) {
-        todayTotalKoli = _todayFarmEggData.total_boxes;
-        todayPureKoli = _todayFarmEggData.pure_koli_boxes !== undefined ? _todayFarmEggData.pure_koli_boxes : todayTotalKoli;
-        todayPieces = _todayFarmEggData.total_pieces || 0;
-        todayEggRev = Math.max(todayShopEggRev, _todayFarmEggData.total_revenue || 0);
-      } else {
-        todayPureKoli = Math.round(todayShopPureKoli * 100) / 100;
-        todayPieces = Math.round(todayShopPieces);
-        todayTotalKoli = Math.round((todayPureKoli + (todayPieces / 30.0)) * 100) / 100;
-      }
+      // Yumurta Toplamı: Dükkanda bugün satılan yumurtaların toplamı
+      const todayPureKoli = Math.round(todayShopPureKoli * 100) / 100;
+      const todayPieces = Math.round(todayShopPieces);
+      const todayTotalKoli = Math.round((todayPureKoli + (todayPieces / 30.0)) * 100) / 100;
+      const todayEggRev = todayShopEggRev;
 
       // 2. Filtrelenen fişlerin özeti
       let filteredTotalRev = 0;
@@ -5251,7 +5235,7 @@
           eggBadgeDetail = `(${todayPureKoli} Koli [30'lu])${todayEggRev > 0 ? ` • Yumurta Cirosu: ${todayEggRev.toFixed(2)} ₺` : ''}`;
         }
       } else {
-        eggBadgeDetail = `Bugün dükkanda veya çiftlikte kaydedilmiş yumurta satışı bulunmuyor.`;
+        eggBadgeDetail = `Bugün dükkanda kaydedilmiş yumurta satışı bulunmuyor.`;
       }
 
       return `
@@ -5292,7 +5276,6 @@
               <div style="font-size:0.7rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Kanal Dağılımı (Bugün)</div>
               <div style="font-size:0.8rem; font-weight:700; color:#059669; margin-top:4px;">🏬 Mağaza: ${todayStoreRev.toFixed(2)} ₺ (${todayStoreCount} fiş)</div>
               <div style="font-size:0.8rem; font-weight:700; color:#0284C7; margin-top:2px;">🌐 İnternet: ${todayInternetRev.toFixed(2)} ₺ (${todayInternetCount} sipariş)</div>
-              ${todayFarmCount > 0 ? `<div style="font-size:0.8rem; font-weight:700; color:#D97706; margin-top:2px;">🚜 Çiftlik: ${todayFarmRev.toFixed(2)} ₺ (${todayFarmCount} satış)</div>` : ''}
             </div>
 
             <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:12px;">
@@ -5405,9 +5388,6 @@
           if (s.channel === 'internet') {
             key = '🌐 İnternet Satışları';
             icon = '🌐';
-          } else if (s.channel === 'ciftlik') {
-            key = '🚜 Çiftlik Satışları';
-            icon = '🚜';
           } else {
             key = '🏬 Mağaza Satışları';
             icon = '🏬';

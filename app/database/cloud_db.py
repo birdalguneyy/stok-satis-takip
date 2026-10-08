@@ -107,6 +107,10 @@ class CloudDatabase:
             pass
 
         self._init_firebase_optional()
+        try:
+            self.sync_shop_egg_sales_to_farm()
+        except Exception:
+            pass
         self._initialized = True
 
 
@@ -1367,7 +1371,8 @@ class CloudDatabase:
             discount_ratio = (total_amount / calculated_total) if (total_amount_override is not None and calculated_total > 0) else 1.0
             for item in cart_items:
                 p_name = str(item.get("product_name", "")).strip()
-                if "yumurta" in p_name.lower():
+                p_norm = p_name.replace("İ", "i").replace("I", "ı").lower()
+                if "yumurta" in p_norm:
                     orig_unit_price = float(item.get("unit_price", 0))
                     qty = float(item.get("quantity", 1))
                     effective_item_total = round(orig_unit_price * qty * discount_ratio, 2)
@@ -1767,6 +1772,11 @@ class CloudDatabase:
                 "UPDATE sales SET sold_at = ?, synced_to_cloud = 0 WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
                 (formatted_dt, numeric_sale_id, uid)
             )
+            # Dükkandan satılan yumurtanın çiftlik modülündeki kaydının tarihini de güncelle
+            conn.execute(
+                "UPDATE farm_egg_sales SET sale_date = ?, synced_to_cloud = 0 WHERE (note LIKE ? OR note LIKE ?) AND (user_id = ? OR user_id IS NULL)",
+                (formatted_dt, f"%Fiş #{numeric_sale_id}%", f"%Fiş #{numeric_sale_id})%", uid)
+            )
 
         if self.firestore_db:
             doc_id = f"u{uid}_s{numeric_sale_id}"
@@ -1779,6 +1789,18 @@ class CloudDatabase:
                     conn.execute("UPDATE sales SET synced_to_cloud = 1 WHERE id = ?", (numeric_sale_id,))
             except Exception as ex:
                 logger.warning(f"Firestore satış tarihi güncelleme uyarısı ({doc_id}): {ex}")
+
+            def _sync_upd_shop_farm_egg():
+                try:
+                    docs = self.firestore_db.collection("farm_egg_sales").where("user_id", "==", uid).stream()
+                    for d in docs:
+                        data = d.to_dict()
+                        n = str(data.get("note") or "")
+                        if f"Fiş #{numeric_sale_id}" in n:
+                            d.reference.update({"sale_date": formatted_dt})
+                except Exception as ex:
+                    logger.warning(f"Firestore farm egg sale date update warning: {ex}")
+            threading.Thread(target=_sync_upd_shop_farm_egg, daemon=True).start()
 
         return True, "Satış tarihi ve saati başarıyla güncellendi."
 
@@ -1826,73 +1848,62 @@ class CloudDatabase:
                 for s in sales:
                     s["items"] = items_by_sale.get(s["id"], [])
 
-            # Çiftlik yumurta satışlarını da satış geçmişine dahil et
-            farm_query = "SELECT * FROM farm_egg_sales WHERE (user_id = ? OR user_id IS NULL)"
-            f_params: list = [uid]
-            if start_date:
-                farm_query += " AND sale_date >= ?"
-                f_params.append(start_date + " 00:00:00")
-            if end_date:
-                farm_query += " AND sale_date <= ?"
-                f_params.append(end_date + " 23:59:59")
-            if customer_name and str(customer_name).strip():
-                farm_query += " AND customer_name LIKE ?"
-                f_params.append(f"%{customer_name.strip()}%")
-            farm_query += " ORDER BY sale_date DESC, id DESC LIMIT 500"
+        return sales
 
-            farm_rows = conn.execute(farm_query, f_params).fetchall()
-            existing_shop_sale_ids = set(sale_ids)
+    def sync_shop_egg_sales_to_farm(self, user_id: Optional[int] = None) -> int:
+        """Dükkanda satılmış olup henüz farm_egg_sales tablosuna aktarılmamış tüm yumurta satışlarını aktarır."""
+        uid = self._resolve_user_id(user_id) or 1
+        synced_count = 0
+        from app.services.farm_service import parse_egg_product
+        with self.db.get_connection() as conn:
+            query = """
+                SELECT si.id as item_id, si.sale_id, si.product_name, si.quantity, si.unit_price, si.subtotal,
+                       s.sold_at, s.customer_name, s.user_id
+                FROM sale_items si
+                JOIN sales s ON si.sale_id = s.id
+                WHERE (s.user_id = ? OR s.user_id IS NULL)
+            """
+            rows = conn.execute(query, (uid,)).fetchall()
+            for r in rows:
+                p_name = str(r["product_name"] or "").strip()
+                p_norm = p_name.replace("İ", "i").replace("I", "ı").lower()
+                if "yumurta" not in p_norm:
+                    continue
 
-            for f_row in farm_rows:
-                fes = dict(f_row)
-                note_str = str(fes.get("note") or "")
-                source_str = str(fes.get("source") or "")
+                sid = r["sale_id"]
+                existing = conn.execute(
+                    "SELECT id FROM farm_egg_sales WHERE (user_id = ? OR user_id IS NULL) AND (note LIKE ? OR note LIKE ?)",
+                    (uid, f"%Fiş #{sid}%", f"%Fiş #{sid})%")
+                ).fetchone()
+                if existing:
+                    continue
 
-                # Eğer bu kayıt dükkandaki bir satış fişinden türetilmişse ve o fiş hala mevcutsa,
-                # dükkan satış geçmişinde çift (mükerrer) görünmemesi için atla
-                if "dükkan" in source_str.lower() and "Fiş #" in note_str:
-                    m = re.search(r"Fiş #(\d+)", note_str)
-                    if m and int(m.group(1)) in existing_shop_sale_ids:
-                        continue
+                qty = float(r["quantity"] or 1)
+                subtot = float(r["subtotal"] or 0)
+                u_type, egg_boxes, egg_pieces = parse_egg_product(p_name, qty)
+                if u_type == "adet" and egg_pieces > 0:
+                    eff_price = round(subtot / egg_pieces, 2)
+                elif egg_boxes > 0:
+                    eff_price = round(subtot / egg_boxes, 2)
+                else:
+                    eff_price = float(r["unit_price"] or 0)
 
-                fid = fes["id"]
-                u_type = fes.get("unit_type") or "koli"
-                b_cnt = float(fes.get("box_count") or 0)
-                p_cnt = float(fes.get("piece_count") or 0) if fes.get("piece_count") else (b_cnt * 30.0 if u_type == "koli" else b_cnt)
-                qty = b_cnt if u_type == "koli" else p_cnt
-                u_str = "koli" if u_type == "koli" else "adet"
-                p_name = f"Yumurta ({b_cnt:g} Koli)" if u_type == "koli" else f"Yumurta ({int(p_cnt)} Adet)"
-                u_price = float(fes.get("unit_price") or 0)
-                t_amt = float(fes.get("total_amount") or (b_cnt * u_price))
-
-                sales.append({
-                    "id": f"farm_{fid}",
-                    "raw_id": fid,
-                    "is_farm": True,
-                    "user_id": fes.get("user_id"),
-                    "total_amount": t_amt,
-                    "item_count": 1,
-                    "sold_at": fes.get("sale_date"),
-                    "note": fes.get("note") or "Çiftlik Yumurta Satışı",
-                    "channel": "ciftlik",
-                    "customer_name": fes.get("customer_name"),
-                    "items": [
-                        {
-                            "sale_id": f"farm_{fid}",
-                            "product_id": None,
-                            "product_name": p_name,
-                            "barcode": "",
-                            "unit_price": u_price,
-                            "quantity": qty,
-                            "unit": u_str,
-                            "subtotal": t_amt,
-                        }
-                    ],
-                })
-
-        # Tüm satışları tarihe göre yeniden sırala
-        sales.sort(key=lambda s: str(s.get("sold_at") or ""), reverse=True)
-        return sales[:500]
+                egg_cust = r["customer_name"] or "Dükkan Perakende"
+                egg_note = f"Dükkan Satışı (Fiş #{sid}) - {p_name}"
+                self.add_farm_egg_sale(
+                    customer_name=egg_cust,
+                    box_count=egg_boxes,
+                    unit_price=eff_price,
+                    sale_date=r["sold_at"],
+                    source="Dükkan",
+                    note=egg_note,
+                    user_id=r["user_id"] or uid,
+                    unit_type=u_type,
+                    piece_count=egg_pieces,
+                    total_amount=subtot,
+                )
+                synced_count += 1
+        return synced_count
 
     def get_sales_analytics(
         self,
@@ -1976,7 +1987,6 @@ class CloudDatabase:
             channel_stats = {
                 "magaza": {"revenue": 0.0, "items": 0, "transactions": 0},
                 "internet": {"revenue": 0.0, "items": 0, "transactions": 0},
-                "ciftlik": {"revenue": 0.0, "items": 0, "transactions": 0},
             }
             for row in ch_rows:
                 k = row["channel"] if row["channel"] in channel_stats else "magaza"

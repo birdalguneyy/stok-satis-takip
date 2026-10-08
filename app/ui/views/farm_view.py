@@ -698,10 +698,12 @@ class FarmView(ctk.CTkFrame):
 
         # Periyot Seçici Düğmeler (Pazartesi-Pazartesi, Aylık, 3 Aylık, Tümü)
         periods = [
-            ("weekly", "📅 Haftalık (Pzt - Pzt)"),
-            ("monthly", "📅 Aylık"),
+            ("today", "📅 Bugün"),
+            ("yesterday", "⏮️ Dün"),
+            ("weekly", "📅 Bu Hafta"),
+            ("monthly", "📅 Bu Ay"),
             ("3_months", "📅 3 Aylık"),
-            ("all", "📅 Tüm Zamanlar"),
+            ("all", "📅 Tümü"),
         ]
 
         p_frame = ctk.CTkFrame(f_row, fg_color=("gray85", "gray25"), corner_radius=8)
@@ -842,7 +844,9 @@ class FarmView(ctk.CTkFrame):
         e_date = data.get("end_date")
         if s_date and e_date:
             period_name = {
-                "weekly": "Haftalık (Pzt - Pzt)",
+                "today": "Bugün",
+                "yesterday": "Dün",
+                "weekly": "Bu Hafta (Pzt - Pzt)",
                 "monthly": "Aylık",
                 "3_months": "3 Aylık",
                 "all": "Tüm Zamanlar",

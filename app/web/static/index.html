@@ -1318,15 +1318,32 @@
               </select>
             </div>
             <!-- Periyot Butonları -->
-            <div style="display:flex; gap:4px; background:var(--bg); padding:3px; border-radius:8px; border:1px solid var(--border);">
-              <button id="pbtn-weekly" class="btn" style="padding:5px 10px; font-size:0.75rem; background:#10B981; color:#fff;" onclick="setFarmPeriod('weekly')">📅 Haftalık (Pzt-Pzt)</button>
-              <button id="pbtn-monthly" class="btn btn-secondary" style="padding:5px 10px; font-size:0.75rem;" onclick="setFarmPeriod('monthly')">📅 Aylık</button>
-              <button id="pbtn-3_months" class="btn btn-secondary" style="padding:5px 10px; font-size:0.75rem;" onclick="setFarmPeriod('3_months')">📅 3 Aylık</button>
-              <button id="pbtn-all" class="btn btn-secondary" style="padding:5px 10px; font-size:0.75rem;" onclick="setFarmPeriod('all')">📅 Tümü</button>
+            <div style="display:flex; gap:4px; background:var(--bg); padding:3px; border-radius:8px; border:1px solid var(--border); flex-wrap:wrap;">
+              <button id="pbtn-today" class="btn" style="padding:5px 9px; font-size:0.75rem; background:#10B981; color:#fff;" onclick="setFarmPeriod('today')">📅 Bugün</button>
+              <button id="pbtn-yesterday" class="btn btn-secondary" style="padding:5px 9px; font-size:0.75rem;" onclick="setFarmPeriod('yesterday')">⏮️ Dün</button>
+              <button id="pbtn-weekly" class="btn btn-secondary" style="padding:5px 9px; font-size:0.75rem;" onclick="setFarmPeriod('weekly')">📅 Bu Hafta</button>
+              <button id="pbtn-monthly" class="btn btn-secondary" style="padding:5px 9px; font-size:0.75rem;" onclick="setFarmPeriod('monthly')">📅 Bu Ay</button>
+              <button id="pbtn-3_months" class="btn btn-secondary" style="padding:5px 9px; font-size:0.75rem;" onclick="setFarmPeriod('3_months')">📅 3 Aylık</button>
+              <button id="pbtn-all" class="btn btn-secondary" style="padding:5px 9px; font-size:0.75rem;" onclick="setFarmPeriod('all')">📅 Tümü</button>
+              <button id="pbtn-custom" class="btn btn-secondary" style="padding:5px 9px; font-size:0.75rem;" onclick="setFarmPeriod('custom')">🗓️ Özel Aralık</button>
             </div>
             <button class="btn btn-secondary" onclick="loadFarmAnalyticsWeb()" style="padding:6px 12px; font-size:0.8rem;">🔄 Yenile</button>
           </div>
-          <div id="farm-active-period-info" style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;"></div>
+
+          <!-- Özel Tarih Aralığı Seçici -->
+          <div id="farm-custom-date-container" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:10px; padding-top:10px; border-top:1px dashed var(--border);">
+            <div style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:0.75rem; font-weight:700; color:var(--text-muted);">Başlangıç:</label>
+              <input type="date" id="farm-custom-start" onchange="onFarmCustomDateChanged()" style="padding:5px 8px; border-radius:6px; border:1px solid var(--border); background:var(--input-bg); color:var(--text); font-size:0.8rem; font-weight:600;">
+            </div>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:0.75rem; font-weight:700; color:var(--text-muted);">Bitiş:</label>
+              <input type="date" id="farm-custom-end" onchange="onFarmCustomDateChanged()" style="padding:5px 8px; border-radius:6px; border:1px solid var(--border); background:var(--input-bg); color:var(--text); font-size:0.8rem; font-weight:600;">
+            </div>
+            <button type="button" class="btn" style="padding:5px 12px; font-size:0.78rem; width:auto; background:var(--accent); color:#fff; font-weight:700;" onclick="applyFarmCustomDateRange()">🔍 Tarihleri Filtrele</button>
+          </div>
+
+          <div id="farm-active-period-info" style="font-size:0.75rem; color:var(--text-muted); margin-top:8px; font-weight:600;"></div>
         </div>
 
         <!-- KPI Kartları -->
@@ -4871,9 +4888,10 @@
         const json = await res.json();
         _allSalesData = json.sales || [];
         _selectedSaleIds.clear();
-        _salesRenderLimit = 30;
+        _salesRenderLimit = 20;
         updateBulkDeleteButton();
         renderSalesHistoryView();
+        fetchTodayFarmEggData();
       } catch (err) {
         container.innerHTML = '<div style="text-align:center; color:var(--danger); padding:20px;">Satış geçmişi yüklenemedi!</div>';
       }
@@ -4883,13 +4901,23 @@
     }
 
     function handleSalesFilterInput(val) {
-      _salesRenderLimit = 30;
+      _salesRenderLimit = 20;
       _salesFilterQuery = (val || '').toLowerCase().trim();
       renderSalesHistoryView();
     }
 
-    function loadMoreSales() {
-      _salesRenderLimit += 30;
+    function loadMoreSales(count = 20) {
+      _salesRenderLimit += (count || 20);
+      renderSalesHistoryView();
+    }
+
+    function showAllSales() {
+      _salesRenderLimit = 999999;
+      renderSalesHistoryView();
+    }
+
+    function resetSalesRenderLimit() {
+      _salesRenderLimit = 20;
       renderSalesHistoryView();
     }
 
@@ -5093,6 +5121,189 @@
       `;
     }
 
+    function parseEggItem(pName, qty) {
+      const name = (pName || '').toLowerCase().trim();
+      const q = parseFloat(qty) || 1.0;
+      if (!name.includes('yumurta')) return null;
+
+      // 30'lu, 20'li, 15'li, 10'lu, 6'lı vb.
+      const m = name.match(/(\d+)\s*(?:['’`\-]?\s*(?:li|lı|lu|lü|lik|lık|luk|lük))/);
+      if (m) {
+        const pack = parseInt(m[1]);
+        if (pack === 30) {
+          return { isKoli: true, pureKoli: q, pieces: q * 30 };
+        } else {
+          return { isKoli: false, pureKoli: 0, pieces: q * pack };
+        }
+      }
+      if (name.includes('adet') || name.includes('tane')) {
+        return { isKoli: false, pureKoli: 0, pieces: q };
+      }
+      if (name.includes('koli')) {
+        return { isKoli: true, pureKoli: q, pieces: q * 30 };
+      }
+      return { isKoli: true, pureKoli: q, pieces: q * 30 };
+    }
+
+    let _todayFarmEggData = null;
+    let _fetchingFarmEggData = false;
+
+    async function fetchTodayFarmEggData() {
+      if (_fetchingFarmEggData) return;
+      _fetchingFarmEggData = true;
+      try {
+        const res = await apiFetch('/api/farm/analytics?period=today');
+        const json = await res.json();
+        if (json.ok && json.data) {
+          _todayFarmEggData = json.data;
+          const summaryEl = document.getElementById('sales-history-bottom-summary');
+          if (summaryEl) {
+            summaryEl.outerHTML = buildSalesBottomSummaryHTML(getFilteredSales());
+          }
+        }
+      } catch (e) {
+      } finally {
+        _fetchingFarmEggData = false;
+      }
+    }
+
+    function buildSalesBottomSummaryHTML(filteredList) {
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      const todayYMD = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+
+      const filtered = filteredList || [];
+
+      // 1. Bugünün satışlarını filtrele
+      const todaySales = (_allSalesData || []).filter(s => (s.sold_at || '').startsWith(todayYMD));
+      let todayTotalRevenue = 0;
+      let todayReceiptCount = todaySales.length;
+      let todayStoreRev = 0;
+      let todayStoreCount = 0;
+      let todayInternetRev = 0;
+      let todayInternetCount = 0;
+
+      let todayShopPureKoli = 0;
+      let todayShopPieces = 0;
+      let todayShopEggRev = 0;
+
+      todaySales.forEach(s => {
+        const amt = Number(s.total_amount || 0);
+        todayTotalRevenue += amt;
+        if (s.channel === 'internet') {
+          todayInternetRev += amt;
+          todayInternetCount++;
+        } else {
+          todayStoreRev += amt;
+          todayStoreCount++;
+        }
+
+        (s.items || []).forEach(it => {
+          const eggInfo = parseEggItem(it.product_name, it.quantity);
+          if (eggInfo) {
+            todayShopEggRev += Number(it.subtotal || 0);
+            if (eggInfo.isKoli) {
+              todayShopPureKoli += eggInfo.pureKoli;
+            } else {
+              todayShopPieces += eggInfo.pieces;
+            }
+          }
+        });
+      });
+
+      // Yumurta Toplamı: Eğer çiftlik modülü verisi varsa onu veya yerel toplamı kullan
+      let todayTotalKoli = 0;
+      let todayPureKoli = 0;
+      let todayPieces = 0;
+      let todayEggRev = todayShopEggRev;
+
+      if (_todayFarmEggData && _todayFarmEggData.total_boxes !== undefined) {
+        todayTotalKoli = _todayFarmEggData.total_boxes;
+        todayPureKoli = _todayFarmEggData.pure_koli_boxes !== undefined ? _todayFarmEggData.pure_koli_boxes : todayTotalKoli;
+        todayPieces = _todayFarmEggData.total_pieces || 0;
+        todayEggRev = Math.max(todayShopEggRev, _todayFarmEggData.total_revenue || 0);
+      } else {
+        todayPureKoli = Math.round(todayShopPureKoli * 100) / 100;
+        todayPieces = Math.round(todayShopPieces);
+        todayTotalKoli = Math.round((todayPureKoli + (todayPieces / 30.0)) * 100) / 100;
+      }
+
+      // 2. Filtrelenen fişlerin özeti
+      let filteredTotalRev = 0;
+      let filteredTotalItems = 0;
+      filtered.forEach(s => {
+        filteredTotalRev += Number(s.total_amount || 0);
+        filteredTotalItems += Number(s.item_count || (s.items ? s.items.length : 0));
+      });
+      const filteredAvg = filtered.length ? (filteredTotalRev / filtered.length) : 0;
+
+      let eggBadgeDetail = '';
+      if (todayTotalKoli > 0) {
+        if (todayPieces > 0) {
+          eggBadgeDetail = `(${todayPureKoli} Koli + ${todayPieces} Adet [30 Adet = 1 Koli])${todayEggRev > 0 ? ` • Yumurta Cirosu: ${todayEggRev.toFixed(2)} ₺` : ''}`;
+        } else {
+          eggBadgeDetail = `(${todayPureKoli} Koli [30'lu])${todayEggRev > 0 ? ` • Yumurta Cirosu: ${todayEggRev.toFixed(2)} ₺` : ''}`;
+        }
+      } else {
+        eggBadgeDetail = `Bugün dükkanda veya çiftlikte kaydedilmiş yumurta satışı bulunmuyor.`;
+      }
+
+      return `
+        <div id="sales-history-bottom-summary" style="background:var(--card); border:2px solid var(--accent); border-radius:16px; padding:18px; margin-top:24px; margin-bottom:16px; box-shadow:0 8px 24px rgba(0,0,0,0.12);">
+          <!-- 1. Bugün Satılan Yumurta Başlığı / Rozeti -->
+          <div style="background:linear-gradient(135deg, rgba(16,185,129,0.12), rgba(5,150,105,0.06)); border:1.5px solid #10B981; border-radius:12px; padding:14px 16px; margin-bottom:14px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+            <div style="display:flex; align-items:center; gap:12px;">
+              <span style="font-size:2rem; background:var(--card); padding:6px 10px; border-radius:10px; border:1px solid rgba(16,185,129,0.3); display:inline-flex;">🥚</span>
+              <div>
+                <div style="font-size:1.1rem; font-weight:800; color:var(--text);">
+                  ${todayTotalKoli > 0 ? `Bugün toplam <span style="color:#10B981;">${todayTotalKoli} koli</span> yumurta sattınız!` : `<span style="color:var(--text-muted);">Bugün henüz yumurta satışı yapılmadı.</span>`}
+                </div>
+                <div style="font-size:0.78rem; color:var(--text-muted); margin-top:2px; font-weight:600;">
+                  ${eggBadgeDetail}
+                </div>
+              </div>
+            </div>
+            ${todayTotalKoli > 0 ? `
+              <div style="text-align:right;">
+                <span style="font-size:0.68rem; color:var(--text-muted); font-weight:700; text-transform:uppercase; letter-spacing:0.5px; display:block;">Günün Yumurta Miktarı</span>
+                <span style="font-size:1.4rem; font-weight:900; color:#10B981;">${todayTotalKoli} Koli</span>
+              </div>
+            ` : ''}
+          </div>
+
+          <!-- 2. Kısa Satış Özeti Grid -->
+          <div style="font-size:0.85rem; font-weight:800; color:var(--text); margin-bottom:10px; display:flex; align-items:center; gap:6px;">
+            <span>📊</span> Günün Satış & Fiş Özeti
+          </div>
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px;">
+            <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:12px;">
+              <div style="font-size:0.7rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Bugünkü Toplam Ciro</div>
+              <div style="font-size:1.25rem; font-weight:900; color:var(--accent); margin:4px 0;">${todayTotalRevenue.toFixed(2)} ₺</div>
+              <div style="font-size:0.72rem; color:var(--text-muted);">${todayReceiptCount} fiş / sipariş</div>
+            </div>
+
+            <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:12px;">
+              <div style="font-size:0.7rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Kanal Dağılımı (Bugün)</div>
+              <div style="font-size:0.8rem; font-weight:700; color:#059669; margin-top:4px;">🏬 Mağaza: ${todayStoreRev.toFixed(2)} ₺ (${todayStoreCount} fiş)</div>
+              <div style="font-size:0.8rem; font-weight:700; color:#0284C7; margin-top:2px;">🌐 İnternet: ${todayInternetRev.toFixed(2)} ₺ (${todayInternetCount} sipariş)</div>
+            </div>
+
+            <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:12px;">
+              <div style="font-size:0.7rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Listelenen Toplam Tutar</div>
+              <div style="font-size:1.25rem; font-weight:900; color:#10B981; margin:4px 0;">${filteredTotalRev.toFixed(2)} ₺</div>
+              <div style="font-size:0.72rem; color:var(--text-muted);">${filtered.length} fiş • ${filteredTotalItems} ürün</div>
+            </div>
+
+            <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:12px;">
+              <div style="font-size:0.7rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Ortalama Fiş Tutarı</div>
+              <div style="font-size:1.25rem; font-weight:900; color:#F59E0B; margin:4px 0;">${filteredAvg.toFixed(2)} ₺</div>
+              <div style="font-size:0.72rem; color:var(--text-muted);">${filtered.length ? (filteredTotalItems / filtered.length).toFixed(1) : 0} ürün / fiş</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
     function renderSalesHistoryView() {
       const container = document.getElementById('sales-history-container');
       if (!container) return;
@@ -5101,8 +5312,10 @@
       const totalBadge = document.getElementById('sales-total-badge');
       if (totalBadge) totalBadge.innerText = `${filtered.length} Satış`;
 
+      const summaryHtml = buildSalesBottomSummaryHTML(filtered);
+
       if (!filtered.length) {
-        container.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:30px;">Aradığınız kriterlere uygun satış hareketi bulunamadı.</div>';
+        container.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:30px;">Aradığınız kriterlere uygun satış hareketi bulunamadı.</div>' + summaryHtml;
         updateBulkDeleteButton();
         return;
       }
@@ -5113,17 +5326,33 @@
       if (groupBy === 'none') {
         const toShow = filtered.slice(0, _salesRenderLimit);
         let cardsHtml = toShow.map(renderSaleCardHTML).join('');
+        let paginationHtml = '';
         if (filtered.length > _salesRenderLimit) {
           const remaining = filtered.length - _salesRenderLimit;
-          cardsHtml += `
-            <div style="text-align:center; padding:16px 0;">
-              <button type="button" class="btn btn-secondary" style="width:auto; margin:0 auto; padding:10px 24px; font-weight:700;" onclick="loadMoreSales()">
-                ⬇️ Daha Fazla Göster (${remaining} satış daha var)
-              </button>
+          paginationHtml = `
+            <div style="text-align:center; padding:16px; background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; margin:14px 0; display:flex; flex-direction:column; align-items:center; gap:8px;">
+              <div style="font-size:0.85rem; color:var(--text); font-weight:700;">
+                📋 ${toShow.length} / ${filtered.length} fiş gösteriliyor <span style="color:var(--text-muted); font-weight:500;">(${remaining} fiş daha var)</span>
+              </div>
+              <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">
+                <button type="button" class="btn btn-secondary" style="width:auto; padding:8px 18px; font-weight:700; font-size:0.82rem; border-color:var(--accent); color:var(--accent);" onclick="loadMoreSales(20)">
+                  ⬇️ Daha Fazla Göster (+20 Fiş)
+                </button>
+                <button type="button" class="btn" style="width:auto; padding:8px 18px; font-weight:700; font-size:0.82rem; background:var(--accent); color:#fff;" onclick="showAllSales()">
+                  👁️ Tümünü Göster (Tüm ${filtered.length} Fiş)
+                </button>
+              </div>
+            </div>
+          `;
+        } else if (filtered.length > 20) {
+          paginationHtml = `
+            <div style="text-align:center; padding:10px 0; font-size:0.8rem; color:var(--text-muted); font-weight:600; display:flex; align-items:center; justify-content:center; gap:10px;">
+              <span>✓ Tüm ${filtered.length} satış fişi listelendi</span>
+              <button type="button" class="btn btn-secondary" style="width:auto; padding:3px 10px; font-size:0.72rem;" onclick="resetSalesRenderLimit()">İlk 20'ye Dön</button>
             </div>
           `;
         }
-        container.innerHTML = cardsHtml;
+        container.innerHTML = cardsHtml + paginationHtml + summaryHtml;
         updateBulkDeleteButton();
         return;
       }
@@ -5179,7 +5408,7 @@
         `;
       }
 
-      container.innerHTML = html;
+      container.innerHTML = html + summaryHtml;
       updateBulkDeleteButton();
     }
 
@@ -6422,9 +6651,12 @@
       }
     }
 
+    let currentFarmPeriod = 'today';
+
     function setFarmPeriod(period) {
       currentFarmPeriod = period;
-      ['weekly', 'monthly', '3_months', 'all'].forEach(p => {
+      const allP = ['today', 'yesterday', 'weekly', 'monthly', '3_months', 'all', 'custom'];
+      allP.forEach(p => {
         const btn = document.getElementById('pbtn-' + p);
         if (btn) {
           if (p === period) {
@@ -6438,12 +6670,86 @@
           }
         }
       });
+
+      const sInput = document.getElementById('farm-custom-start');
+      const eInput = document.getElementById('farm-custom-end');
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      const toYMD = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+      if (period === 'today') {
+        const tStr = toYMD(now);
+        if (sInput) sInput.value = tStr;
+        if (eInput) eInput.value = tStr;
+      } else if (period === 'yesterday') {
+        const yDate = new Date(now);
+        yDate.setDate(now.getDate() - 1);
+        const yStr = toYMD(yDate);
+        if (sInput) sInput.value = yStr;
+        if (eInput) eInput.value = yStr;
+      } else if (period === 'weekly') {
+        const day = now.getDay();
+        const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+        const monday = new Date(now);
+        monday.setDate(diff);
+        const nextMon = new Date(monday);
+        nextMon.setDate(monday.getDate() + 7);
+        if (sInput) sInput.value = toYMD(monday);
+        if (eInput) eInput.value = toYMD(nextMon);
+      } else if (period === 'monthly') {
+        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+        const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        if (sInput) sInput.value = toYMD(firstDay);
+        if (eInput) eInput.value = toYMD(lastDay);
+      } else if (period === 'all') {
+        if (sInput) sInput.value = '';
+        if (eInput) eInput.value = '';
+      }
+
+      loadFarmAnalyticsWeb();
+    }
+
+    function onFarmCustomDateChanged() {
+      const allP = ['today', 'yesterday', 'weekly', 'monthly', '3_months', 'all', 'custom'];
+      currentFarmPeriod = 'custom';
+      allP.forEach(p => {
+        const btn = document.getElementById('pbtn-' + p);
+        if (btn) {
+          if (p === 'custom') {
+            btn.className = 'btn';
+            btn.style.background = '#10B981';
+            btn.style.color = '#fff';
+          } else {
+            btn.className = 'btn btn-secondary';
+            btn.style.background = 'transparent';
+            btn.style.color = 'var(--text)';
+          }
+        }
+      });
+    }
+
+    function applyFarmCustomDateRange() {
+      const sInput = document.getElementById('farm-custom-start');
+      const eInput = document.getElementById('farm-custom-end');
+      if (!sInput || !eInput || (!sInput.value && !eInput.value)) {
+        showToast("⚠️ Lütfen geçerli bir tarih aralığı seçin!");
+        return;
+      }
+      onFarmCustomDateChanged();
       loadFarmAnalyticsWeb();
     }
 
     async function loadFarmAnalyticsWeb() {
       const cust = document.getElementById('farm-filter-cust-select').value;
-      const url = `/api/farm/analytics?period=${currentFarmPeriod}&customer_name=${encodeURIComponent(cust)}`;
+      const sDate = document.getElementById('farm-custom-start') ? document.getElementById('farm-custom-start').value : '';
+      const eDate = document.getElementById('farm-custom-end') ? document.getElementById('farm-custom-end').value : '';
+
+      let url = `/api/farm/analytics?period=${currentFarmPeriod}&customer_name=${encodeURIComponent(cust)}`;
+      if (currentFarmPeriod === 'custom' || (sDate && eDate)) {
+        if (sDate) url += `&start_date=${sDate}`;
+        if (eDate) url += `&end_date=${eDate}`;
+      }
+
       try {
         const res = await apiFetch(url);
         const json = await res.json();
@@ -6451,9 +6757,22 @@
         const d = json.data;
 
         // Info
-        const pNames = { weekly: 'Haftalık (Pazartesi - Pazartesi)', monthly: 'Aylık', '3_months': '3 Aylık', all: 'Tüm Zamanlar' };
+        const pNames = {
+          today: 'Bugün',
+          yesterday: 'Dün',
+          weekly: 'Bu Hafta (Pzt - Pzt)',
+          monthly: 'Bu Ay',
+          '3_months': '3 Aylık',
+          all: 'Tüm Zamanlar',
+          custom: 'Özel Tarih Aralığı'
+        };
+        const periodTitle = pNames[currentFarmPeriod] || 'Filtreli Dönem';
         if (d.start_date && d.end_date) {
-          document.getElementById('farm-active-period-info').innerText = `📅 ${pNames[currentFarmPeriod] || ''}: ${d.start_date} ➔ ${d.end_date}`;
+          if (d.start_date === d.end_date) {
+            document.getElementById('farm-active-period-info').innerText = `📅 ${periodTitle}: ${d.start_date}`;
+          } else {
+            document.getElementById('farm-active-period-info').innerText = `📅 ${periodTitle}: ${d.start_date} ➔ ${d.end_date}`;
+          }
         } else {
           document.getElementById('farm-active-period-info').innerText = '📅 Tüm Zamanlar (Filtresiz)';
         }

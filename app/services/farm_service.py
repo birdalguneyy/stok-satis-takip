@@ -79,7 +79,14 @@ class FarmService:
         today = datetime.now().date()
         clean_period = (period or "all").lower().strip()
 
-        if clean_period == "weekly":
+        if clean_period in ("today", "bugün", "daily", "gunluk"):
+            return today.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d")
+
+        elif clean_period in ("yesterday", "dün"):
+            yesterday = today - timedelta(days=1)
+            return yesterday.strftime("%Y-%m-%d"), yesterday.strftime("%Y-%m-%d")
+
+        elif clean_period == "weekly":
             # Pazartesi = 0, Pazar = 6
             monday = today - timedelta(days=today.weekday())
             # Pazartesiden bir sonraki Pazartesiye kadar
@@ -99,7 +106,7 @@ class FarmService:
             start_date = today - timedelta(days=90)
             return start_date.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d")
 
-        elif clean_period == "custom":
+        elif clean_period in ("custom", "özel"):
             return custom_start, custom_end
 
         return None, None
@@ -155,10 +162,15 @@ class FarmService:
         - Müşteri adı belirtilmemişse: Tüm müşterilere yapılan genel toplam, ciro ve müşteri bazında döküm özeti
         - 30 adet = 1 koli formülüyle filtrelenen adetler koliye dönüştürülür.
         """
-        if period != "custom":
-            calc_start, calc_end = self.get_date_range_for_period(period)
-        else:
+        clean_p = (period or "all").lower().strip()
+        if clean_p in ("custom", "özel") or (start_date and end_date and clean_p in ("custom", "all")):
             calc_start, calc_end = start_date, end_date
+        else:
+            calc_start, calc_end = self.get_date_range_for_period(
+                period=clean_p,
+                custom_start=start_date,
+                custom_end=end_date,
+            )
 
         sales = self.cloud_db.get_farm_egg_sales(
             user_id=user_id,

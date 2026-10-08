@@ -106,6 +106,34 @@ class TestFarmModule(unittest.TestCase):
         all_data = self.farm_service.get_egg_sales_analysis(period="all")
         self.assertEqual(all_data["total_boxes"], 15.0)
 
+        # Bugün ve Dün periyot testleri
+        t_start, t_end = FarmService.get_date_range_for_period("today")
+        self.assertEqual(t_start, today.strftime("%Y-%m-%d"))
+        self.assertEqual(t_end, today.strftime("%Y-%m-%d"))
+
+        y_date = today - timedelta(days=1)
+        y_start, y_end = FarmService.get_date_range_for_period("yesterday")
+        self.assertEqual(y_start, y_date.strftime("%Y-%m-%d"))
+        self.assertEqual(y_end, y_date.strftime("%Y-%m-%d"))
+
+        # Dün bir satış ekle
+        self.farm_service.create_egg_sale(
+            customer_name="Dünkü Müşteri",
+            box_count=3.0,
+            unit_price=190.0,
+            sale_date=y_date.strftime("%Y-%m-%d 14:00:00"),
+        )
+        yesterday_data = self.farm_service.get_egg_sales_analysis(period="yesterday")
+        self.assertEqual(yesterday_data["total_boxes"], 3.0)
+
+        # Özel tarih aralığı testi (custom)
+        custom_data = self.farm_service.get_egg_sales_analysis(
+            period="custom",
+            start_date=y_date.strftime("%Y-%m-%d"),
+            end_date=y_date.strftime("%Y-%m-%d"),
+        )
+        self.assertEqual(custom_data["total_boxes"], 3.0)
+
     def test_customer_specific_filtering_and_all_customers_summary(self):
         self.farm_service.create_egg_sale(customer_name="Ali", box_count=4.0, unit_price=180.0)
         self.farm_service.create_egg_sale(customer_name="Ali", box_count=6.0, unit_price=180.0)

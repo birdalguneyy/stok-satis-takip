@@ -294,6 +294,46 @@ class TestFarmModule(unittest.TestCase):
         self.assertEqual(analysis["total_revenue"], 120.0 + 60.0 + 360.0) # 540 TL
         self.assertEqual(analysis["avg_box_price"], 180.0)
 
+    def test_farm_egg_sales_appear_in_shop_history_and_sync(self):
+        # 1. Çiftlikten yumurta satışı yapalım
+        ok, msg, f_sale_id = self.cloud_db.add_farm_egg_sale(
+            customer_name="Çiftlik Müşterisi Selim",
+            box_count=3.0,
+            unit_price=160.0,
+            sale_date="2026-10-08 10:15:00",
+            source="Ciftlik",
+            note="Organik Çiftlik Satışı",
+            unit_type="koli",
+        )
+        self.assertTrue(ok)
+        self.assertIsNotNone(f_sale_id)
+
+        # 2. Dükkan satış geçmişini çekelim
+        history = self.cloud_db.get_sales_history(customer_name="Çiftlik Müşterisi Selim")
+        self.assertTrue(any(s["customer_name"] == "Çiftlik Müşterisi Selim" for s in history))
+        selim_sale = next(s for s in history if s["customer_name"] == "Çiftlik Müşterisi Selim")
+        self.assertEqual(selim_sale["id"], f"farm_{f_sale_id}")
+        self.assertEqual(selim_sale["channel"], "ciftlik")
+        self.assertEqual(selim_sale["total_amount"], 480.0)
+        self.assertEqual(len(selim_sale["items"]), 1)
+        self.assertIn("3 Koli", selim_sale["items"][0]["product_name"])
+
+        # 3. sale_repository üzerinden de kontrol edelim (Masaüstü için)
+        repo_history = self.sale_repo.get_sales_history(customer_name="Çiftlik Müşterisi Selim")
+        self.assertTrue(any(s["customer_name"] == "Çiftlik Müşterisi Selim" for s in repo_history))
+
+        # 4. Tarih ve saat güncelleme testi (farm_ id ile)
+        ok_dt, msg_dt = self.cloud_db.update_sale_datetime(f"farm_{f_sale_id}", "2026-10-08 16:30:00")
+        self.assertTrue(ok_dt)
+        f_sales = self.cloud_db.get_farm_egg_sales(customer_name="Çiftlik Müşterisi Selim")
+        self.assertEqual(f_sales[0]["sale_date"], "2026-10-08 16:30:00")
+
+        # 5. Dükkan üzerinden çiftlik satışını silme testi (farm_ id ile)
+        ok_del, msg_del = self.cloud_db.delete_sale(f"farm_{f_sale_id}")
+        self.assertTrue(ok_del)
+        f_sales_after = self.cloud_db.get_farm_egg_sales(customer_name="Çiftlik Müşterisi Selim")
+        self.assertEqual(len(f_sales_after), 0)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -3,12 +3,13 @@ import hashlib
 import json
 import logging
 import os
+import re
 import secrets
 import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from app.config import DATA_DIR, DB_PATH, TURKEY_TZ, get_turkey_now, get_turkey_now_str
 from app.database.connection import Database
@@ -1437,19 +1438,34 @@ class CloudDatabase:
 
     def delete_sale(
         self,
-        sale_id: int,
+        sale_id: Union[int, str],
         user_id: Optional[int] = None,
         restore_stock: bool = True,
     ) -> tuple[bool, str]:
         uid = self._resolve_user_id(user_id)
         now = get_turkey_now_str()
+
+        # Handle farm egg sale deletion if ID has "farm_" prefix
+        s_id_str = str(sale_id).strip()
+        if s_id_str.startswith("farm_"):
+            try:
+                fid = int(s_id_str.replace("farm_", ""))
+                return self.delete_farm_egg_sale(fid, user_id=uid)
+            except ValueError:
+                return False, "Geçersiz çiftlik satış numarası!"
+
+        try:
+            numeric_sale_id = int(sale_id)
+        except (ValueError, TypeError):
+            return False, "Geçersiz satış numarası!"
+
         affected_product_ids = set()
 
         with self.db.get_connection() as conn:
             # Satışın bu kullanıcıya ait olduğunu doğrula (veya genel kullanıcı)
             sale = conn.execute(
                 "SELECT id, total_amount FROM sales WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
-                (sale_id, uid)
+                (numeric_sale_id, uid)
             ).fetchone()
 
             if not sale:
@@ -1459,7 +1475,7 @@ class CloudDatabase:
                 # Satıştaki ürünlerin stoklarını geri yükle (aktif ürünler için)
                 items = conn.execute(
                     "SELECT product_id, barcode, quantity FROM sale_items WHERE sale_id = ?",
-                    (sale_id,)
+                    (numeric_sale_id,)
                 ).fetchall()
                 for it in items:
                     pid = it["product_id"]
@@ -1500,15 +1516,20 @@ class CloudDatabase:
                                 affected_product_ids.add(p_row["id"])
 
             # Satış kalemlerini ve ana satış kaydını sil
-            conn.execute("DELETE FROM sale_items WHERE sale_id = ?", (sale_id,))
-            conn.execute("DELETE FROM sales WHERE id = ? AND (user_id = ? OR user_id IS NULL)", (sale_id, uid))
+            conn.execute("DELETE FROM sale_items WHERE sale_id = ?", (numeric_sale_id,))
+            conn.execute("DELETE FROM sales WHERE id = ? AND (user_id = ? OR user_id IS NULL)", (numeric_sale_id, uid))
+            # Varsa bu dükkan fişinden türemiş çiftlik yumurta kaydını da temizle
+            conn.execute(
+                "DELETE FROM farm_egg_sales WHERE (note LIKE ? OR note LIKE ?) AND (user_id = ? OR user_id IS NULL)",
+                (f"%Fiş #{numeric_sale_id}%", f"%Fiş #{numeric_sale_id})%", uid)
+            )
 
         if self.firestore_db:
             try:
-                doc_id = f"u{uid}_s{sale_id}"
+                doc_id = f"u{uid}_s{numeric_sale_id}"
                 self.firestore_db.collection("sales").document(doc_id).delete()
                 # Eski ID ile de silmeyi dene
-                self.firestore_db.collection("sales").document(str(sale_id)).delete()
+                self.firestore_db.collection("sales").document(str(numeric_sale_id)).delete()
             except Exception as e:
                 logger.warning(f"Firestore satış silme uyarısı: {e}")
 
@@ -1524,6 +1545,7 @@ class CloudDatabase:
                                     "stock_quantity": float(p_row["stock_quantity"]),
                                     "unit": p_row["unit"],
                                     "updated_at": now,
+                                    "synced_to_cloud": 1,
                                 })
                                 conn.execute("UPDATE products SET synced_to_cloud = 1 WHERE id = ?", (pid,))
                             except Exception as ex:
@@ -1533,7 +1555,7 @@ class CloudDatabase:
 
     def delete_sales_bulk(
         self,
-        sale_ids: List[int],
+        sale_ids: List[Union[int, str]],
         user_id: Optional[int] = None,
         restore_stock: bool = True,
     ) -> tuple[bool, str, int]:
@@ -1543,8 +1565,34 @@ class CloudDatabase:
 
         uid = self._resolve_user_id(user_id)
         now = get_turkey_now_str()
-        cleaned_ids = [int(sid) for sid in sale_ids if sid]
+
+        # Ayrıştır: Çiftlik satışları ve dükkan satışları
+        farm_ids: List[int] = []
+        cleaned_ids: List[int] = []
+        for sid in sale_ids:
+            s_str = str(sid).strip()
+            if s_str.startswith("farm_"):
+                try:
+                    farm_ids.append(int(s_str.replace("farm_", "")))
+                except ValueError:
+                    pass
+            else:
+                try:
+                    cleaned_ids.append(int(s_str))
+                except (ValueError, TypeError):
+                    pass
+
+        total_deleted = 0
+
+        # Çiftlik satışlarını sil
+        for fid in farm_ids:
+            ok, _ = self.delete_farm_egg_sale(fid, user_id=uid)
+            if ok:
+                total_deleted += 1
+
         if not cleaned_ids:
+            if total_deleted > 0:
+                return True, f"{total_deleted} adet satış başarıyla silindi.", total_deleted
             return False, "Geçersiz satış listesi!", 0
 
         affected_product_ids = set()
@@ -1557,10 +1605,10 @@ class CloudDatabase:
             ).fetchall()
             valid_ids = [r["id"] for r in valid_sales]
 
-            if not valid_ids:
+            if not valid_ids and total_deleted == 0:
                 return False, "Seçilen satışlar bulunamadı veya bu hesaba ait değil!", 0
 
-            if restore_stock:
+            if valid_ids and restore_stock:
                 v_placeholders = ",".join("?" for _ in valid_ids)
                 items = conn.execute(
                     f"SELECT product_id, barcode, quantity FROM sale_items WHERE sale_id IN ({v_placeholders})",
@@ -1604,12 +1652,18 @@ class CloudDatabase:
                             if p_row:
                                 affected_product_ids.add(p_row["id"])
 
-            v_placeholders = ",".join("?" for _ in valid_ids)
-            conn.execute(f"DELETE FROM sale_items WHERE sale_id IN ({v_placeholders})", valid_ids)
-            conn.execute(f"DELETE FROM sales WHERE id IN ({v_placeholders}) AND (user_id = ? OR user_id IS NULL)", (*valid_ids, uid))
-            deleted_count = len(valid_ids)
+            if valid_ids:
+                v_placeholders = ",".join("?" for _ in valid_ids)
+                conn.execute(f"DELETE FROM sale_items WHERE sale_id IN ({v_placeholders})", valid_ids)
+                conn.execute(f"DELETE FROM sales WHERE id IN ({v_placeholders}) AND (user_id = ? OR user_id IS NULL)", (*valid_ids, uid))
+                for vid in valid_ids:
+                    conn.execute(
+                        "DELETE FROM farm_egg_sales WHERE (note LIKE ? OR note LIKE ?) AND (user_id = ? OR user_id IS NULL)",
+                        (f"%Fiş #{vid}%", f"%Fiş #{vid})%", uid)
+                    )
+                total_deleted += len(valid_ids)
 
-        if self.firestore_db:
+        if self.firestore_db and valid_ids:
             for sid in valid_ids:
                 try:
                     self.firestore_db.collection("sales").document(f"u{uid}_s{sid}").delete()
@@ -1634,11 +1688,11 @@ class CloudDatabase:
                             except Exception as ex:
                                 logger.warning(f"Firestore ürün stok güncelleme uyarısı ({pid}): {ex}")
 
-        return True, f"{deleted_count} adet satış başarıyla silindi ve ürün stokları depoya geri yüklendi.", deleted_count
+        return True, f"{total_deleted} adet satış başarıyla silindi ve ürün stokları depoya geri yüklendi.", total_deleted
 
     def update_sale_datetime(
         self,
-        sale_id: int,
+        sale_id: Union[int, str],
         new_sold_at: str,
         user_id: Optional[int] = None,
     ) -> tuple[bool, str]:
@@ -1663,10 +1717,47 @@ class CloudDatabase:
 
         now = get_turkey_now_str()
 
+        # Çiftlik yumurta satışı kontrolü
+        s_id_str = str(sale_id).strip()
+        if s_id_str.startswith("farm_"):
+            try:
+                fid = int(s_id_str.replace("farm_", ""))
+            except ValueError:
+                return False, "Geçersiz çiftlik satış numarası!"
+
+            with self.db.get_connection() as conn:
+                row = conn.execute(
+                    "SELECT id FROM farm_egg_sales WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+                    (fid, uid)
+                ).fetchone()
+                if not row:
+                    return False, "Çiftlik satış kaydı bulunamadı veya bu hesaba ait değil!"
+                conn.execute(
+                    "UPDATE farm_egg_sales SET sale_date = ?, synced_to_cloud = 0 WHERE id = ?",
+                    (formatted_dt, fid)
+                )
+
+            if self.firestore_db:
+                def _sync_upd_egg():
+                    try:
+                        self.firestore_db.collection("farm_egg_sales").document(f"u{uid}_es{fid}").update({
+                            "sale_date": formatted_dt,
+                        })
+                    except Exception as ex:
+                        logger.warning(f"Firestore farm egg sale datetime update warning: {ex}")
+                threading.Thread(target=_sync_upd_egg, daemon=True).start()
+
+            return True, "Çiftlik satış tarihi ve saati başarıyla güncellendi."
+
+        try:
+            numeric_sale_id = int(sale_id)
+        except (ValueError, TypeError):
+            return False, "Geçersiz satış numarası!"
+
         with self.db.get_connection() as conn:
             sale = conn.execute(
                 "SELECT id FROM sales WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
-                (sale_id, uid)
+                (numeric_sale_id, uid)
             ).fetchone()
 
             if not sale:
@@ -1674,18 +1765,18 @@ class CloudDatabase:
 
             conn.execute(
                 "UPDATE sales SET sold_at = ?, synced_to_cloud = 0 WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
-                (formatted_dt, sale_id, uid)
+                (formatted_dt, numeric_sale_id, uid)
             )
 
         if self.firestore_db:
-            doc_id = f"u{uid}_s{sale_id}"
+            doc_id = f"u{uid}_s{numeric_sale_id}"
             try:
                 self.firestore_db.collection("sales").document(doc_id).update({
                     "sold_at": formatted_dt,
                     "updated_at": now,
                 })
                 with self.db.get_connection() as conn:
-                    conn.execute("UPDATE sales SET synced_to_cloud = 1 WHERE id = ?", (sale_id,))
+                    conn.execute("UPDATE sales SET synced_to_cloud = 1 WHERE id = ?", (numeric_sale_id,))
             except Exception as ex:
                 logger.warning(f"Firestore satış tarihi güncelleme uyarısı ({doc_id}): {ex}")
 
@@ -1715,27 +1806,93 @@ class CloudDatabase:
         sales = []
         with self.db.get_connection() as conn:
             rows = conn.execute(query, params).fetchall()
-            if not rows:
-                return []
-            sales = [dict(r) for r in rows]
+            sales = [dict(r) for r in rows] if rows else []
             sale_ids = [s["id"] for s in sales]
 
             # Batch fetch all sale_items in a single indexed query instead of N queries
-            placeholders = ",".join("?" for _ in sale_ids)
-            items_query = f"SELECT * FROM sale_items WHERE sale_id IN ({placeholders})"
-            items_rows = conn.execute(items_query, sale_ids).fetchall()
+            if sale_ids:
+                placeholders = ",".join("?" for _ in sale_ids)
+                items_query = f"SELECT * FROM sale_items WHERE sale_id IN ({placeholders})"
+                items_rows = conn.execute(items_query, sale_ids).fetchall()
 
-            items_by_sale: Dict[int, List[Dict[str, Any]]] = {}
-            for i in items_rows:
-                i_dict = dict(i)
-                sid = i_dict["sale_id"]
-                if sid not in items_by_sale:
-                    items_by_sale[sid] = []
-                items_by_sale[sid].append(i_dict)
+                items_by_sale: Dict[int, List[Dict[str, Any]]] = {}
+                for i in items_rows:
+                    i_dict = dict(i)
+                    sid = i_dict["sale_id"]
+                    if sid not in items_by_sale:
+                        items_by_sale[sid] = []
+                    items_by_sale[sid].append(i_dict)
 
-            for s in sales:
-                s["items"] = items_by_sale.get(s["id"], [])
-        return sales
+                for s in sales:
+                    s["items"] = items_by_sale.get(s["id"], [])
+
+            # Çiftlik yumurta satışlarını da satış geçmişine dahil et
+            farm_query = "SELECT * FROM farm_egg_sales WHERE (user_id = ? OR user_id IS NULL)"
+            f_params: list = [uid]
+            if start_date:
+                farm_query += " AND sale_date >= ?"
+                f_params.append(start_date + " 00:00:00")
+            if end_date:
+                farm_query += " AND sale_date <= ?"
+                f_params.append(end_date + " 23:59:59")
+            if customer_name and str(customer_name).strip():
+                farm_query += " AND customer_name LIKE ?"
+                f_params.append(f"%{customer_name.strip()}%")
+            farm_query += " ORDER BY sale_date DESC, id DESC LIMIT 500"
+
+            farm_rows = conn.execute(farm_query, f_params).fetchall()
+            existing_shop_sale_ids = set(sale_ids)
+
+            for f_row in farm_rows:
+                fes = dict(f_row)
+                note_str = str(fes.get("note") or "")
+                source_str = str(fes.get("source") or "")
+
+                # Eğer bu kayıt dükkandaki bir satış fişinden türetilmişse ve o fiş hala mevcutsa,
+                # dükkan satış geçmişinde çift (mükerrer) görünmemesi için atla
+                if "dükkan" in source_str.lower() and "Fiş #" in note_str:
+                    m = re.search(r"Fiş #(\d+)", note_str)
+                    if m and int(m.group(1)) in existing_shop_sale_ids:
+                        continue
+
+                fid = fes["id"]
+                u_type = fes.get("unit_type") or "koli"
+                b_cnt = float(fes.get("box_count") or 0)
+                p_cnt = float(fes.get("piece_count") or 0) if fes.get("piece_count") else (b_cnt * 30.0 if u_type == "koli" else b_cnt)
+                qty = b_cnt if u_type == "koli" else p_cnt
+                u_str = "koli" if u_type == "koli" else "adet"
+                p_name = f"Yumurta ({b_cnt:g} Koli)" if u_type == "koli" else f"Yumurta ({int(p_cnt)} Adet)"
+                u_price = float(fes.get("unit_price") or 0)
+                t_amt = float(fes.get("total_amount") or (b_cnt * u_price))
+
+                sales.append({
+                    "id": f"farm_{fid}",
+                    "raw_id": fid,
+                    "is_farm": True,
+                    "user_id": fes.get("user_id"),
+                    "total_amount": t_amt,
+                    "item_count": 1,
+                    "sold_at": fes.get("sale_date"),
+                    "note": fes.get("note") or "Çiftlik Yumurta Satışı",
+                    "channel": "ciftlik",
+                    "customer_name": fes.get("customer_name"),
+                    "items": [
+                        {
+                            "sale_id": f"farm_{fid}",
+                            "product_id": None,
+                            "product_name": p_name,
+                            "barcode": "",
+                            "unit_price": u_price,
+                            "quantity": qty,
+                            "unit": u_str,
+                            "subtotal": t_amt,
+                        }
+                    ],
+                })
+
+        # Tüm satışları tarihe göre yeniden sırala
+        sales.sort(key=lambda s: str(s.get("sold_at") or ""), reverse=True)
+        return sales[:500]
 
     def get_sales_analytics(
         self,
@@ -1819,6 +1976,7 @@ class CloudDatabase:
             channel_stats = {
                 "magaza": {"revenue": 0.0, "items": 0, "transactions": 0},
                 "internet": {"revenue": 0.0, "items": 0, "transactions": 0},
+                "ciftlik": {"revenue": 0.0, "items": 0, "transactions": 0},
             }
             for row in ch_rows:
                 k = row["channel"] if row["channel"] in channel_stats else "magaza"

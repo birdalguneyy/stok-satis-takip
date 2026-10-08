@@ -747,7 +747,7 @@ def get_sales_forecast():
     return jsonify(forecast)
 
 
-@app.route("/api/sales/<int:sale_id>", methods=["DELETE"])
+@app.route("/api/sales/<sale_id>", methods=["DELETE"])
 def delete_sale_route(sale_id):
     user_id = get_current_user_id()
     if user_id is None:
@@ -760,8 +760,8 @@ def delete_sale_route(sale_id):
     return jsonify({"ok": ok, "message": msg})
 
 
-@app.route("/api/sales/<int:sale_id>/datetime", methods=["POST", "PUT"])
-def update_sale_datetime_route(sale_id: int):
+@app.route("/api/sales/<sale_id>/datetime", methods=["POST", "PUT"])
+def update_sale_datetime_route(sale_id):
     user_id = get_current_user_id()
     if user_id is None:
         return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401

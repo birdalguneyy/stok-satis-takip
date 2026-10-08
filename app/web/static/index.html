@@ -6322,7 +6322,7 @@
     // ÇİFTLİK YÖNETİM MODÜLÜ (2805 ŞİFRE & İŞ MANTIĞI)
 
     // ════════════════════════════════════════════════════════════════════
-    let currentFarmPeriod = 'weekly';
+    let currentFarmPeriod = 'today';
 
     function openFarmModal() {
       if (sessionStorage.getItem('farm_unlocked') === 'true') {
@@ -6671,8 +6671,6 @@
         showToast("Silinemedi!", "danger");
       }
     }
-
-    let currentFarmPeriod = 'today';
 
     function setFarmPeriod(period) {
       currentFarmPeriod = period;

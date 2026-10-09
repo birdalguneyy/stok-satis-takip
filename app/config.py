@@ -38,3 +38,6 @@ CURRENCY_SYMBOL = "₺"
 WINDOW_MIN_WIDTH = 1100
 WINDOW_MIN_HEIGHT = 700
 TOAST_DURATION_MS = 3000
+
+# Sistem Giriş Güvenlik Kilidi PIN Kodu (Yetkisiz internet erişimini ve botları engellemek için)
+GATE_PIN = os.getenv("GATE_PIN", "2805")

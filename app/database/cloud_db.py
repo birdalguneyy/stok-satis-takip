@@ -121,6 +121,10 @@ class CloudDatabase:
         except Exception:
             pass
 
+        self._hydration_completed = False
+        self._hydration_lock = threading.Lock()
+        self._last_pull_timestamp = 0.0
+
         self._init_firebase_optional()
         try:
             self.sync_shop_egg_sales_to_farm()
@@ -200,12 +204,6 @@ class CloudDatabase:
                     # Varsayılan uygulama zaten başlatılmışsa geç
                     pass
                 self.firestore_db = firestore.client()
-                logger.info("Firebase Firestore Cloud bağlantısı başarıyla kuruldu.")
-                # İlk verileri arka planda güvenle çek
-                try:
-                    threading.Thread(target=self.pull_all_from_firebase, daemon=True).start()
-                except Exception:
-                    pass
             else:
                 logger.info("Firebase kimlik bilgileri bulunamadı, SQLite yerel mod aktif.")
         except Exception as exc:
@@ -217,6 +215,41 @@ class CloudDatabase:
             return True
         self._init_firebase_optional()
         return self.firestore_db is not None
+
+    def ensure_initial_hydration(self, force: bool = False) -> bool:
+        """Render konteyneri yeni dağıtıldığında veya SQLite sıfırlandığında,
+        buluttaki tüm verileri SQLite'a tek seferlik aktarır.
+        SQLite'ta zaten veri varsa (ürün, satış vb.) Firestore'u boş yere okumaz (READ harcamaz).
+        """
+        if not self.ensure_firebase():
+            return False
+
+        with self._hydration_lock:
+            if self._hydration_completed and not force:
+                return True
+
+            with self.db.get_connection() as conn:
+                p_cnt = conn.execute("SELECT COUNT(*) FROM products").fetchone()[0]
+                s_cnt = conn.execute("SELECT COUNT(*) FROM sales").fetchone()[0]
+
+            if not force and (p_cnt > 0 or s_cnt > 0):
+                self._hydration_completed = True
+                return True
+
+            now_ts = time.time()
+            if not force and (now_ts - self._last_pull_timestamp < 60):
+                return True
+
+            logger.info("Firestore ilk veri yüklemesi (initial hydration) başlatılıyor...")
+            try:
+                pulled = self.pull_all_from_firebase()
+                self._hydration_completed = True
+                self._last_pull_timestamp = time.time()
+                logger.info(f"Firestore ilk veri yüklemesi tamamlandı: {pulled} kayıt yerel SQLite'a aktarıldı.")
+                return True
+            except Exception as e:
+                logger.warning(f"Firestore initial hydration hatası: {e}")
+                return False
 
     # ════════════════════════════════════════════════════════════════════
     # BULUTTAN YEREL VERİTABANINA TAM VERİ AKTARIMI (HYDRATION)
@@ -785,9 +818,14 @@ class CloudDatabase:
     # ════════════════════════════════════════════════════════════════════
     # FİREBASE OTOMATİK SENKRONİZASYON (2-WAY OFFLINE-FIRST SYNC)
     # ════════════════════════════════════════════════════════════════════
-    def sync_offline_data_with_firebase(self, user_id: Optional[int] = None) -> Dict[str, Any]:
+    def push_offline_data_to_firebase(self, user_id: Optional[int] = None) -> Dict[str, Any]:
+        """Arka plan servisi için SADECE gönderilmemiş verileri Firestore'a aktarır (0 READ)."""
+        return self.sync_offline_data_with_firebase(user_id=user_id, allow_pull=False)
+
+    def sync_offline_data_with_firebase(self, user_id: Optional[int] = None, allow_pull: bool = False) -> Dict[str, Any]:
         """Yerel SQLite veritabanında henüz buluta gönderilmemiş (synced_to_cloud = 0) kayıtları
-        Firebase Firestore'a aktarır ve Firestore'daki güncel verileri yerelle senkronize eder.
+        Firebase Firestore'a aktarır (PUSH).
+        allow_pull True ve 60sn cooldown dolmuşsa buluttan güncellemeleri de çeker (PULL).
         """
         if not self.firestore_db:
             self._init_firebase_optional()
@@ -804,6 +842,31 @@ class CloudDatabase:
 
         try:
             with self.db.get_connection() as conn:
+                # 0. Hızlı kontrol: Gönderilecek veri yoksa ve allow_pull False ise Firestore'u hiç yorma!
+                unsynced_exists = False
+                for tbl in ["users", "categories", "products", "sales", "expenses", "farm_customers", "farm_egg_sales", "farm_feed_purchases"]:
+                    try:
+                        q = f"SELECT 1 FROM {tbl} WHERE synced_to_cloud = 0"
+                        params = []
+                        if user_id is not None and tbl != "users":
+                            q += " AND (user_id = ? OR user_id IS NULL)"
+                            params.append(user_id)
+                        q += " LIMIT 1"
+                        if conn.execute(q, params).fetchone():
+                            unsynced_exists = True
+                            break
+                    except Exception:
+                        pass
+
+                key_file = DATA_DIR / "gemini_key.txt"
+                if not unsynced_exists and not key_file.exists() and not allow_pull:
+                    return {
+                        "synced": True,
+                        "reason": "✅ Tüm verileriniz bulut ile eşitlendi ve güncel.",
+                        "pushed": 0,
+                        "pulled": 0,
+                    }
+
                 # 1. PUSH UN-SYNCED USERS
                 un_users = conn.execute("SELECT * FROM users WHERE synced_to_cloud = 0").fetchall()
                 for u in un_users:
@@ -978,8 +1041,15 @@ class CloudDatabase:
                     except Exception as ex:
                         logger.warning(f"Gemini API key Firestore aktarma uyarısı: {ex}")
 
-            # 7. PULL REMOTE CHANGES (Strictly for this user!)
-            pulled_count = self.pull_all_from_firebase(user_id=user_id)
+            # 7. PULL REMOTE CHANGES (Sadece allow_pull True ise ve 60sn cooldown dolmuşsa)
+            pulled_count = 0
+            now_ts = time.time()
+            if allow_pull and (now_ts - self._last_pull_timestamp >= 60):
+                try:
+                    pulled_count = self.pull_all_from_firebase(user_id=user_id)
+                    self._last_pull_timestamp = now_ts
+                except Exception as ex:
+                    logger.warning(f"Firestore senkronizasyon çekme uyarısı: {ex}")
 
             if pushed_count == 0 and pulled_count == 0:
                 reason = "✅ Tüm verileriniz bulut ile eşitlendi ve güncel."
@@ -1205,9 +1275,9 @@ class CloudDatabase:
                 (uid,),
             ).fetchall()
             cats = [{"id": r["id"], "name": r["name"]} for r in rows]
-            if not cats and self.ensure_firebase():
+            if not cats and not self._hydration_completed:
                 try:
-                    self.pull_all_from_firebase(user_id=uid)
+                    self.ensure_initial_hydration()
                     rows = conn.execute(
                         "SELECT id, name FROM categories WHERE (user_id = ? OR user_id IS NULL) ORDER BY name ASC",
                         (uid,),
@@ -1308,9 +1378,9 @@ class CloudDatabase:
             rows = conn.execute(query, params).fetchall()
             products = [dict(r) for r in rows]
 
-            if not products and self.ensure_firebase():
+            if not products and not self._hydration_completed and not search:
                 try:
-                    self.pull_all_from_firebase(user_id=uid)
+                    self.ensure_initial_hydration(force=True)
                     rows = conn.execute(query, params).fetchall()
                     products = [dict(r) for r in rows]
                 except Exception as e:
@@ -2222,10 +2292,10 @@ class CloudDatabase:
 
         sales = _fetch_with_items(query, params)
 
-        # Eğer yerel veritabanında satış bulunamadıysa ve Firebase aktifse, buluttan çekip tekrar dene
-        if not sales and self.ensure_firebase():
+        # Eğer yerel veritabanında satış bulunamadıysa ve henüz buluttan çekilmediyse, tek seferlik hidrasyon dene
+        if not sales and not self._hydration_completed:
             try:
-                self.pull_all_from_firebase(user_id=uid)
+                self.ensure_initial_hydration(force=True)
                 sales = _fetch_with_items(query, params)
             except Exception as e_pull:
                 logger.warning(f"get_sales_history Firestore otomatik çekme uyarısı: {e_pull}")
@@ -2315,9 +2385,9 @@ class CloudDatabase:
 
             s_row = conn.execute(sales_query, s_params).fetchone()
             total_tx = s_row["total_transactions"] if s_row else 0
-            if total_tx == 0 and self.ensure_firebase():
+            if total_tx == 0 and not self._hydration_completed:
                 try:
-                    self.pull_all_from_firebase(user_id=uid)
+                    self.ensure_initial_hydration()
                     s_row = conn.execute(sales_query, s_params).fetchone()
                     total_tx = s_row["total_transactions"] if s_row else 0
                 except Exception:
@@ -2598,9 +2668,9 @@ class CloudDatabase:
             rows = conn.execute(query, params).fetchall()
             expenses = [dict(r) for r in rows]
 
-            if not expenses and self.ensure_firebase():
+            if not expenses and not self._hydration_completed:
                 try:
-                    self.pull_all_from_firebase(user_id=uid)
+                    self.ensure_initial_hydration()
                     rows = conn.execute(query, params).fetchall()
                     expenses = [dict(r) for r in rows]
                 except Exception:
@@ -2766,7 +2836,8 @@ class CloudDatabase:
                                 )
                             ret_user = dict(data)
                             ret_user.pop("password_hash", None)
-                            self.pull_all_from_firebase(user_id=uid)
+                            if not self._hydration_completed:
+                                self.ensure_initial_hydration()
                             return True, f"Mevcut hesabınız doğrulandı ve '{data['company_name']}' firmasıyla oturum açıldı!", ret_user
                         else:
                             return False, "Bu telefon veya e-posta ile kayıtlı bir hesap zaten var. Lütfen giriş yapınız.", None
@@ -2889,7 +2960,8 @@ class CloudDatabase:
                 except Exception:
                     pass
             user_dict.pop("password_hash", None)
-            self.pull_all_from_firebase(user_id=user_dict["id"])
+            if not self._hydration_completed:
+                self.ensure_initial_hydration()
             return True, f"Hoş geldiniz, {user_dict.get('full_name', '')} ({user_dict.get('company_name', '')})", user_dict
 
         # 2. SQLite'da bulunamazsa Firestore'dan sorgula
@@ -2933,7 +3005,8 @@ class CloudDatabase:
                                 )
                             user_dict = dict(data)
                             user_dict.pop("password_hash", None)
-                            self.pull_all_from_firebase(user_id=uid)
+                            if not self._hydration_completed:
+                                self.ensure_initial_hydration()
                             return True, f"Hoş geldiniz, {user_dict.get('full_name', '')} ({user_dict.get('company_name', '')})", user_dict
                         else:
                             return False, "Girilen şifre hatalı! Lütfen kontrol ediniz.", None
@@ -3238,9 +3311,9 @@ class CloudDatabase:
             rows = conn.execute(query, params).fetchall()
             sales = [dict(r) for r in rows]
 
-            if not sales and self.ensure_firebase():
+            if not sales and not self._hydration_completed:
                 try:
-                    self.pull_all_from_firebase(user_id=uid)
+                    self.ensure_initial_hydration()
                     rows = conn.execute(query, params).fetchall()
                     sales = [dict(r) for r in rows]
                 except Exception:
@@ -3387,9 +3460,9 @@ class CloudDatabase:
             rows = conn.execute(query, params).fetchall()
             purchases = [dict(r) for r in rows]
 
-            if not purchases and self.ensure_firebase():
+            if not purchases and not self._hydration_completed:
                 try:
-                    self.pull_all_from_firebase(user_id=uid)
+                    self.ensure_initial_hydration()
                     rows = conn.execute(query, params).fetchall()
                     purchases = [dict(r) for r in rows]
                 except Exception:

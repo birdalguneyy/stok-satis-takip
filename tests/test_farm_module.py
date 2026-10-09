@@ -203,8 +203,9 @@ class TestFarmModule(unittest.TestCase):
         self.assertIn("Dükkan Satışı", egg_entry["note"])
 
     def test_flask_api_farm_endpoints(self):
-        from app.web.web_server import app
+        from app.web.web_server import app, EXPECTED_GATE_TOKEN
         client = app.test_client()
+        client.environ_base = {"HTTP_X_GATE_TOKEN": EXPECTED_GATE_TOKEN}
 
         # 1. Şifre kontrolü (2805)
         res_fail = client.post("/api/farm/auth-check", json={"password": "1234"})

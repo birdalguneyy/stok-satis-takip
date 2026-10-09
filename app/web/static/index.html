@@ -578,9 +578,68 @@
     .modal-card table tr:hover td {
       background: var(--card-hover);
     }
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      20%, 60% { transform: translateX(-10px); }
+      40%, 80% { transform: translateX(10px); }
+    }
+    .gate-key:active {
+      transform: scale(0.92);
+      background: rgba(255, 255, 255, 0.18) !important;
+    }
   </style>
 </head>
 <body>
+
+  <!-- ════════════════════════════════════════════════════════════════════ -->
+  <!-- 🔒 SİSTEM ERİŞİM GÜVENLİK KİLİDİ (2805 MASTER PIN GİRİŞİ) -->
+  <!-- ════════════════════════════════════════════════════════════════════ -->
+  <div id="gate-lock-overlay" style="position:fixed; inset:0; z-index:9999999; background:radial-gradient(circle at center, #1e293b 0%, #0b0f19 100%); display:flex; align-items:center; justify-content:center; padding:16px;">
+    <div id="gate-lock-card" style="width:100%; max-width:380px; background:rgba(30, 41, 59, 0.94); border:1px solid rgba(255, 255, 255, 0.14); backdrop-filter:blur(24px); border-radius:24px; padding:28px 24px; box-shadow:0 25px 60px rgba(0,0,0,0.7); text-align:center; color:#f8fafc; user-select:none;">
+      
+      <div style="width:68px; height:68px; margin:0 auto 16px; background:linear-gradient(135deg, rgba(79, 70, 229, 0.25), rgba(16, 185, 129, 0.25)); border:1px solid rgba(99, 102, 241, 0.4); border-radius:20px; display:flex; align-items:center; justify-content:center; font-size:2rem; box-shadow:0 8px 24px rgba(79, 70, 229, 0.3);">
+        🔒
+      </div>
+
+      <h2 style="font-size:1.35rem; font-weight:800; margin:0 0 6px; letter-spacing:-0.3px; color:#ffffff;">Sistem Koruması</h2>
+      <p style="font-size:0.85rem; color:#94a3b8; margin:0 0 20px; line-height:1.4;">Yetkili Erişimi — Lütfen 4 Haneli PIN Kodunu Giriniz</p>
+
+      <!-- PIN GÖSTERGE NOKTALARI -->
+      <div id="gate-pin-dots" style="display:flex; justify-content:center; gap:16px; margin-bottom:24px;">
+        <div class="gate-dot" id="gate-dot-0" style="width:16px; height:16px; border-radius:50%; border:2px solid rgba(255,255,255,0.3); background:transparent; transition:all 0.2s cubic-bezier(0.4, 0, 0.2, 1);"></div>
+        <div class="gate-dot" id="gate-dot-1" style="width:16px; height:16px; border-radius:50%; border:2px solid rgba(255,255,255,0.3); background:transparent; transition:all 0.2s cubic-bezier(0.4, 0, 0.2, 1);"></div>
+        <div class="gate-dot" id="gate-dot-2" style="width:16px; height:16px; border-radius:50%; border:2px solid rgba(255,255,255,0.3); background:transparent; transition:all 0.2s cubic-bezier(0.4, 0, 0.2, 1);"></div>
+        <div class="gate-dot" id="gate-dot-3" style="width:16px; height:16px; border-radius:50%; border:2px solid rgba(255,255,255,0.3); background:transparent; transition:all 0.2s cubic-bezier(0.4, 0, 0.2, 1);"></div>
+      </div>
+
+      <!-- GİZLİ / KLAVYE GİRDİ ALANI -->
+      <input type="password" id="gate-pin-input" maxlength="4" inputmode="numeric" pattern="[0-9]*" autocomplete="off" style="position:absolute; opacity:0; pointer-events:none; left:-9999px;">
+
+      <!-- HATA MESAJI -->
+      <div id="gate-pin-error" style="min-height:22px; font-size:0.82rem; font-weight:600; color:#ef4444; margin-bottom:12px; display:none;"></div>
+
+      <!-- TUŞ TAKIMI (NUMPAD) -->
+      <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; max-width:280px; margin:0 auto 10px;">
+        <button type="button" class="gate-key" onclick="handleGateKey('1')" style="height:56px; font-size:1.45rem; font-weight:700; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:16px; color:#ffffff; cursor:pointer; transition:all 0.15s; outline:none;">1</button>
+        <button type="button" class="gate-key" onclick="handleGateKey('2')" style="height:56px; font-size:1.45rem; font-weight:700; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:16px; color:#ffffff; cursor:pointer; transition:all 0.15s; outline:none;">2</button>
+        <button type="button" class="gate-key" onclick="handleGateKey('3')" style="height:56px; font-size:1.45rem; font-weight:700; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:16px; color:#ffffff; cursor:pointer; transition:all 0.15s; outline:none;">3</button>
+        <button type="button" class="gate-key" onclick="handleGateKey('4')" style="height:56px; font-size:1.45rem; font-weight:700; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:16px; color:#ffffff; cursor:pointer; transition:all 0.15s; outline:none;">4</button>
+        <button type="button" class="gate-key" onclick="handleGateKey('5')" style="height:56px; font-size:1.45rem; font-weight:700; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:16px; color:#ffffff; cursor:pointer; transition:all 0.15s; outline:none;">5</button>
+        <button type="button" class="gate-key" onclick="handleGateKey('6')" style="height:56px; font-size:1.45rem; font-weight:700; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:16px; color:#ffffff; cursor:pointer; transition:all 0.15s; outline:none;">6</button>
+        <button type="button" class="gate-key" onclick="handleGateKey('7')" style="height:56px; font-size:1.45rem; font-weight:700; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:16px; color:#ffffff; cursor:pointer; transition:all 0.15s; outline:none;">7</button>
+        <button type="button" class="gate-key" onclick="handleGateKey('8')" style="height:56px; font-size:1.45rem; font-weight:700; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:16px; color:#ffffff; cursor:pointer; transition:all 0.15s; outline:none;">8</button>
+        <button type="button" class="gate-key" onclick="handleGateKey('9')" style="height:56px; font-size:1.45rem; font-weight:700; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:16px; color:#ffffff; cursor:pointer; transition:all 0.15s; outline:none;">9</button>
+        <button type="button" class="gate-key" onclick="handleGateKey('backspace')" style="height:56px; font-size:1.15rem; font-weight:700; background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.25); border-radius:16px; color:#f87171; cursor:pointer; transition:all 0.15s; outline:none;">⌫</button>
+        <button type="button" class="gate-key" onclick="handleGateKey('0')" style="height:56px; font-size:1.45rem; font-weight:700; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:16px; color:#ffffff; cursor:pointer; transition:all 0.15s; outline:none;">0</button>
+        <button type="button" class="gate-key" onclick="handleGateKey('submit')" style="height:56px; font-size:1.15rem; font-weight:700; background:linear-gradient(135deg, #10b981, #059669); border:none; border-radius:16px; color:#ffffff; cursor:pointer; transition:all 0.15s; outline:none; box-shadow:0 4px 14px rgba(16,185,129,0.3);">✓</button>
+      </div>
+
+      <div style="font-size:0.75rem; color:#64748b; margin-top:14px;">
+        Klavyeden veya ekrandan 4 haneli şifrenizi tuşlayabilirsiniz.
+      </div>
+
+    </div>
+  </div>
 
   <!-- ════════════════════════════════════════════════════════════════════ -->
   <!-- KURUMSAL ÜYELİK VE GİRİŞ YAPMA MODAL OVERLAY -->
@@ -1429,6 +1488,7 @@
       <div id="pwa-install-badge" class="status-badge" style="display:none;" onclick="installPWA()">📲 Yükle</div>
       <div class="status-badge" onclick="cycleTheme()" id="theme-toggle-btn" title="Tema Değiştir">☀️ Açık</div>
       <div class="status-badge" onclick="openAIKeyModal()">🔑 AI</div>
+      <div class="status-badge" onclick="lockAppNow()" id="gate-lock-btn" title="Uygulamayı Kilitle" style="cursor:pointer; background:rgba(239,68,68,0.12); color:#ef4444; border-color:rgba(239,68,68,0.25); font-weight:700;">🔒 Kilitle</div>
     </div>
   </header>
 
@@ -2049,11 +2109,26 @@
 
     async function fetchWithAuth(url, options = {}) {
       const token = localStorage.getItem('stok_auth_token') || sessionStorage.getItem('stok_auth_token');
+      const gateToken = sessionStorage.getItem('stok_gate_token');
       options.headers = options.headers || {};
       if (token) {
         options.headers['Authorization'] = 'Bearer ' + token;
       }
-      return await fetch(url, options);
+      if (gateToken) {
+        options.headers['X-Gate-Token'] = gateToken;
+      }
+      const res = await fetch(url, options);
+      if (res.status === 401) {
+        try {
+          const clone = res.clone();
+          const json = await clone.json();
+          if (json.gate_locked) {
+            sessionStorage.removeItem('gate_unlocked');
+            showGateLockModal();
+          }
+        } catch(e) {}
+      }
+      return res;
     }
 
     async function apiFetch(url, options = {}) {
@@ -6318,15 +6393,177 @@
       checkSyncStatus();
     });
 
-    setInterval(checkSyncStatus, 30000);
+    let _appInitialized = false;
+    function initAppAfterGateUnlock() {
+      if (_appInitialized) return;
+      _appInitialized = true;
+      initIndexedDB();
+      checkAIStatus();
+      checkSavedAuthSession();
+      startRealtimeListener();
+      setInterval(checkSyncStatus, 45000);
+      setTheme(localStorage.getItem('app-theme') || 'light');
+    }
 
-    // Init AI status check, IndexedDB storage, Auth session check, and Live Realtime Sync
-    initIndexedDB();
-    checkAIStatus();
-    checkSavedAuthSession();
-    startRealtimeListener();
-    // Tema butonunu güncelle
-    setTheme(localStorage.getItem('app-theme') || 'light');
+    // ════════════════════════════════════════════════════════════════════
+    // 🔒 SİSTEM GÜVENLİK KİLİDİ (2805 PIN İŞ MANTIĞI & DOĞRULAMA)
+    // ════════════════════════════════════════════════════════════════════
+    let gatePinCurrent = '';
+
+    function checkGateLock() {
+      const isUnlocked = sessionStorage.getItem('gate_unlocked') === 'true';
+      if (isUnlocked) {
+        hideGateLockModal();
+        initAppAfterGateUnlock();
+      } else {
+        showGateLockModal();
+      }
+    }
+
+    function showGateLockModal() {
+      const overlay = document.getElementById('gate-lock-overlay');
+      if (overlay) {
+        overlay.style.display = 'flex';
+        gatePinCurrent = '';
+        updateGatePinDots();
+        const errEl = document.getElementById('gate-pin-error');
+        if (errEl) errEl.style.display = 'none';
+        const hiddenInput = document.getElementById('gate-pin-input');
+        if (hiddenInput) {
+          hiddenInput.value = '';
+          setTimeout(() => hiddenInput.focus(), 150);
+        }
+      }
+    }
+
+    function hideGateLockModal() {
+      const overlay = document.getElementById('gate-lock-overlay');
+      if (overlay) overlay.style.display = 'none';
+    }
+
+    function lockAppNow() {
+      sessionStorage.removeItem('gate_unlocked');
+      showGateLockModal();
+      showToast("🔒 Sistem kilitlendi.");
+    }
+
+    function updateGatePinDots() {
+      for (let i = 0; i < 4; i++) {
+        const dot = document.getElementById(`gate-dot-${i}`);
+        if (dot) {
+          if (i < gatePinCurrent.length) {
+            dot.style.background = '#10B981';
+            dot.style.borderColor = '#10B981';
+            dot.style.transform = 'scale(1.25)';
+            dot.style.boxShadow = '0 0 12px rgba(16, 185, 129, 0.6)';
+          } else {
+            dot.style.background = 'transparent';
+            dot.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+            dot.style.transform = 'scale(1)';
+            dot.style.boxShadow = 'none';
+          }
+        }
+      }
+    }
+
+    async function handleGateKey(key) {
+      const errEl = document.getElementById('gate-pin-error');
+      if (errEl) errEl.style.display = 'none';
+
+      if (key === 'backspace') {
+        gatePinCurrent = gatePinCurrent.slice(0, -1);
+        updateGatePinDots();
+        return;
+      }
+
+      if (key === 'submit') {
+        if (gatePinCurrent.length === 4) {
+          await submitGatePin();
+        } else {
+          showGateError("Lütfen 4 haneli PIN kodunu giriniz.");
+        }
+        return;
+      }
+
+      if (/^[0-9]$/.test(key) && gatePinCurrent.length < 4) {
+        gatePinCurrent += key;
+        updateGatePinDots();
+        if (gatePinCurrent.length === 4) {
+          setTimeout(submitGatePin, 120);
+        }
+      }
+    }
+
+    function showGateError(msg) {
+      const errEl = document.getElementById('gate-pin-error');
+      const card = document.getElementById('gate-lock-card');
+      if (errEl) {
+        errEl.innerText = msg || "❌ Hatalı PIN kodu!";
+        errEl.style.display = 'block';
+      }
+      if (card) {
+        card.style.animation = 'none';
+        card.offsetHeight;
+        card.style.animation = 'shake 0.4s ease-in-out';
+      }
+      for (let i = 0; i < 4; i++) {
+        const dot = document.getElementById(`gate-dot-${i}`);
+        if (dot) {
+          dot.style.background = '#EF4444';
+          dot.style.borderColor = '#EF4444';
+          dot.style.boxShadow = '0 0 10px rgba(239, 68, 68, 0.6)';
+        }
+      }
+      setTimeout(() => {
+        gatePinCurrent = '';
+        updateGatePinDots();
+      }, 500);
+    }
+
+    async function submitGatePin() {
+      try {
+        const res = await fetch('/api/gate/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: gatePinCurrent })
+        });
+        const json = await res.json();
+        if (res.ok && json.ok) {
+          sessionStorage.setItem('gate_unlocked', 'true');
+          sessionStorage.setItem('farm_unlocked', 'true');
+          if (json.token) {
+            sessionStorage.setItem('stok_gate_token', json.token);
+          }
+          hideGateLockModal();
+          initAppAfterGateUnlock();
+          showToast("🔓 Yetkili girişi başarılı. Hoş geldiniz!");
+        } else {
+          showGateError(json.message || "❌ Hatalı PIN kodu!");
+        }
+      } catch (err) {
+        showGateError("Bağlantı hatası! Lütfen tekrar deneyiniz.");
+      }
+    }
+
+    // Klavye dinleyicisi
+    window.addEventListener('keydown', (e) => {
+      const overlay = document.getElementById('gate-lock-overlay');
+      if (overlay && overlay.style.display !== 'none') {
+        if (/^[0-9]$/.test(e.key)) {
+          e.preventDefault();
+          handleGateKey(e.key);
+        } else if (e.key === 'Backspace') {
+          e.preventDefault();
+          handleGateKey('backspace');
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          handleGateKey('submit');
+        }
+      }
+    });
+
+    // Başlangıç kilit kontrolü
+    checkGateLock();
 
     // ════════════════════════════════════════════════════════════════════
     // ÇİFTLİK YÖNETİM MODÜLÜ (2805 ŞİFRE & İŞ MANTIĞI)

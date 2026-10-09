@@ -33,6 +33,7 @@ class TestFirebaseSyncResilience(unittest.TestCase):
         # Create a mock Firestore client
         self.mock_firestore = MagicMock()
         self.cloud_db.firestore_db = self.mock_firestore
+        self.cloud_db._hydration_completed = False
 
         # Ensure user 1 exists
         with self.db.get_connection() as conn:
@@ -297,6 +298,58 @@ class TestFirebaseSyncResilience(unittest.TestCase):
         self.assertTrue(res["synced"])
         self.assertIn("✅", res["reason"])
         self.assertNotIn("0 veri aktarıldı, 0 veri indirildi", res["reason"])
+
+    def test_push_offline_data_makes_zero_reads_when_no_unsynced(self):
+        """When all local records have synced_to_cloud = 1, push_offline_data_to_firebase must not touch Firestore (0 READ / 0 WRITE)."""
+        with self.db.get_connection() as conn:
+            for table in ["users", "categories", "products", "sales", "expenses", "farm_customers", "farm_egg_sales", "farm_feed_purchases"]:
+                try:
+                    conn.execute(f"UPDATE {table} SET synced_to_cloud = 1")
+                except Exception:
+                    pass
+
+        self.mock_firestore.reset_mock()
+        res = self.cloud_db.push_offline_data_to_firebase(user_id=1)
+        self.assertTrue(res["synced"])
+        self.assertEqual(res["pushed"], 0)
+        self.assertEqual(res["pulled"], 0)
+        # Verify ZERO calls to Firestore collection
+        self.assertEqual(self.mock_firestore.collection.call_count, 0)
+
+    def test_initial_hydration_skips_when_database_already_has_data(self):
+        """When SQLite already has products/sales, ensure_initial_hydration must not stream Firestore (0 READ)."""
+        # We already have product 101 inserted in setUp
+        self.mock_firestore.reset_mock()
+        self.cloud_db._hydration_completed = False
+        res = self.cloud_db.ensure_initial_hydration(force=False)
+        self.assertTrue(res)
+        self.assertTrue(self.cloud_db._hydration_completed)
+        self.assertEqual(self.mock_firestore.collection.call_count, 0)
+
+    def test_gatekeeper_pin_and_api_lock(self):
+        """Requests to /api/* must be blocked with 401 until PIN 2805 is verified."""
+        from app.web.web_server import app, EXPECTED_GATE_TOKEN
+        client = app.test_client()
+
+        # 1. Unauthenticated request to /api/products is rejected
+        res = client.get("/api/products")
+        self.assertEqual(res.status_code, 401)
+        self.assertTrue(res.get_json().get("gate_locked"))
+
+        # 2. Verifying wrong PIN fails
+        res_wrong = client.post("/api/gate/verify", json={"pin": "9999"})
+        self.assertEqual(res_wrong.status_code, 401)
+        self.assertFalse(res_wrong.get_json()["ok"])
+
+        # 3. Verifying correct PIN 2805 succeeds
+        res_ok = client.post("/api/gate/verify", json={"pin": "2805"})
+        self.assertEqual(res_ok.status_code, 200)
+        token = res_ok.get_json()["token"]
+        self.assertEqual(token, EXPECTED_GATE_TOKEN)
+
+        # 4. Request with X-Gate-Token header succeeds
+        res_auth = client.get("/api/products", headers={"X-Gate-Token": token})
+        self.assertEqual(res_auth.status_code, 200)
 
 
 if __name__ == "__main__":

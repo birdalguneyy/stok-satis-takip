@@ -19,7 +19,8 @@ except ImportError:
 from flask import Flask, jsonify, request, send_from_directory
 
 
-from app.config import DATA_DIR
+import hashlib
+from app.config import DATA_DIR, GATE_PIN
 from app.database.cloud_db import CloudDatabase
 from app.services.ai_package_service import AIPackageService
 from app.services.forecast_service import ForecastService
@@ -36,6 +37,70 @@ app = Flask(__name__, static_folder=str(STATIC_DIR), template_folder=str(STATIC_
 cloud_db = CloudDatabase()
 ai_service = AIPackageService()
 forecast_service = ForecastService(cloud_db)
+
+GATE_SECRET = "stok_satis_gate_key_2026"
+
+
+def make_gate_token() -> str:
+    return hashlib.sha256(f"{GATE_PIN}:{GATE_SECRET}".encode("utf-8")).hexdigest()
+
+
+EXPECTED_GATE_TOKEN = make_gate_token()
+
+
+def is_gate_unlocked_request() -> bool:
+    token = (
+        request.headers.get("X-Gate-Token", "").strip()
+        or request.cookies.get("stok_gate_token", "").strip()
+        or request.args.get("gate_token", "").strip()
+    )
+    pin_hdr = request.headers.get("X-Gate-PIN", "").strip()
+    return (token == EXPECTED_GATE_TOKEN) or (pin_hdr == str(GATE_PIN).strip())
+
+
+@app.before_request
+def gatekeeper_check():
+    path = request.path
+    # Muaf tutulan yollar: Statik dosyalar, favicon, manifest, sw, gate API'leri ve sağlık kontrolleri
+    if (
+        path == "/"
+        or path.startswith("/static/")
+        or path in ("/favicon.ico", "/manifest.json", "/sw.js", "/health", "/ping")
+        or path.startswith("/api/gate/")
+    ):
+        return None
+
+    # Tüm API ve veri işlemleri için PIN doğrulaması zorunludur
+    if not is_gate_unlocked_request():
+        return jsonify({
+            "ok": False,
+            "gate_locked": True,
+            "message": "🔒 Yetkisiz erişim. Lütfen önce 2805 PIN kodunu giriniz."
+        }), 401
+
+
+@app.route("/api/gate/verify", methods=["POST"])
+def gate_verify():
+    data = request.json or {}
+    pin = str(data.get("pin", "")).strip()
+    if pin == str(GATE_PIN).strip():
+        token = EXPECTED_GATE_TOKEN
+        resp = jsonify({"ok": True, "token": token, "message": "Giriş başarılı!"})
+        resp.set_cookie(
+            "stok_gate_token",
+            token,
+            max_age=86400 * 30,
+            httponly=False,
+            samesite="Lax"
+        )
+        return resp
+    return jsonify({"ok": False, "message": "Geçersiz PIN şifresi!"}), 401
+
+
+@app.route("/api/gate/status", methods=["GET"])
+def gate_status():
+    unlocked = is_gate_unlocked_request()
+    return jsonify({"ok": True, "unlocked": unlocked})
 
 
 def get_local_ip() -> str:
@@ -265,7 +330,7 @@ def trigger_sync():
     user_id = get_current_user_id()
     if user_id is None:
         return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
-    res = cloud_db.sync_offline_data_with_firebase(user_id=user_id)
+    res = cloud_db.sync_offline_data_with_firebase(user_id=user_id, allow_pull=True)
     notify_data_change(user_id)
     return jsonify({"ok": True, "result": res})
 
@@ -1079,13 +1144,18 @@ def api_farm_analytics():
 
 
 def _background_sync_loop():
-
     import time
     logger.info("Firebase 7/24 Arka Plan Otomatik Senkronizasyon Servisi başlatıldı.")
+    # Sunucu ilk açılışında tek seferlik initial hydration (verileri buluttan SQLite'a çekme)
+    try:
+        cloud_db.ensure_initial_hydration()
+    except Exception as exc:
+        logger.warning(f"Sunucu açılışı initial hydration uyarısı: {exc}")
+
     while True:
         try:
-            time.sleep(25)
-            cloud_db.sync_offline_data_with_firebase()
+            time.sleep(60)
+            cloud_db.push_offline_data_to_firebase()
         except Exception as exc:
             logger.debug(f"Arka plan senkronizasyon uyarısı: {exc}")
 

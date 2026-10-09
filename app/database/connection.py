@@ -1,6 +1,6 @@
 import sqlite3
 from contextlib import contextmanager
-from typing import Generator, Optional
+from typing import Any, Generator, Optional
 
 from app.config import DATA_DIR, DB_PATH
 
@@ -14,12 +14,28 @@ class Database:
             cls._instance._initialized = False
         return cls._instance
 
-    def __init__(self) -> None:
+    def __init__(self, db_path: Optional[Any] = None) -> None:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        if db_path is not None:
+            from pathlib import Path
+            self.db_path = Path(db_path)
+            self._initialized = True
+            return
         if self._initialized:
             return
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        self.db_path = DB_PATH
+        from app.config import DB_PATH as CONFIG_DB_PATH
+        self.db_path = CONFIG_DB_PATH
         self._initialized = True
+
+    @classmethod
+    def reset_instance(cls, db_path: Optional[Any] = None) -> "Database":
+        """Testlerde izole veritabanı kullanabilmek için singleton'ı sıfırlar."""
+        cls._instance = None
+        inst = cls()
+        if db_path is not None:
+            from pathlib import Path
+            inst.db_path = Path(db_path)
+        return inst
 
     def connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=30.0, check_same_thread=False)

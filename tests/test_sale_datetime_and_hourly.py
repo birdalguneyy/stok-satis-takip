@@ -9,10 +9,27 @@ from app.services.forecast_service import ForecastService
 class TestSaleDatetimeAndHourly(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        from app.config import DATA_DIR
+        cls.test_db_path = DATA_DIR / "test_hourly.db"
+        if cls.test_db_path.exists():
+            try:
+                cls.test_db_path.unlink()
+            except Exception:
+                pass
+        cls.db = Database.reset_instance(cls.test_db_path)
         run_migrations()
-        cls.db = Database()
         cls.cloud_db = CloudDatabase()
+        cls.cloud_db.db = cls.db
         cls.sale_repo = SaleRepository(cls.db)
+
+    @classmethod
+    def tearDownClass(cls):
+        Database.reset_instance()
+        if hasattr(cls, "test_db_path") and cls.test_db_path.exists():
+            try:
+                cls.test_db_path.unlink()
+            except Exception:
+                pass
 
     def setUp(self):
         with self.db.get_connection() as conn:

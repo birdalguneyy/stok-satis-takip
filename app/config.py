@@ -29,7 +29,8 @@ else:
     BASE_DIR = Path(__file__).resolve().parent.parent
     DATA_DIR = BASE_DIR / "data"
 
-DB_PATH = DATA_DIR / "stok_satis.db"
+DB_NAME = os.getenv("SQLITE_DB_NAME", "stok_satis.db")
+DB_PATH = DATA_DIR / DB_NAME
 
 
 DEFAULT_CRITICAL_STOCK = 5

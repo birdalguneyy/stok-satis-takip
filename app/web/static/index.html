@@ -6235,9 +6235,17 @@
         });
         const json = await res.json();
         if (json.ok && json.result) {
-          showToast(`☁️ Firebase Eşitleme: ${json.result.pushed} veri buluta yüklendi, ${json.result.pulled} veri güncellendi.`);
+          const resObj = json.result;
+          if (resObj.reason) {
+            showToast(resObj.reason);
+          } else if ((resObj.pushed || 0) === 0 && (resObj.pulled || 0) === 0) {
+            showToast("✅ Tüm verileriniz bulut ile güncel ve senkronize.");
+          } else {
+            showToast(`☁️ Firebase Eşitleme: ${resObj.pushed || 0} veri buluta yüklendi, ${resObj.pulled || 0} veri güncellendi.`);
+          }
           loadProducts();
           if (typeof loadPOSProductPicker === 'function') loadPOSProductPicker();
+          if (typeof loadSalesHistory === 'function') loadSalesHistory();
           checkSyncStatus();
         }
       } catch (e) {

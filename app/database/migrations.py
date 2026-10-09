@@ -8,6 +8,20 @@ SCHEMA_VERSION = 1
 DEFAULT_CATEGORIES = ("Genel", "Gıda", "İçecek", "Temizlik", "Elektronik")
 
 
+def _seed_categories(conn) -> None:
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO users (id, company_name, full_name, phone, email, password_hash)
+        VALUES (1, 'Yerel İşletme', 'Yönetici', '05000000000', 'admin@yerel.com', '')
+        """
+    )
+    for cat in DEFAULT_CATEGORIES:
+        conn.execute(
+            "INSERT OR IGNORE INTO categories (name, user_id, synced_to_cloud) VALUES (?, 1, 1)",
+            (cat,),
+        )
+
+
 def run_migrations() -> None:
     schema_path = Path(__file__).parent / "schema.sql"
     schema_sql = schema_path.read_text(encoding="utf-8")

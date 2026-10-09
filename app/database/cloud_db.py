@@ -23,6 +23,21 @@ UPLOADS_DIR = DATA_DIR / "uploads" / "products"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def normalize_datetime_str(val: Any) -> str:
+    """ISO formatındaki (örn. 2026-10-09T14:30:00) veya timezone içeren tarihleri
+    standart SQLite 'YYYY-MM-DD HH:MM:SS' formatına dönüştürür."""
+    if not val:
+        return get_turkey_now_str()
+    if isinstance(val, datetime):
+        return val.astimezone(TURKEY_TZ).strftime("%Y-%m-%d %H:%M:%S") if val.tzinfo else val.strftime("%Y-%m-%d %H:%M:%S")
+    s = str(val).strip().replace("T", " ")
+    if "." in s:
+        s = s.split(".")[0]
+    if len(s) == 10:
+        s += " 00:00:00"
+    return s[:19]
+
+
 def _save_base64_to_disk(image_str: Optional[str], uid: int, pid: int) -> str:
     """Base64 data URL formatındaki görseli disk üzerindeki uploads/products klasörüne kaydeder.
     Depolama alanından maksimum tasarruf sağlamak ve cihaz hafızasını şişirmemek için
@@ -257,17 +272,38 @@ class CloudDatabase:
                     for doc in cat_docs:
                         d = doc.to_dict()
                         cid = d.get("id")
-                        if not cid and doc.id.isdigit():
-                            cid = int(doc.id)
-                        elif not cid and "_c" in doc.id:
+                        if cid is None:
+                            if doc.id.isdigit():
+                                cid = int(doc.id)
+                            elif "_c" in doc.id:
+                                try:
+                                    cid = int(doc.id.split("_c")[-1])
+                                except Exception:
+                                    pass
+                            if cid is None:
+                                nums = re.findall(r"\d+", doc.id)
+                                if nums:
+                                    cid = int(nums[-1])
+                            if cid is None:
+                                max_c = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM categories").fetchone()[0]
+                                cid = int(max_c)
+                        else:
                             try:
-                                cid = int(doc.id.split("_c")[-1])
+                                cid = int(cid)
                             except Exception:
                                 pass
+
                         doc_user_id = d.get("user_id")
-                        if user_id is not None and doc_user_id is not None and doc_user_id != user_id:
-                            continue
-                        final_uid = doc_user_id if doc_user_id is not None else (user_id or 1)
+                        if doc_user_id is None and doc.id.startswith("u") and "_" in doc.id:
+                            try:
+                                doc_user_id = int(doc.id.split("_")[0][1:])
+                            except Exception:
+                                pass
+                        try:
+                            final_uid = int(doc_user_id) if doc_user_id is not None else (int(user_id) if user_id is not None else 1)
+                        except Exception:
+                            final_uid = 1
+
                         if cid and d.get("name"):
                             conn.execute(
                                 """
@@ -287,19 +323,49 @@ class CloudDatabase:
                     for doc in p_docs:
                         d = doc.to_dict()
                         pid = d.get("id")
-                        if not pid and doc.id.isdigit():
-                            pid = int(doc.id)
-                        elif not pid and "_p" in doc.id:
+                        if pid is None:
+                            if doc.id.isdigit():
+                                pid = int(doc.id)
+                            elif "_p" in doc.id:
+                                try:
+                                    pid = int(doc.id.split("_p")[-1])
+                                except Exception:
+                                    pass
+                            if pid is None:
+                                nums = re.findall(r"\d+", doc.id)
+                                if nums:
+                                    pid = int(nums[-1])
+                            if pid is None:
+                                max_p = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM products").fetchone()[0]
+                                pid = int(max_p)
+                        else:
                             try:
-                                pid = int(doc.id.split("_p")[-1])
+                                pid = int(pid)
                             except Exception:
                                 pass
+
                         doc_user_id = d.get("user_id")
-                        if user_id is not None and doc_user_id is not None and doc_user_id != user_id:
-                            continue
-                        final_uid = doc_user_id if doc_user_id is not None else (user_id or 1)
+                        if doc_user_id is None and doc.id.startswith("u") and "_" in doc.id:
+                            try:
+                                doc_user_id = int(doc.id.split("_")[0][1:])
+                            except Exception:
+                                pass
+                        try:
+                            final_uid = int(doc_user_id) if doc_user_id is not None else (int(user_id) if user_id is not None else 1)
+                        except Exception:
+                            final_uid = 1
+
                         if pid and d.get("name"):
                             cat_id = d.get("category_id") or 1
+                            try:
+                                cat_id = int(cat_id)
+                            except Exception:
+                                cat_id = 1
+                            # Ensure category exists for foreign key
+                            conn.execute(
+                                "INSERT OR IGNORE INTO categories (id, name, user_id, synced_to_cloud) VALUES (?, 'Genel', ?, 1)",
+                                (cat_id, final_uid),
+                            )
                             conn.execute(
                                 """
                                 INSERT OR REPLACE INTO products (
@@ -320,8 +386,8 @@ class CloudDatabase:
                                     str(d.get("unit", "adet")),
                                     d.get("image_path", ""),
                                     int(d.get("is_active", 1)),
-                                    d.get("created_at", now),
-                                    d.get("updated_at", now),
+                                    normalize_datetime_str(d.get("created_at")),
+                                    normalize_datetime_str(d.get("updated_at")),
                                 ),
                             )
                             pulled_count += 1
@@ -334,27 +400,40 @@ class CloudDatabase:
                     for doc in sales_docs:
                         d = doc.to_dict()
                         sid = d.get("id")
-                        if not sid and doc.id.isdigit():
-                            sid = int(doc.id)
-                        elif not sid and "_s" in doc.id:
+                        if sid is None:
+                            if doc.id.isdigit():
+                                sid = int(doc.id)
+                            elif "_s" in doc.id:
+                                try:
+                                    sid = int(doc.id.split("_s")[-1])
+                                except Exception:
+                                    pass
+                            if sid is None:
+                                nums = re.findall(r"\d+", doc.id)
+                                if nums:
+                                    sid = int(nums[-1])
+                            if sid is None:
+                                max_s = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM sales").fetchone()[0]
+                                sid = int(max_s)
+                        else:
                             try:
-                                sid = int(doc.id.split("_s")[-1])
+                                sid = int(sid)
                             except Exception:
                                 pass
-                        doc_user_id = d.get("user_id")
-                        if user_id is not None and doc_user_id is not None:
-                            if str(doc_user_id).strip() != str(user_id).strip():
-                                continue
-                        final_uid = doc_user_id if doc_user_id is not None else (user_id or 1)
-                        if sid:
-                            raw_s_at = d.get("sold_at")
-                            if isinstance(raw_s_at, datetime):
-                                s_at = raw_s_at.astimezone(TURKEY_TZ).strftime("%Y-%m-%d %H:%M:%S") if raw_s_at.tzinfo else raw_s_at.strftime("%Y-%m-%d %H:%M:%S")
-                            elif isinstance(raw_s_at, str) and raw_s_at.strip():
-                                s_at = raw_s_at.strip()
-                            else:
-                                s_at = now
 
+                        doc_user_id = d.get("user_id")
+                        if doc_user_id is None and doc.id.startswith("u") and "_" in doc.id:
+                            try:
+                                doc_user_id = int(doc.id.split("_")[0][1:])
+                            except Exception:
+                                pass
+                        try:
+                            final_uid = int(doc_user_id) if doc_user_id is not None else (int(user_id) if user_id is not None else 1)
+                        except Exception:
+                            final_uid = 1
+
+                        if sid:
+                            s_at = normalize_datetime_str(d.get("sold_at"))
                             conn.execute(
                                 """
                                 INSERT OR REPLACE INTO sales (
@@ -376,6 +455,11 @@ class CloudDatabase:
                             items = d.get("items", [])
                             conn.execute("DELETE FROM sale_items WHERE sale_id = ?", (sid,))
                             for it in items:
+                                it_pid = it.get("product_id")
+                                if it_pid is not None:
+                                    p_chk = conn.execute("SELECT id FROM products WHERE id = ?", (it_pid,)).fetchone()
+                                    if not p_chk:
+                                        it_pid = None
                                 conn.execute(
                                     """
                                     INSERT INTO sale_items (sale_id, product_id, product_name, barcode, unit_price, quantity, subtotal, unit)
@@ -383,7 +467,7 @@ class CloudDatabase:
                                     """,
                                     (
                                         sid,
-                                        it.get("product_id"),
+                                        it_pid,
                                         it.get("product_name", ""),
                                         it.get("barcode", ""),
                                         float(it.get("unit_price", 0)),
@@ -402,18 +486,41 @@ class CloudDatabase:
                     for doc in exp_docs:
                         d = doc.to_dict()
                         eid = d.get("id")
-                        if not eid and doc.id.isdigit():
-                            eid = int(doc.id)
-                        elif not eid and "_e" in doc.id:
+                        if eid is None:
+                            if doc.id.isdigit():
+                                eid = int(doc.id)
+                            elif "_e" in doc.id:
+                                try:
+                                    eid = int(doc.id.split("_e")[-1])
+                                except Exception:
+                                    pass
+                            if eid is None:
+                                nums = re.findall(r"\d+", doc.id)
+                                if nums:
+                                    eid = int(nums[-1])
+                            if eid is None:
+                                max_e = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM expenses").fetchone()[0]
+                                eid = int(max_e)
+                        else:
                             try:
-                                eid = int(doc.id.split("_e")[-1])
+                                eid = int(eid)
                             except Exception:
                                 pass
+
                         doc_user_id = d.get("user_id")
-                        if user_id is not None and doc_user_id is not None and doc_user_id != user_id:
-                            continue
-                        final_uid = doc_user_id if doc_user_id is not None else (user_id or 1)
+                        if doc_user_id is None and doc.id.startswith("u") and "_" in doc.id:
+                            try:
+                                doc_user_id = int(doc.id.split("_")[0][1:])
+                            except Exception:
+                                pass
+                        try:
+                            final_uid = int(doc_user_id) if doc_user_id is not None else (int(user_id) if user_id is not None else 1)
+                        except Exception:
+                            final_uid = 1
+
                         if eid and d.get("title"):
+                            raw_e_date = str(d.get("expense_date") or "").strip()
+                            e_date = raw_e_date[:10] if len(raw_e_date) >= 10 else now[:10]
                             conn.execute(
                                 """
                                 INSERT OR REPLACE INTO expenses (
@@ -426,9 +533,9 @@ class CloudDatabase:
                                     d.get("title"),
                                     float(d.get("amount", 0)),
                                     d.get("category", "Fatura"),
-                                    d.get("expense_date", now[:10]),
+                                    e_date,
                                     d.get("note", ""),
-                                    d.get("created_at", now),
+                                    normalize_datetime_str(d.get("created_at")),
                                 ),
                             )
                             pulled_count += 1
@@ -441,8 +548,10 @@ class CloudDatabase:
                     for doc in settings_docs:
                         d = doc.to_dict()
                         suid = d.get("user_id") or (int(doc.id.replace("u", "")) if doc.id.replace("u", "").isdigit() else 1)
-                        if user_id is not None and suid != user_id:
-                            continue
+                        try:
+                            suid = int(suid)
+                        except Exception:
+                            suid = 1
                         conn.execute(
                             """
                             INSERT OR REPLACE INTO store_settings (user_id, weekday_hours, weekend_hours)
@@ -468,15 +577,42 @@ class CloudDatabase:
 
                 # 6.2 PULL FARM CUSTOMERS
                 try:
-
                     fc_docs = self.firestore_db.collection("farm_customers").stream()
                     for doc in fc_docs:
                         d = doc.to_dict()
-                        fc_id = d.get("id") or (int(doc.id) if doc.id.isdigit() else None)
+                        fc_id = d.get("id")
+                        if fc_id is None:
+                            if doc.id.isdigit():
+                                fc_id = int(doc.id)
+                            elif "_fc" in doc.id:
+                                try:
+                                    fc_id = int(doc.id.split("_fc")[-1])
+                                except Exception:
+                                    pass
+                            if fc_id is None:
+                                nums = re.findall(r"\d+", doc.id)
+                                if nums:
+                                    fc_id = int(nums[-1])
+                            if fc_id is None:
+                                max_fc = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM farm_customers").fetchone()[0]
+                                fc_id = int(max_fc)
+                        else:
+                            try:
+                                fc_id = int(fc_id)
+                            except Exception:
+                                pass
+
                         doc_user_id = d.get("user_id")
-                        if user_id is not None and doc_user_id is not None and doc_user_id != user_id:
-                            continue
-                        final_uid = doc_user_id if doc_user_id is not None else (user_id or 1)
+                        if doc_user_id is None and doc.id.startswith("u") and "_" in doc.id:
+                            try:
+                                doc_user_id = int(doc.id.split("_")[0][1:])
+                            except Exception:
+                                pass
+                        try:
+                            final_uid = int(doc_user_id) if doc_user_id is not None else (int(user_id) if user_id is not None else 1)
+                        except Exception:
+                            final_uid = 1
+
                         if d.get("name"):
                             conn.execute(
                                 """
@@ -484,7 +620,7 @@ class CloudDatabase:
                                     id, user_id, name, phone, synced_to_cloud, created_at
                                 ) VALUES (?, ?, ?, ?, 1, ?)
                                 """,
-                                (fc_id, final_uid, d.get("name"), d.get("phone", ""), d.get("created_at", now)),
+                                (fc_id, final_uid, d.get("name"), d.get("phone", ""), normalize_datetime_str(d.get("created_at"))),
                             )
                             pulled_count += 1
                 except Exception as e:
@@ -496,17 +632,38 @@ class CloudDatabase:
                     for doc in es_docs:
                         d = doc.to_dict()
                         es_id = d.get("id")
-                        if not es_id and doc.id.isdigit():
-                            es_id = int(doc.id)
-                        elif not es_id and "_es" in doc.id:
+                        if es_id is None:
+                            if doc.id.isdigit():
+                                es_id = int(doc.id)
+                            elif "_es" in doc.id:
+                                try:
+                                    es_id = int(doc.id.split("_es")[-1])
+                                except Exception:
+                                    pass
+                            if es_id is None:
+                                nums = re.findall(r"\d+", doc.id)
+                                if nums:
+                                    es_id = int(nums[-1])
+                            if es_id is None:
+                                max_es = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM farm_egg_sales").fetchone()[0]
+                                es_id = int(max_es)
+                        else:
                             try:
-                                es_id = int(doc.id.split("_es")[-1])
+                                es_id = int(es_id)
                             except Exception:
                                 pass
+
                         doc_user_id = d.get("user_id")
-                        if user_id is not None and doc_user_id is not None and doc_user_id != user_id:
-                            continue
-                        final_uid = doc_user_id if doc_user_id is not None else (user_id or 1)
+                        if doc_user_id is None and doc.id.startswith("u") and "_" in doc.id:
+                            try:
+                                doc_user_id = int(doc.id.split("_")[0][1:])
+                            except Exception:
+                                pass
+                        try:
+                            final_uid = int(doc_user_id) if doc_user_id is not None else (int(user_id) if user_id is not None else 1)
+                        except Exception:
+                            final_uid = 1
+
                         if es_id and d.get("customer_name"):
                             conn.execute(
                                 """
@@ -525,9 +682,9 @@ class CloudDatabase:
                                     float(d.get("unit_price", 0)),
                                     float(d.get("total_amount", 0)),
                                     d.get("source", "Ciftlik"),
-                                    d.get("sale_date", now),
+                                    normalize_datetime_str(d.get("sale_date")),
                                     d.get("note", ""),
-                                    d.get("created_at", now),
+                                    normalize_datetime_str(d.get("created_at")),
                                 ),
                             )
                             pulled_count += 1
@@ -540,22 +697,45 @@ class CloudDatabase:
                     for doc in fp_docs:
                         d = doc.to_dict()
                         fp_id = d.get("id")
-                        if not fp_id and doc.id.isdigit():
-                            fp_id = int(doc.id)
-                        elif not fp_id and "_fp" in doc.id:
+                        if fp_id is None:
+                            if doc.id.isdigit():
+                                fp_id = int(doc.id)
+                            elif "_fp" in doc.id:
+                                try:
+                                    fp_id = int(doc.id.split("_fp")[-1])
+                                except Exception:
+                                    pass
+                            if fp_id is None:
+                                nums = re.findall(r"\d+", doc.id)
+                                if nums:
+                                    fp_id = int(nums[-1])
+                            if fp_id is None:
+                                max_fp = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM farm_feed_purchases").fetchone()[0]
+                                fp_id = int(max_fp)
+                        else:
                             try:
-                                fp_id = int(doc.id.split("_fp")[-1])
+                                fp_id = int(fp_id)
                             except Exception:
                                 pass
+
                         doc_user_id = d.get("user_id")
-                        if user_id is not None and doc_user_id is not None and doc_user_id != user_id:
-                            continue
-                        final_uid = doc_user_id if doc_user_id is not None else (user_id or 1)
+                        if doc_user_id is None and doc.id.startswith("u") and "_" in doc.id:
+                            try:
+                                doc_user_id = int(doc.id.split("_")[0][1:])
+                            except Exception:
+                                pass
+                        try:
+                            final_uid = int(doc_user_id) if doc_user_id is not None else (int(user_id) if user_id is not None else 1)
+                        except Exception:
+                            final_uid = 1
+
                         if fp_id and d.get("bag_count"):
                             bag_count = float(d.get("bag_count", 0))
                             bag_weight = float(d.get("bag_weight_kg", 50.0))
                             tot_kg = float(d.get("total_weight_kg", bag_count * bag_weight))
                             tot_ton = float(d.get("total_weight_ton", tot_kg / 1000.0))
+                            raw_pdate = str(d.get("purchase_date") or "").strip()
+                            p_date = raw_pdate[:10] if len(raw_pdate) >= 10 else now[:10]
                             conn.execute(
                                 """
                                 INSERT OR REPLACE INTO farm_feed_purchases (
@@ -572,10 +752,10 @@ class CloudDatabase:
                                     tot_ton,
                                     float(d.get("unit_price", 0)),
                                     float(d.get("total_amount", 0)),
-                                    d.get("purchase_date", now[:10]),
+                                    p_date,
                                     d.get("supplier", ""),
                                     d.get("note", ""),
-                                    d.get("created_at", now),
+                                    normalize_datetime_str(d.get("created_at")),
                                 ),
                             )
                             pulled_count += 1
@@ -801,9 +981,18 @@ class CloudDatabase:
             # 7. PULL REMOTE CHANGES (Strictly for this user!)
             pulled_count = self.pull_all_from_firebase(user_id=user_id)
 
+            if pushed_count == 0 and pulled_count == 0:
+                reason = "✅ Tüm verileriniz bulut ile eşitlendi ve güncel."
+            elif pushed_count > 0 and pulled_count > 0:
+                reason = f"☁️ Firebase eşitlendi: {pushed_count} veri buluta aktarıldı, {pulled_count} veri güncellendi."
+            elif pushed_count > 0:
+                reason = f"☁️ Firebase eşitlendi: {pushed_count} yeni veri buluta aktarıldı."
+            else:
+                reason = f"☁️ Firebase eşitlendi: {pulled_count} veri buluttan indirildi."
+
             return {
                 "synced": True,
-                "reason": f"Firebase eşitlendi ({pushed_count} veri buluta aktarıldı, {pulled_count} veri buluttan indirildi).",
+                "reason": reason,
                 "pushed": pushed_count,
                 "pulled": pulled_count,
             }
@@ -811,12 +1000,12 @@ class CloudDatabase:
             logger.error(f"Senkronizasyon hatası: {exc}")
             return {"synced": False, "reason": str(exc), "pushed": pushed_count, "pulled": 0}
 
-    def _resolve_user_id(self, user_id: Optional[int] = None) -> Optional[int]:
+    def _resolve_user_id(self, user_id: Optional[Union[int, str]] = None) -> int:
         if user_id is not None:
             try:
                 return int(user_id)
             except (ValueError, TypeError):
-                return user_id
+                pass
         try:
             with self.db.get_connection() as conn:
                 # 1. En çok aktif ürünü olan ana işletmeyi bul (örn: GALLUS2)
@@ -828,15 +1017,15 @@ class CloudDatabase:
                     ORDER BY COUNT(p.id) DESC
                     LIMIT 1
                 """).fetchone()
-                if row:
-                    return row["id"]
-                # 2. Ürün bulunamazsa son oluşturulan veya ilk kullanıcıyı al
-                row = conn.execute("SELECT id FROM users ORDER BY id DESC LIMIT 1").fetchone()
-                if row:
-                    return row["id"]
+                if row and row["id"] is not None:
+                    return int(row["id"])
+                # 2. Ürün bulunamazsa ilk kullanıcıyı al
+                row = conn.execute("SELECT id FROM users ORDER BY id ASC LIMIT 1").fetchone()
+                if row and row["id"] is not None:
+                    return int(row["id"])
         except Exception:
             pass
-        return None
+        return 1
 
     def force_full_sync_with_firebase(self, user_id: Optional[int] = None) -> Dict[str, Any]:
         """Kullanıcının TÜM ürünlerini, kategorilerini, satışlarını ve kullanıcı kaydını
@@ -986,9 +1175,18 @@ class CloudDatabase:
             # 9. Çift yönlü çekme
             pulled_count = self.pull_all_from_firebase(user_id=uid)
 
+            if pushed_count == 0 and pulled_count == 0:
+                reason = "✅ Tüm verileriniz bulut ile eşitlendi ve güncel."
+            elif pushed_count > 0 and pulled_count > 0:
+                reason = f"☁️ Firebase eşitlendi: {pushed_count} veri buluta aktarıldı, {pulled_count} veri güncellendi."
+            elif pushed_count > 0:
+                reason = f"☁️ Firebase eşitlendi: {pushed_count} yeni veri buluta aktarıldı."
+            else:
+                reason = f"☁️ Firebase eşitlendi: {pulled_count} veri buluttan indirildi."
+
             return {
                 "synced": True,
-                "reason": f"Tüm ürünler ve veriler Firebase ile başarıyla eşitlendi ({pushed_count} buluta yüklendi, {pulled_count} indirildi).",
+                "reason": reason,
                 "pushed": pushed_count,
                 "pulled": pulled_count,
             }
@@ -999,14 +1197,28 @@ class CloudDatabase:
     # ════════════════════════════════════════════════════════════════════
     # KATEGORİ İŞLEMLERİ (KULLANICIYA ÖZEL İZOLE)
     # ════════════════════════════════════════════════════════════════════
-    def get_categories(self, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
-        uid = self._resolve_user_id(user_id) or 1
+    def get_categories(self, user_id: Optional[Union[int, str]] = None) -> List[Dict[str, Any]]:
+        uid = self._resolve_user_id(user_id)
         with self.db.get_connection() as conn:
             rows = conn.execute(
-                "SELECT id, name FROM categories WHERE user_id = ? ORDER BY name ASC",
+                "SELECT id, name FROM categories WHERE (user_id = ? OR user_id IS NULL) ORDER BY name ASC",
                 (uid,),
             ).fetchall()
-            return [{"id": r["id"], "name": r["name"]} for r in rows]
+            cats = [{"id": r["id"], "name": r["name"]} for r in rows]
+            if not cats and self.ensure_firebase():
+                try:
+                    self.pull_all_from_firebase(user_id=uid)
+                    rows = conn.execute(
+                        "SELECT id, name FROM categories WHERE (user_id = ? OR user_id IS NULL) ORDER BY name ASC",
+                        (uid,),
+                    ).fetchall()
+                    cats = [{"id": r["id"], "name": r["name"]} for r in rows]
+                except Exception:
+                    pass
+            if not cats:
+                rows = conn.execute("SELECT id, name FROM categories ORDER BY name ASC").fetchall()
+                cats = [{"id": r["id"], "name": r["name"]} for r in rows]
+            return cats
 
     def add_category(self, name: str, user_id: Optional[int] = None) -> Optional[int]:
         name_clean = name.strip()
@@ -1075,13 +1287,13 @@ class CloudDatabase:
         with self.db.get_connection() as conn:
             row = conn.execute(query, (product_id, uid)).fetchone()
             return dict(row) if row else None
-    def get_products(self, user_id: Optional[int] = None, search: str = "") -> List[Dict[str, Any]]:
-        uid = user_id or 1
+    def get_products(self, user_id: Optional[Union[int, str]] = None, search: str = "") -> List[Dict[str, Any]]:
+        uid = self._resolve_user_id(user_id)
         query = """
             SELECT p.*, c.name as category_name
             FROM products p
             LEFT JOIN categories c ON p.category_id = c.id
-            WHERE p.is_active = 1 AND p.user_id = ?
+            WHERE p.is_active = 1 AND (p.user_id = ? OR p.user_id IS NULL)
         """
         params: list = [uid]
 
@@ -1094,20 +1306,45 @@ class CloudDatabase:
 
         with self.db.get_connection() as conn:
             rows = conn.execute(query, params).fetchall()
-            return [dict(r) for r in rows]
+            products = [dict(r) for r in rows]
 
-    def get_product_by_barcode(self, barcode: str, user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
-        uid = user_id or 1
+            if not products and self.ensure_firebase():
+                try:
+                    self.pull_all_from_firebase(user_id=uid)
+                    rows = conn.execute(query, params).fetchall()
+                    products = [dict(r) for r in rows]
+                except Exception as e:
+                    logger.warning(f"get_products auto-pull uyarısı: {e}")
+
+            if not products:
+                fb_query = query.replace("(p.user_id = ? OR p.user_id IS NULL)", "1=1")
+                fb_params = params[1:]
+                fb_rows = conn.execute(fb_query, fb_params).fetchall()
+                if fb_rows:
+                    products = [dict(r) for r in fb_rows]
+
+            return products
+
+    def get_product_by_barcode(self, barcode: str, user_id: Optional[Union[int, str]] = None) -> Optional[Dict[str, Any]]:
+        uid = self._resolve_user_id(user_id)
         query = """
             SELECT p.*, c.name as category_name
             FROM products p
             LEFT JOIN categories c ON p.category_id = c.id
-            WHERE p.barcode = ? AND p.is_active = 1 AND p.user_id = ?
+            WHERE p.barcode = ? AND p.is_active = 1 AND (p.user_id = ? OR p.user_id IS NULL)
         """
         params: list = [barcode.strip(), uid]
 
         with self.db.get_connection() as conn:
             row = conn.execute(query, params).fetchone()
+            if not row:
+                fb_query = """
+                    SELECT p.*, c.name as category_name
+                    FROM products p
+                    LEFT JOIN categories c ON p.category_id = c.id
+                    WHERE p.barcode = ? AND p.is_active = 1
+                """
+                row = conn.execute(fb_query, (barcode.strip(),)).fetchone()
             return dict(row) if row else None
 
     def save_product(
@@ -1431,7 +1668,7 @@ class CloudDatabase:
             total_amount = round(calculated_total, 2)
 
         item_count = len(cart_items)
-        now = sold_at.strip() if sold_at and str(sold_at).strip() else get_turkey_now_str()
+        now = normalize_datetime_str(sold_at)
 
         with self.db.get_connection() as conn:
             cursor = conn.execute(
@@ -1441,6 +1678,24 @@ class CloudDatabase:
             sale_id = cursor.lastrowid
 
             for item in cart_items:
+                raw_pid = item.get("product_id")
+                if raw_pid is not None:
+                    p_exists = conn.execute("SELECT id FROM products WHERE id = ?", (raw_pid,)).fetchone()
+                    if not p_exists:
+                        p_name = item.get("product_name", "Ürün")
+                        p_barcode = item.get("barcode", f"AUTO{raw_pid}")
+                        p_price = float(item.get("unit_price", 0))
+                        conn.execute(
+                            """
+                            INSERT OR IGNORE INTO products (
+                                id, user_id, category_id, name, barcode, purchase_price, sale_price,
+                                stock_quantity, critical_stock_level, unit, is_active, synced_to_cloud, created_at, updated_at
+                            ) VALUES (?, ?, 1, ?, ?, 0.0, ?, 0.0, 5.0, ?, 1, 0, ?, ?)
+                            """,
+                            (raw_pid, uid, p_name, p_barcode, p_price, str(item.get("unit", "adet")), now, now),
+                        )
+                valid_pid = raw_pid
+
                 conn.execute(
                     """
                     INSERT INTO sale_items (sale_id, product_id, product_name, barcode, unit_price, quantity, subtotal, unit)
@@ -1448,7 +1703,7 @@ class CloudDatabase:
                     """,
                     (
                         sale_id,
-                        item["product_id"],
+                        valid_pid,
                         item["product_name"],
                         item["barcode"],
                         float(item["unit_price"]),
@@ -1458,14 +1713,15 @@ class CloudDatabase:
                     ),
                 )
                 # Deduct stock ONLY for active products of this user
-                conn.execute(
-                    """
-                    UPDATE products
-                    SET stock_quantity = MAX(0.0, stock_quantity - ?), updated_at = ?
-                    WHERE id = ? AND user_id = ? AND is_active = 1
-                    """,
-                    (float(item["quantity"]), now, item["product_id"], uid),
-                )
+                if valid_pid is not None:
+                    conn.execute(
+                        """
+                        UPDATE products
+                        SET stock_quantity = MAX(0.0, stock_quantity - ?), updated_at = ?
+                        WHERE id = ? AND user_id = ? AND is_active = 1
+                        """,
+                        (float(item["quantity"]), now, valid_pid, uid),
+                    )
 
         # Dükkan satışındaki yumurtaları otomatik Çiftlik kaydına aktar
         try:
@@ -1928,7 +2184,7 @@ class CloudDatabase:
 
     def get_sales_history(
         self,
-        user_id: Optional[int] = None,
+        user_id: Optional[Union[int, str]] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         customer_name: Optional[str] = None,
@@ -1937,60 +2193,51 @@ class CloudDatabase:
         query = "SELECT * FROM sales WHERE (user_id = ? OR user_id IS NULL)"
         params: list = [uid]
         if start_date:
-            query += " AND sold_at >= ?"
+            query += " AND replace(sold_at, 'T', ' ') >= ?"
             params.append(start_date + " 00:00:00")
         if end_date:
-            query += " AND sold_at <= ?"
+            query += " AND replace(sold_at, 'T', ' ') <= ?"
             params.append(end_date + " 23:59:59")
         if customer_name and str(customer_name).strip():
             query += " AND customer_name LIKE ?"
             params.append(f"%{customer_name.strip()}%")
-        query += " ORDER BY sold_at DESC, id DESC LIMIT 500"
+        query += " ORDER BY replace(sold_at, 'T', ' ') DESC, id DESC LIMIT 500"
 
-        sales = []
-        with self.db.get_connection() as conn:
-            rows = conn.execute(query, params).fetchall()
-            sales = [dict(r) for r in rows] if rows else []
-            sale_ids = [s["id"] for s in sales]
+        def _fetch_with_items(q, p):
+            with self.db.get_connection() as conn:
+                rows = conn.execute(q, p).fetchall()
+                s_list = [dict(r) for r in rows] if rows else []
+                s_ids = [s["id"] for s in s_list]
+                if s_ids:
+                    placeholders = ",".join("?" for _ in s_ids)
+                    items_query = f"SELECT * FROM sale_items WHERE sale_id IN ({placeholders})"
+                    items_rows = conn.execute(items_query, s_ids).fetchall()
+                    items_by_sale: Dict[int, List[Dict[str, Any]]] = {}
+                    for i in items_rows:
+                        i_dict = dict(i)
+                        items_by_sale.setdefault(i_dict["sale_id"], []).append(i_dict)
+                    for s in s_list:
+                        s["items"] = items_by_sale.get(s["id"], [])
+                return s_list
 
-            # Batch fetch all sale_items in a single indexed query instead of N queries
-            if sale_ids:
-                placeholders = ",".join("?" for _ in sale_ids)
-                items_query = f"SELECT * FROM sale_items WHERE sale_id IN ({placeholders})"
-                items_rows = conn.execute(items_query, sale_ids).fetchall()
+        sales = _fetch_with_items(query, params)
 
-                items_by_sale: Dict[int, List[Dict[str, Any]]] = {}
-                for i in items_rows:
-                    i_dict = dict(i)
-                    sid = i_dict["sale_id"]
-                    if sid not in items_by_sale:
-                        items_by_sale[sid] = []
-                    items_by_sale[sid].append(i_dict)
-
-                for s in sales:
-                    s["items"] = items_by_sale.get(s["id"], [])
-
-        # Eğer yerel veritabanında satış bulunamadıysa ve Firebase aktifse (örn. Render yeni uyandıysa), buluttan çekip tekrar dene
+        # Eğer yerel veritabanında satış bulunamadıysa ve Firebase aktifse, buluttan çekip tekrar dene
         if not sales and self.ensure_firebase():
             try:
                 self.pull_all_from_firebase(user_id=uid)
-                with self.db.get_connection() as conn:
-                    rows = conn.execute(query, params).fetchall()
-                    sales = [dict(r) for r in rows] if rows else []
-                    sale_ids = [s["id"] for s in sales]
-                    if sale_ids:
-                        placeholders = ",".join("?" for _ in sale_ids)
-                        items_query = f"SELECT * FROM sale_items WHERE sale_id IN ({placeholders})"
-                        items_rows = conn.execute(items_query, sale_ids).fetchall()
-                        items_by_sale = {}
-                        for i in items_rows:
-                            i_dict = dict(i)
-                            sid = i_dict["sale_id"]
-                            items_by_sale.setdefault(sid, []).append(i_dict)
-                        for s in sales:
-                            s["items"] = items_by_sale.get(s["id"], [])
+                sales = _fetch_with_items(query, params)
             except Exception as e_pull:
                 logger.warning(f"get_sales_history Firestore otomatik çekme uyarısı: {e_pull}")
+
+        # Eğer hala satış bulunamadıysa, mağazada herhangi bir kullanıcıya ait satış var mı kontrol et
+        if not sales:
+            try:
+                fb_query = query.replace("(user_id = ? OR user_id IS NULL)", "1=1")
+                fb_params = params[1:]
+                sales = _fetch_with_items(fb_query, fb_params)
+            except Exception:
+                pass
 
         return sales
 
@@ -2051,7 +2298,7 @@ class CloudDatabase:
 
     def get_sales_analytics(
         self,
-        user_id: Optional[int] = None,
+        user_id: Optional[Union[int, str]] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -2060,10 +2307,10 @@ class CloudDatabase:
             sales_query = "SELECT COUNT(*) as total_transactions, SUM(total_amount) as total_revenue, SUM(item_count) as total_items FROM sales WHERE (user_id = ? OR user_id IS NULL)"
             s_params: list = [uid]
             if start_date:
-                sales_query += " AND sold_at >= ?"
+                sales_query += " AND replace(sold_at, 'T', ' ') >= ?"
                 s_params.append(start_date + " 00:00:00")
             if end_date:
-                sales_query += " AND sold_at <= ?"
+                sales_query += " AND replace(sold_at, 'T', ' ') <= ?"
                 s_params.append(end_date + " 23:59:59")
 
             s_row = conn.execute(sales_query, s_params).fetchone()
@@ -2075,23 +2322,45 @@ class CloudDatabase:
                     total_tx = s_row["total_transactions"] if s_row else 0
                 except Exception:
                     pass
+
+            if total_tx == 0:
+                fb_sq = sales_query.replace("(user_id = ? OR user_id IS NULL)", "1=1")
+                fb_sparams = s_params[1:]
+                fb_row = conn.execute(fb_sq, fb_sparams).fetchone()
+                if fb_row and fb_row["total_transactions"]:
+                    s_row = fb_row
+                    total_tx = fb_row["total_transactions"]
+                    uid_filter = "1=1"
+                    top_params = [p for p in s_params[1:]]
+                    ch_uid_filter = "1=1"
+                    ch_params_extra = [p for p in s_params[1:]]
+                else:
+                    uid_filter = "(s.user_id = ? OR s.user_id IS NULL)"
+                    top_params = [uid]
+                    ch_uid_filter = "(user_id = ? OR user_id IS NULL)"
+                    ch_params_extra = [uid]
+            else:
+                uid_filter = "(s.user_id = ? OR s.user_id IS NULL)"
+                top_params = [uid]
+                ch_uid_filter = "(user_id = ? OR user_id IS NULL)"
+                ch_params_extra = [uid]
+
             total_rev = s_row["total_revenue"] or 0.0
             total_items = s_row["total_items"] or 0
             avg_cart = (total_rev / total_tx) if total_tx > 0 else 0.0
 
             # Top 5 Best Selling Products for this user
-            top_query = """
+            top_query = f"""
                 SELECT si.product_name, SUM(si.quantity) as total_qty, SUM(si.subtotal) as total_sales_amount
                 FROM sale_items si
                 JOIN sales s ON si.sale_id = s.id
-                WHERE (s.user_id = ? OR s.user_id IS NULL)
+                WHERE {uid_filter}
             """
-            top_params: list = [uid]
             if start_date:
-                top_query += " AND s.sold_at >= ?"
+                top_query += " AND replace(s.sold_at, 'T', ' ') >= ?"
                 top_params.append(start_date + " 00:00:00")
             if end_date:
-                top_query += " AND s.sold_at <= ?"
+                top_query += " AND replace(s.sold_at, 'T', ' ') <= ?"
                 top_params.append(end_date + " 23:59:59")
             top_query += " GROUP BY si.product_name ORDER BY total_qty DESC LIMIT 5"
             top_rows = conn.execute(top_query, top_params).fetchall()
@@ -2100,6 +2369,8 @@ class CloudDatabase:
             # Low Stock Items for this user
             low_query = "SELECT id, name, barcode, stock_quantity, critical_stock_level FROM products WHERE is_active = 1 AND (user_id = ? OR user_id IS NULL) AND stock_quantity <= critical_stock_level"
             low_rows = conn.execute(low_query, [uid]).fetchall()
+            if not low_rows:
+                low_rows = conn.execute("SELECT id, name, barcode, stock_quantity, critical_stock_level FROM products WHERE is_active = 1 AND stock_quantity <= critical_stock_level").fetchall()
             low_stock_items = [dict(r) for r in low_rows]
 
             # Total Expenses for this user
@@ -2117,20 +2388,20 @@ class CloudDatabase:
             net_profit = total_rev - total_exp
 
             # Channel Breakdown (Mağaza vs İnternet)
-            ch_query = """
+            ch_query = f"""
                 SELECT COALESCE(channel, 'magaza') as channel,
                        COUNT(*) as tx_count,
                        SUM(total_amount) as revenue,
                        SUM(item_count) as items
                 FROM sales
-                WHERE (user_id = ? OR user_id IS NULL)
+                WHERE {ch_uid_filter}
             """
-            ch_params: list = [uid]
+            ch_params: list = ch_params_extra
             if start_date:
-                ch_query += " AND sold_at >= ?"
+                ch_query += " AND replace(sold_at, 'T', ' ') >= ?"
                 ch_params.append(start_date + " 00:00:00")
             if end_date:
-                ch_query += " AND sold_at <= ?"
+                ch_query += " AND replace(sold_at, 'T', ' ') <= ?"
                 ch_params.append(end_date + " 23:59:59")
             ch_query += " GROUP BY COALESCE(channel, 'magaza')"
             ch_rows = conn.execute(ch_query, ch_params).fetchall()
@@ -2308,13 +2579,13 @@ class CloudDatabase:
 
     def get_expenses(
         self,
-        user_id: Optional[int] = None,
+        user_id: Optional[Union[int, str]] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        uid = user_id or 1
+        uid = self._resolve_user_id(user_id)
         with self.db.get_connection() as conn:
-            query = "SELECT * FROM expenses WHERE user_id = ?"
+            query = "SELECT * FROM expenses WHERE (user_id = ? OR user_id IS NULL)"
             params: list = [uid]
             if start_date:
                 query += " AND expense_date >= ?"
@@ -2325,7 +2596,24 @@ class CloudDatabase:
             query += " ORDER BY expense_date DESC, id DESC LIMIT 100"
 
             rows = conn.execute(query, params).fetchall()
-            return [dict(r) for r in rows]
+            expenses = [dict(r) for r in rows]
+
+            if not expenses and self.ensure_firebase():
+                try:
+                    self.pull_all_from_firebase(user_id=uid)
+                    rows = conn.execute(query, params).fetchall()
+                    expenses = [dict(r) for r in rows]
+                except Exception:
+                    pass
+
+            if not expenses:
+                fb_q = query.replace("(user_id = ? OR user_id IS NULL)", "1=1")
+                fb_p = params[1:]
+                fb_rows = conn.execute(fb_q, fb_p).fetchall()
+                if fb_rows:
+                    expenses = [dict(r) for r in fb_rows]
+
+            return expenses
 
     def get_store_hours(self, user_id: Optional[int] = None) -> Dict[str, str]:
         uid = user_id or 1
@@ -2917,14 +3205,14 @@ class CloudDatabase:
 
     def get_farm_egg_sales(
         self,
-        user_id: Optional[int] = None,
+        user_id: Optional[Union[int, str]] = None,
         customer_name: Optional[str] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         source: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Yumurta satış kayıtlarını filtreli ve tarih sırasına göre döner."""
-        uid = self._resolve_user_id(user_id) or 1
+        uid = self._resolve_user_id(user_id)
         query = "SELECT * FROM farm_egg_sales WHERE (user_id = ? OR user_id IS NULL)"
         params: list = [uid]
 
@@ -2933,22 +3221,39 @@ class CloudDatabase:
             params.append(f"%{customer_name.strip()}%")
 
         if start_date and start_date.strip():
-            query += " AND sale_date >= ?"
+            query += " AND replace(sale_date, 'T', ' ') >= ?"
             params.append(f"{start_date.strip()} 00:00:00" if len(start_date.strip()) == 10 else start_date.strip())
 
         if end_date and end_date.strip():
-            query += " AND sale_date <= ?"
+            query += " AND replace(sale_date, 'T', ' ') <= ?"
             params.append(f"{end_date.strip()} 23:59:59" if len(end_date.strip()) == 10 else end_date.strip())
 
         if source and source.strip() and source.strip().lower() != "tümü":
             query += " AND source = ?"
             params.append(source.strip())
 
-        query += " ORDER BY sale_date DESC, id DESC"
+        query += " ORDER BY replace(sale_date, 'T', ' ') DESC, id DESC"
 
         with self.db.get_connection() as conn:
             rows = conn.execute(query, params).fetchall()
-            return [dict(r) for r in rows]
+            sales = [dict(r) for r in rows]
+
+            if not sales and self.ensure_firebase():
+                try:
+                    self.pull_all_from_firebase(user_id=uid)
+                    rows = conn.execute(query, params).fetchall()
+                    sales = [dict(r) for r in rows]
+                except Exception:
+                    pass
+
+            if not sales:
+                fb_q = query.replace("(user_id = ? OR user_id IS NULL)", "1=1")
+                fb_p = params[1:]
+                fb_rows = conn.execute(fb_q, fb_p).fetchall()
+                if fb_rows:
+                    sales = [dict(r) for r in fb_rows]
+
+            return sales
 
     def delete_farm_egg_sale(self, sale_id: int, user_id: Optional[int] = None) -> tuple[bool, str]:
         """Yumurta satışı kaydını siler."""
@@ -3059,12 +3364,12 @@ class CloudDatabase:
 
     def get_farm_feed_purchases(
         self,
-        user_id: Optional[int] = None,
+        user_id: Optional[Union[int, str]] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Yem alım kayıtlarını tarih sırasına göre döner."""
-        uid = self._resolve_user_id(user_id) or 1
+        uid = self._resolve_user_id(user_id)
         query = "SELECT * FROM farm_feed_purchases WHERE (user_id = ? OR user_id IS NULL)"
         params: list = [uid]
 
@@ -3080,7 +3385,24 @@ class CloudDatabase:
 
         with self.db.get_connection() as conn:
             rows = conn.execute(query, params).fetchall()
-            return [dict(r) for r in rows]
+            purchases = [dict(r) for r in rows]
+
+            if not purchases and self.ensure_firebase():
+                try:
+                    self.pull_all_from_firebase(user_id=uid)
+                    rows = conn.execute(query, params).fetchall()
+                    purchases = [dict(r) for r in rows]
+                except Exception:
+                    pass
+
+            if not purchases:
+                fb_q = query.replace("(user_id = ? OR user_id IS NULL)", "1=1")
+                fb_p = params[1:]
+                fb_rows = conn.execute(fb_q, fb_p).fetchall()
+                if fb_rows:
+                    purchases = [dict(r) for r in fb_rows]
+
+            return purchases
 
     def delete_farm_feed_purchase(self, purchase_id: int, user_id: Optional[int] = None) -> tuple[bool, str]:
         """Yem alım kaydını siler."""

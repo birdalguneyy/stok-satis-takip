@@ -34,6 +34,7 @@ class TestFirebaseSyncResilience(unittest.TestCase):
         self.mock_firestore = MagicMock()
         self.cloud_db.firestore_db = self.mock_firestore
         self.cloud_db._hydration_completed = False
+        self.cloud_db._last_pull_timestamp = 0.0
 
         # Ensure user 1 exists
         with self.db.get_connection() as conn:
@@ -417,6 +418,104 @@ class TestFirebaseSyncResilience(unittest.TestCase):
         res_inv = client.post("/api/firebase/config", json={"credentials": "invalid"}, headers={"X-Gate-Token": EXPECTED_GATE_TOKEN})
         self.assertEqual(res_inv.status_code, 400)
         self.assertIn("Geçersiz kimlik formatı", res_inv.get_json()["message"])
+
+
+    def test_ensure_initial_hydration_runs_even_with_demo_products(self):
+        """ensure_initial_hydration must NOT skip hydration if only demo products exist and sales is 0."""
+        # Ensure only demo products in DB
+        with self.db.get_connection() as conn:
+            conn.execute("DELETE FROM sale_items")
+            conn.execute("DELETE FROM sales")
+            conn.execute("DELETE FROM farm_egg_sales")
+            conn.execute("DELETE FROM products WHERE barcode NOT LIKE '86900000000%'")
+
+        # Mock firestore sales doc
+        mock_doc = MagicMock()
+        mock_doc.id = "u1_s777"
+        mock_doc.to_dict.return_value = {
+            "id": 777,
+            "user_id": 1,
+            "total_amount": 1500.0,
+            "item_count": 1,
+            "sold_at": "2026-10-10 10:00:00",
+            "items": [],
+        }
+        self.mock_firestore.collection.return_value.stream.return_value = [mock_doc]
+        self.cloud_db._hydration_completed = False
+        self.cloud_db._last_pull_timestamp = 0
+
+        res = self.cloud_db.ensure_initial_hydration(force=False)
+        self.assertTrue(res)
+        self.assertTrue(self.cloud_db._hydration_completed)
+
+        # Check sale was pulled into SQLite
+        with self.db.get_connection() as conn:
+            sale = conn.execute("SELECT * FROM sales WHERE id = 777").fetchone()
+            self.assertIsNotNone(sale)
+            self.assertEqual(sale["total_amount"], 1500.0)
+
+    def test_get_farm_egg_sales_auto_pulls_when_empty(self):
+        """get_farm_egg_sales must auto-pull from Firestore when local farm_egg_sales table is 0."""
+        mock_doc = MagicMock()
+        mock_doc.id = "u1_es555"
+        mock_doc.to_dict.return_value = {
+            "id": 555,
+            "user_id": 1,
+            "customer_name": "Ahmet Çiftlik",
+            "box_count": 2.0,
+            "unit_type": "koli",
+            "piece_count": 60.0,
+            "unit_price": 100.0,
+            "total_amount": 200.0,
+            "source": "Ciftlik",
+            "sale_date": "2026-10-10 11:00:00",
+        }
+        self.mock_firestore.collection.return_value.stream.return_value = [mock_doc]
+        self.cloud_db._last_pull_timestamp = 0
+
+        with self.db.get_connection() as conn:
+            conn.execute("DELETE FROM farm_egg_sales")
+
+        egg_sales = self.cloud_db.get_farm_egg_sales(user_id=1)
+        self.assertGreaterEqual(len(egg_sales), 1)
+        self.assertEqual(egg_sales[0]["customer_name"], "Ahmet Çiftlik")
+
+    def test_pull_sales_id_collision_protection(self):
+        """If a pulled Firestore sale has an ID matching a different existing sale, a new ID is assigned to avoid data loss."""
+        with self.db.get_connection() as conn:
+            conn.execute("DELETE FROM sale_items")
+            conn.execute("DELETE FROM sales")
+            conn.execute(
+                """
+                INSERT INTO sales (id, user_id, total_amount, item_count, sold_at, note, channel, customer_name)
+                VALUES (50, 1, 100.0, 1, '2026-10-01 10:00:00', 'Eski Satış', 'magaza', 'Müşteri 1')
+                """
+            )
+
+        # Pull a different sale that also claims id 50
+        mock_doc = MagicMock()
+        mock_doc.id = "u1_s50"
+        mock_doc.to_dict.return_value = {
+            "id": 50,
+            "user_id": 1,
+            "total_amount": 999.0,
+            "item_count": 3,
+            "sold_at": "2026-10-10 12:00:00",
+            "note": "Yeni Farklı Satış",
+            "channel": "magaza",
+            "customer_name": "Müşteri 2",
+            "items": [],
+        }
+        self.mock_firestore.collection.return_value.stream.return_value = [mock_doc]
+        self.cloud_db.pull_all_from_firebase(user_id=1)
+
+        with self.db.get_connection() as conn:
+            all_sales = conn.execute("SELECT * FROM sales ORDER BY id ASC").fetchall()
+            # Both sales must exist! Neither was overwritten
+            self.assertEqual(len(all_sales), 2)
+            ids = [s["id"] for s in all_sales]
+            self.assertIn(50, ids)
+            self.assertIn(51, ids)
 
 
 if __name__ == "__main__":

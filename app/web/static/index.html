@@ -4689,7 +4689,14 @@
     function setDatePreset(preset, btnEl) {
       currentDatePreset = preset;
       document.querySelectorAll('.date-pill').forEach(p => p.classList.remove('active'));
-      if (btnEl) btnEl.classList.add('active');
+      if (btnEl) {
+        btnEl.classList.add('active');
+      } else {
+        document.querySelectorAll('.date-pill').forEach(p => {
+          const oc = p.getAttribute('onclick') || '';
+          if (oc.includes(`'${preset}'`)) p.classList.add('active');
+        });
+      }
 
       const now = new Date();
       const formatYMD = (d) => {
@@ -5478,7 +5485,42 @@
       const summaryHtml = buildSalesBottomSummaryHTML(filtered);
 
       if (!filtered.length) {
-        container.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:30px;">Aradığınız kriterlere uygun satış hareketi bulunamadı.</div>' + summaryHtml;
+        let emptyPrompt = '';
+        if (currentStartDate || currentEndDate) {
+          emptyPrompt = `
+            <div style="text-align:center; padding:35px 20px; background:var(--card); border:1.5px dashed var(--border); border-radius:14px; margin:15px 0;">
+              <div style="font-size:2.2rem; margin-bottom:8px;">🔎</div>
+              <div style="font-weight:700; font-size:1.05rem; color:var(--text); margin-bottom:6px;">Seçili Tarih Aralığında Satış Hareketi Yok</div>
+              <div style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;">
+                Seçtiğiniz tarihler arasında satış bulunamadı. Tüm geçmiş satışları görmek için "Tüm Zamanlar" periyodunu seçebilir veya buluttan verileri yenileyebilirsiniz.
+              </div>
+              <div style="display:flex; justify-content:center; gap:10px; flex-wrap:wrap;">
+                <button type="button" class="btn" style="width:auto; padding:8px 18px; font-size:0.85rem; font-weight:700; background:var(--accent); color:#fff; border-radius:8px; cursor:pointer;" onclick="setDatePreset('all')">
+                  🌐 Tüm Zamanları Göster
+                </button>
+                <button type="button" class="btn btn-secondary" style="width:auto; padding:8px 18px; font-size:0.85rem; font-weight:700; border-radius:8px; cursor:pointer;" onclick="triggerFullCloudSync()">
+                  ☁️ Buluttan Satışları İndir (Eşitle)
+                </button>
+              </div>
+            </div>
+          `;
+        } else {
+          emptyPrompt = `
+            <div style="text-align:center; padding:40px 20px; background:var(--card); border:1.5px dashed var(--border); border-radius:14px; margin:15px 0;">
+              <div style="font-size:2.4rem; margin-bottom:8px;">🧾</div>
+              <div style="font-weight:700; font-size:1.1rem; color:var(--text); margin-bottom:6px;">Kayıtlı Satış Hareketi Bulunmuyor</div>
+              <div style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;">
+                Yerel veritabanında henüz satış fişi bulunamadı. Firebase'deki geçmiş satışlarınızı hemen SQLite'a çekmek için aşağıdaki butona tıklayabilirsiniz.
+              </div>
+              <div style="display:flex; justify-content:center; gap:10px; flex-wrap:wrap;">
+                <button type="button" class="btn" style="width:auto; padding:10px 22px; font-size:0.88rem; font-weight:800; background:linear-gradient(135deg, #10B981, #059669); color:#fff; border-radius:10px; cursor:pointer; box-shadow:0 4px 14px rgba(16,185,129,0.3);" onclick="triggerFullCloudSync()">
+                  ☁️ Buluttan Geçmiş Satışları İndir (Eşitle)
+                </button>
+              </div>
+            </div>
+          `;
+        }
+        container.innerHTML = emptyPrompt + summaryHtml;
         updateBulkDeleteButton();
         return;
       }
@@ -6196,6 +6238,13 @@
         if (json.ok && json.result) {
           if (json.result.synced) {
             showToast(json.result.reason || "✅ Firebase ile eşitlendi.");
+            if ((json.result.pulled || 0) > 0) {
+              try { loadProducts(); } catch(e) {}
+              try { if (typeof loadPOSProductPicker === 'function') loadPOSProductPicker(); } catch(e) {}
+              try { if (typeof loadSalesHistory === 'function') loadSalesHistory(); } catch(e) {}
+              try { if (typeof loadFarmEggSalesWeb === 'function') loadFarmEggSalesWeb(); } catch(e) {}
+              try { if (typeof loadFarmFeedPurchasesWeb === 'function') loadFarmFeedPurchasesWeb(); } catch(e) {}
+            }
           } else {
             showToast("⚠️ " + (json.result.reason || "Firebase çevrimdışı! Veriler yerel veritabanında saklanmaktadır."));
           }
@@ -6311,8 +6360,15 @@
           if (textInput) textInput.value = '';
           const fileInput = document.getElementById('fb-json-file-input');
           if (fileInput) fileInput.value = '';
+          closeFirebaseModal();
           await checkSyncStatus();
           await loadFirebaseDiagnosticInfo();
+          try { await loadProducts(); } catch(e) {}
+          try { if (typeof loadPOSProductPicker === 'function') loadPOSProductPicker(); } catch(e) {}
+          try { if (typeof loadSalesHistory === 'function') await loadSalesHistory(); } catch(e) {}
+          try { if (typeof loadFarmEggSalesWeb === 'function') await loadFarmEggSalesWeb(); } catch(e) {}
+          try { if (typeof loadFarmFeedPurchasesWeb === 'function') await loadFarmFeedPurchasesWeb(); } catch(e) {}
+          try { if (typeof loadExpenses === 'function') await loadExpenses(); } catch(e) {}
         } else {
           showToast("❌ " + (json.message || "Firebase bağlantı hatası!"));
           await loadFirebaseDiagnosticInfo();

@@ -346,10 +346,15 @@ class CloudDatabase:
                     self.firebase_last_error = "Firestore günlük kota sınırı aşıldı."
                     return False, "Firebase bağlantısı sağlandı ancak günlük okuma kotası (50.000 limit) aşıldığı için Firestore sorguları reddediliyor."
 
-            threading.Thread(target=self.ensure_initial_hydration, kwargs={"force": True}, daemon=True).start()
+            # İlk veri çekimini (initial hydration) derhal gerçekleştir
+            try:
+                self.ensure_initial_hydration(force=True)
+            except Exception as hyd_err:
+                logger.warning(f"save_firebase_credentials hydration uyarısı: {hyd_err}")
 
             proj = self.firebase_project_id or c_dict.get("project_id", "")
-            return True, f"Firebase bağlantısı başarıyla kuruldu! (Proje: {proj})"
+            pulled_info = f" ({self._last_pulled_count} kayıt aktarıldı)" if getattr(self, "_last_pulled_count", 0) > 0 else ""
+            return True, f"Firebase bağlantısı başarıyla kuruldu! (Proje: {proj}){pulled_info}"
         except Exception as exc:
             logger.exception("save_firebase_credentials hatası")
             return False, f"Kimlik kaydetme hatası: {exc}"
@@ -363,8 +368,8 @@ class CloudDatabase:
 
     def ensure_initial_hydration(self, force: bool = False) -> bool:
         """Render konteyneri yeni dağıtıldığında veya SQLite sıfırlandığında,
-        buluttaki tüm verileri SQLite'a tek seferlik aktarır.
-        SQLite'ta zaten veri varsa (ürün, satış vb.) Firestore'u boş yere okumaz (READ harcamaz).
+        buluttaki tüm verileri SQLite'a aktarır.
+        SQLite'ta gerçek veri varsa (demo harici ürün ve satışlar) Firestore'u boş yere okumaz (READ harcamaz).
         """
         if not self.ensure_firebase():
             return False
@@ -374,20 +379,23 @@ class CloudDatabase:
                 return True
 
             with self.db.get_connection() as conn:
-                p_cnt = conn.execute("SELECT COUNT(*) FROM products").fetchone()[0]
+                real_p_cnt = conn.execute("SELECT COUNT(*) FROM products WHERE barcode NOT LIKE '86900000000%'").fetchone()[0]
                 s_cnt = conn.execute("SELECT COUNT(*) FROM sales").fetchone()[0]
+                es_cnt = conn.execute("SELECT COUNT(*) FROM farm_egg_sales").fetchone()[0]
 
-            if not force and (p_cnt > 0 or s_cnt > 0):
+            # Sadece hem gerçek ürünler hem de satışlar (mağaza veya çiftlik) zaten yerelde mevcutsa atla
+            if not force and real_p_cnt > 0 and (s_cnt > 0 or es_cnt > 0):
                 self._hydration_completed = True
                 return True
 
             now_ts = time.time()
-            if not force and (now_ts - self._last_pull_timestamp < 60):
+            if not force and (now_ts - self._last_pull_timestamp < 30):
                 return True
 
             logger.info("Firestore ilk veri yüklemesi (initial hydration) başlatılıyor...")
             try:
                 pulled = self.pull_all_from_firebase()
+                self._last_pulled_count = pulled
                 self._hydration_completed = True
                 self._last_pull_timestamp = time.time()
                 logger.info(f"Firestore ilk veri yüklemesi tamamlandı: {pulled} kayıt yerel SQLite'a aktarıldı.")
@@ -612,6 +620,24 @@ class CloudDatabase:
 
                         if sid:
                             s_at = normalize_datetime_str(d.get("sold_at"))
+                            # ID çakışma önleme: Farklı bir satışın üzerine yazılmasını engelle
+                            existing_sale = conn.execute("SELECT sold_at, total_amount FROM sales WHERE id = ?", (sid,)).fetchone()
+                            if existing_sale:
+                                ex_sold = existing_sale["sold_at"]
+                                ex_tot = float(existing_sale["total_amount"] or 0)
+                                cur_tot = float(d.get("total_amount", 0))
+                                if ex_sold != s_at or abs(ex_tot - cur_tot) > 0.05:
+                                    max_s = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM sales").fetchone()[0]
+                                    sid = int(max_s)
+
+                            # item_count pozitif tamsayı olmalıdır (SQLite CHECK (item_count > 0))
+                            try:
+                                raw_item_cnt = int(d.get("item_count") or 0)
+                            except Exception:
+                                raw_item_cnt = 0
+                            items_len = len(d.get("items") or [])
+                            safe_item_count = max(1, raw_item_cnt, items_len)
+
                             conn.execute(
                                 """
                                 INSERT OR REPLACE INTO sales (
@@ -622,7 +648,7 @@ class CloudDatabase:
                                     sid,
                                     final_uid,
                                     float(d.get("total_amount", 0)),
-                                    int(d.get("item_count", 0)),
+                                    safe_item_count,
                                     s_at,
                                     d.get("note", "Satış"),
                                     d.get("channel", "magaza"),
@@ -843,6 +869,13 @@ class CloudDatabase:
                             final_uid = 1
 
                         if es_id and d.get("customer_name"):
+                            es_sdate = normalize_datetime_str(d.get("sale_date"))
+                            existing_es = conn.execute("SELECT customer_name, sale_date FROM farm_egg_sales WHERE id = ?", (es_id,)).fetchone()
+                            if existing_es:
+                                if existing_es["customer_name"] != d.get("customer_name") or existing_es["sale_date"] != es_sdate:
+                                    max_es = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM farm_egg_sales").fetchone()[0]
+                                    es_id = int(max_es)
+
                             conn.execute(
                                 """
                                 INSERT OR REPLACE INTO farm_egg_sales (
@@ -860,7 +893,7 @@ class CloudDatabase:
                                     float(d.get("unit_price", 0)),
                                     float(d.get("total_amount", 0)),
                                     d.get("source", "Ciftlik"),
-                                    normalize_datetime_str(d.get("sale_date")),
+                                    es_sdate,
                                     d.get("note", ""),
                                     normalize_datetime_str(d.get("created_at")),
                                 ),
@@ -914,6 +947,13 @@ class CloudDatabase:
                             tot_ton = float(d.get("total_weight_ton", tot_kg / 1000.0))
                             raw_pdate = str(d.get("purchase_date") or "").strip()
                             p_date = raw_pdate[:10] if len(raw_pdate) >= 10 else now[:10]
+
+                            existing_fp = conn.execute("SELECT supplier, purchase_date FROM farm_feed_purchases WHERE id = ?", (fp_id,)).fetchone()
+                            if existing_fp:
+                                if existing_fp["supplier"] != d.get("supplier", "") or existing_fp["purchase_date"] != p_date:
+                                    max_fp = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM farm_feed_purchases").fetchone()[0]
+                                    fp_id = int(max_fp)
+
                             conn.execute(
                                 """
                                 INSERT OR REPLACE INTO farm_feed_purchases (
@@ -1525,13 +1565,18 @@ class CloudDatabase:
             rows = conn.execute(query, params).fetchall()
             products = [dict(r) for r in rows]
 
-            if not products and not self._hydration_completed and not search:
-                try:
-                    self.ensure_initial_hydration(force=True)
-                    rows = conn.execute(query, params).fetchall()
-                    products = [dict(r) for r in rows]
-                except Exception as e:
-                    logger.warning(f"get_products auto-pull uyarısı: {e}")
+            real_count = conn.execute("SELECT COUNT(*) FROM products WHERE barcode NOT LIKE '86900000000%'").fetchone()[0]
+            if real_count == 0 and not search and self.ensure_firebase():
+                now_ts = time.time()
+                if now_ts - self._last_pull_timestamp > 10:
+                    try:
+                        self.pull_all_from_firebase(user_id=uid)
+                        self._last_pull_timestamp = now_ts
+                        self._hydration_completed = True
+                        rows = conn.execute(query, params).fetchall()
+                        products = [dict(r) for r in rows]
+                    except Exception as e:
+                        logger.warning(f"get_products auto-pull uyarısı: {e}")
 
             if not products:
                 fb_query = query.replace("(p.user_id = ? OR p.user_id IS NULL)", "1=1")
@@ -2439,13 +2484,20 @@ class CloudDatabase:
 
         sales = _fetch_with_items(query, params)
 
-        # Eğer yerel veritabanında satış bulunamadıysa ve henüz buluttan çekilmediyse, tek seferlik hidrasyon dene
-        if not sales and not self._hydration_completed:
-            try:
-                self.ensure_initial_hydration(force=True)
-                sales = _fetch_with_items(query, params)
-            except Exception as e_pull:
-                logger.warning(f"get_sales_history Firestore otomatik çekme uyarısı: {e_pull}")
+        # Eğer yerel veritabanında satış bulunamadıysa ve Firestore bağlıysa, otomatik çekmeyi dene
+        if not sales and self.ensure_firebase():
+            with self.db.get_connection() as conn:
+                tot_s = conn.execute("SELECT COUNT(*) FROM sales").fetchone()[0]
+            if tot_s == 0:
+                now_ts = time.time()
+                if now_ts - self._last_pull_timestamp > 10:
+                    try:
+                        self.pull_all_from_firebase(user_id=uid)
+                        self._last_pull_timestamp = now_ts
+                        self._hydration_completed = True
+                        sales = _fetch_with_items(query, params)
+                    except Exception as e_pull:
+                        logger.warning(f"get_sales_history Firestore otomatik çekme uyarısı: {e_pull}")
 
         # Eğer hala satış bulunamadıysa, mağazada herhangi bir kullanıcıya ait satış var mı kontrol et
         if not sales:
@@ -3462,13 +3514,19 @@ class CloudDatabase:
             rows = conn.execute(query, params).fetchall()
             sales = [dict(r) for r in rows]
 
-            if not sales and not self._hydration_completed:
-                try:
-                    self.ensure_initial_hydration()
-                    rows = conn.execute(query, params).fetchall()
-                    sales = [dict(r) for r in rows]
-                except Exception:
-                    pass
+            if not sales and self.ensure_firebase():
+                tot_es = conn.execute("SELECT COUNT(*) FROM farm_egg_sales").fetchone()[0]
+                if tot_es == 0:
+                    now_ts = time.time()
+                    if now_ts - self._last_pull_timestamp > 10:
+                        try:
+                            self.pull_all_from_firebase(user_id=uid)
+                            self._last_pull_timestamp = now_ts
+                            self._hydration_completed = True
+                            rows = conn.execute(query, params).fetchall()
+                            sales = [dict(r) for r in rows]
+                        except Exception as e_pull:
+                            logger.warning(f"get_farm_egg_sales Firestore otomatik çekme uyarısı: {e_pull}")
 
             if not sales:
                 fb_q = query.replace("(user_id = ? OR user_id IS NULL)", "1=1")
@@ -3615,13 +3673,19 @@ class CloudDatabase:
             rows = conn.execute(query, params).fetchall()
             purchases = [dict(r) for r in rows]
 
-            if not purchases and not self._hydration_completed:
-                try:
-                    self.ensure_initial_hydration()
-                    rows = conn.execute(query, params).fetchall()
-                    purchases = [dict(r) for r in rows]
-                except Exception:
-                    pass
+            if not purchases and self.ensure_firebase():
+                tot_fp = conn.execute("SELECT COUNT(*) FROM farm_feed_purchases").fetchone()[0]
+                if tot_fp == 0:
+                    now_ts = time.time()
+                    if now_ts - self._last_pull_timestamp > 10:
+                        try:
+                            self.pull_all_from_firebase(user_id=uid)
+                            self._last_pull_timestamp = now_ts
+                            self._hydration_completed = True
+                            rows = conn.execute(query, params).fetchall()
+                            purchases = [dict(r) for r in rows]
+                        except Exception as e_pull:
+                            logger.warning(f"get_farm_feed_purchases Firestore otomatik çekme uyarısı: {e_pull}")
 
             if not purchases:
                 fb_q = query.replace("(user_id = ? OR user_id IS NULL)", "1=1")

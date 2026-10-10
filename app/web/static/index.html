@@ -1579,7 +1579,7 @@
       <div id="farm-badge" class="status-badge" style="font-weight:700; background:#059669; color:#fff; cursor:pointer;" onclick="openFarmModal()">🚜 Çiftlik</div>
       <div id="p2p-status-badge" class="status-badge" style="font-weight:700;" onclick="openP2PModal()">🔴 PC Bağlı Değil</div>
 
-      <div id="sync-status-badge" class="status-badge" style="font-weight:700; cursor:pointer;" onclick="openFirebaseSettingsModal()" title="Firebase Bağlantı Durumu ve Ayarları">🟢 Firebase Aktif</div>
+      <div id="sync-status-badge" class="status-badge" style="font-weight:700; cursor:pointer;" onclick="openFirebaseSettingsModal()" title="Firebase Bağlantı Durumu ve Ayarları">🔥 ⏳ Firebase...</div>
       <div id="user-profile-badge" class="status-badge" onclick="openAuthModal()">🏢 <span id="user-profile-name">Giriş / Profil</span></div>
 
       <div id="pwa-install-badge" class="status-badge" style="display:none;" onclick="installPWA()">📲 Yükle</div>
@@ -6194,9 +6194,13 @@
         const res = await fetchWithAuth('/api/sync/trigger');
         const json = await res.json();
         if (json.ok && json.result) {
-          showToast(json.result.reason || "Firebase ile eşitlendi.");
+          if (json.result.synced) {
+            showToast(json.result.reason || "✅ Firebase ile eşitlendi.");
+          } else {
+            showToast("⚠️ " + (json.result.reason || "Firebase çevrimdışı! Veriler yerel veritabanında saklanmaktadır."));
+          }
         } else if (json.message) {
-          showToast(json.message);
+          showToast("⚠️ " + json.message);
         }
       } catch (err) {
         showToast("🌐 Senkronizasyon isteği iletilemedi!");
@@ -6529,7 +6533,9 @@
         const json = await res.json();
         if (json.ok && json.result) {
           const resObj = json.result;
-          if (resObj.reason) {
+          if (!resObj.synced) {
+            showToast("⚠️ " + (resObj.reason || "Firebase çevrimdışı! Lütfen Firebase anahtarını kontrol ediniz."));
+          } else if (resObj.reason) {
             showToast(resObj.reason);
           } else if ((resObj.pushed || 0) === 0 && (resObj.pulled || 0) === 0) {
             showToast("✅ Tüm verileriniz bulut ile güncel ve senkronize.");
@@ -6540,9 +6546,11 @@
           if (typeof loadPOSProductPicker === 'function') loadPOSProductPicker();
           if (typeof loadSalesHistory === 'function') loadSalesHistory();
           checkSyncStatus();
+        } else {
+          showToast("❌ " + (json.message || "Bulut senkronizasyonu başarısız!"));
         }
       } catch (e) {
-        showToast("Bulut senkronizasyonu başarısız!");
+        showToast("❌ Bulut senkronizasyonu başarısız!");
       }
     }
 
@@ -6618,6 +6626,7 @@
       initIndexedDB();
       checkAIStatus();
       checkSavedAuthSession();
+      checkSyncStatus();
       startRealtimeListener();
       setInterval(checkSyncStatus, 45000);
       setTheme(localStorage.getItem('app-theme') || 'light');

@@ -351,6 +351,73 @@ class TestFirebaseSyncResilience(unittest.TestCase):
         res_auth = client.get("/api/products", headers={"X-Gate-Token": token})
         self.assertEqual(res_auth.status_code, 200)
 
+    def test_parse_cred_dict_variations(self):
+        """CloudDatabase._parse_cred_dict should cleanly parse JSON strings, base64, and dicts."""
+        import base64
+        import json
+
+        sample = {
+            "type": "service_account",
+            "project_id": "test-project-123",
+            "private_key": "-----BEGIN PRIVATE KEY-----\\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASC\\n-----END PRIVATE KEY-----\\n",
+            "client_email": "test@test-project-123.iam.gserviceaccount.com"
+        }
+        # 1. Plain dict
+        parsed = self.cloud_db._parse_cred_dict(sample)
+        self.assertIsNotNone(parsed)
+        self.assertIn("\n", parsed["private_key"])
+        self.assertNotIn("\\n", parsed["private_key"])
+
+        # 2. JSON string
+        json_str = json.dumps(sample)
+        parsed_str = self.cloud_db._parse_cred_dict(json_str)
+        self.assertIsNotNone(parsed_str)
+        self.assertEqual(parsed_str["project_id"], "test-project-123")
+
+        # 3. Quoted JSON string (Render env var format)
+        quoted_str = f"'{json_str}'"
+        parsed_quoted = self.cloud_db._parse_cred_dict(quoted_str)
+        self.assertIsNotNone(parsed_quoted)
+        self.assertEqual(parsed_quoted["project_id"], "test-project-123")
+
+        # 4. Base64 encoded JSON
+        b64_str = base64.b64encode(json_str.encode("utf-8")).decode("utf-8")
+        parsed_b64 = self.cloud_db._parse_cred_dict(b64_str)
+        self.assertIsNotNone(parsed_b64)
+        self.assertEqual(parsed_b64["project_id"], "test-project-123")
+
+        # 5. Invalid string returns None
+        self.assertIsNone(self.cloud_db._parse_cred_dict("not-a-json-string"))
+        self.assertIsNone(self.cloud_db._parse_cred_dict(""))
+
+    def test_sync_status_endpoint_returns_diagnostics(self):
+        """The /api/sync/status endpoint should return has_firebase, last_error, and diagnostics."""
+        from app.web.web_server import app, EXPECTED_GATE_TOKEN
+        client = app.test_client()
+
+        res = client.get("/api/sync/status", headers={"X-Gate-Token": EXPECTED_GATE_TOKEN})
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertTrue(data["ok"])
+        self.assertIn("has_firebase", data)
+        self.assertIn("last_error", data)
+        self.assertIn("project_id", data)
+        self.assertIn("cred_source", data)
+
+    def test_firebase_config_endpoint_validation(self):
+        """The /api/firebase/config endpoint should reject empty or invalid JSON."""
+        from app.web.web_server import app, EXPECTED_GATE_TOKEN
+        client = app.test_client()
+
+        # Empty body
+        res_empty = client.post("/api/firebase/config", json={}, headers={"X-Gate-Token": EXPECTED_GATE_TOKEN})
+        self.assertEqual(res_empty.status_code, 400)
+
+        # Invalid credentials format
+        res_inv = client.post("/api/firebase/config", json={"credentials": "invalid"}, headers={"X-Gate-Token": EXPECTED_GATE_TOKEN})
+        self.assertEqual(res_inv.status_code, 400)
+        self.assertIn("Geçersiz kimlik formatı", res_inv.get_json()["message"])
+
 
 if __name__ == "__main__":
     unittest.main()

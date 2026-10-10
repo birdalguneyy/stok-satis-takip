@@ -99,6 +99,9 @@ class CloudDatabase:
         except Exception as exc:
             logger.warning(f"Migration otomatik çalıştırma uyarısı: {exc}")
         self.firestore_db = None
+        self.firebase_last_error = None
+        self.firebase_cred_source = None
+        self.firebase_project_id = None
         # Clean orphan rows from older single-user versions by attaching them to primary user 1
         try:
             with self.db.get_connection() as conn:
@@ -133,81 +136,223 @@ class CloudDatabase:
         self._initialized = True
 
 
-    def _init_firebase_optional(self) -> None:
+    @staticmethod
+    def _parse_cred_dict(raw: Any) -> Optional[dict]:
+        """Verilen nesneyi (dict, JSON string, Base64 vb.) Firebase Service Account sözlüğüne çevirir."""
+        if not raw:
+            return None
+        c_dict = None
+        if isinstance(raw, dict):
+            c_dict = dict(raw)
+        elif isinstance(raw, str):
+            s = raw.strip()
+            # Tırnak temizliği (örnek: '"{"type": ...}"' veya ''{"type": ...}'')
+            while (s.startswith("'") and s.endswith("'")) or (s.startswith('"') and s.endswith('"')):
+                s = s[1:-1].strip()
+            # Base64 kontrolü
+            if not s.startswith("{"):
+                try:
+                    dec = base64.b64decode(s).decode("utf-8", errors="ignore").strip()
+                    if dec.startswith("{"):
+                        s = dec
+                except Exception:
+                    pass
+            try:
+                c_dict = json.loads(s, strict=False)
+                if isinstance(c_dict, str):
+                    c_dict = json.loads(c_dict, strict=False)
+            except Exception:
+                return None
+
+        if isinstance(c_dict, dict) and "private_key" in c_dict:
+            pk = str(c_dict.get("private_key", ""))
+            c_dict["private_key"] = pk.replace("\\n", "\n").replace("\\\\n", "\n")
+            return c_dict
+        return None
+
+    def _init_firebase_optional(self, force: bool = False) -> None:
         """Firebase Admin / Firestore bağlantısını dondurmadan arka planda dener."""
         try:
             import firebase_admin
             from firebase_admin import credentials, firestore
 
-            if firebase_admin._apps:
+            if force and firebase_admin._apps:
+                for app_name in list(firebase_admin._apps.keys()):
+                    try:
+                        firebase_admin.delete_app(firebase_admin._apps[app_name])
+                    except Exception:
+                        pass
+                self.firestore_db = None
+
+            if not force and firebase_admin._apps and self.firestore_db is not None:
+                return
+
+            if not force and firebase_admin._apps and self.firestore_db is None:
                 try:
                     self.firestore_db = firestore.client()
+                    self.firebase_last_error = None
                     logger.info("Firebase Firestore mevcut uygulamadan bağlandı.")
                     return
                 except Exception as e:
                     logger.warning(f"Firebase Firestore istemci alma hatası: {e}")
+                    self.firebase_last_error = str(e)
 
             cred = None
-            env_json = os.environ.get("FIREBASE_CREDENTIALS_JSON")
-            env_path = os.environ.get("FIREBASE_CREDENTIALS_PATH")
+            source_name = None
+            detected_project_id = None
 
-            candidate_paths = [
-                Path(__file__).resolve().parent.parent.parent / "firebase_credentials.json",
-                Path.cwd() / "firebase_credentials.json",
-                DATA_DIR.parent / "firebase_credentials.json",
-                DATA_DIR / "firebase_credentials.json",
+            # 1. Ortam Değişkenleri Kontrolü (Render, Cloud veya Yerel)
+            env_var_names = [
+                "FIREBASE_CREDENTIALS_JSON",
+                "FIREBASE_CREDENTIALS",
+                "GOOGLE_APPLICATION_CREDENTIALS",
+                "FIREBASE_SERVICE_ACCOUNT",
+                "FIREBASE_SERVICE_ACCOUNT_KEY",
+                "FIREBASE_KEY",
+                "FIREBASE_CONFIG",
+                "FIREBASE_ADMIN_CREDENTIALS",
+                "FIREBASE_CREDENTIALS_PATH",
             ]
-            file_path = next((p for p in candidate_paths if p.exists()), None)
-
-            if env_json and env_json.strip():
-                raw_json = env_json.strip()
+            for var_name in env_var_names:
+                val = os.environ.get(var_name)
+                if not val or not val.strip():
+                    continue
+                val = val.strip()
+                # Değer bir dosya yolu mu?
                 try:
-                    # Render panelinden bazen dış tırnaklar ile gelebilir
-                    if (raw_json.startswith("'") and raw_json.endswith("'")) or (raw_json.startswith('"') and raw_json.endswith('"')):
-                        raw_json = raw_json[1:-1].strip()
-                    if not raw_json.startswith("{"):
+                    p = Path(val)
+                    if p.exists() and p.is_file():
                         try:
-                            raw_json = base64.b64decode(raw_json).decode("utf-8")
-                        except Exception:
-                            pass
-                    c_dict = json.loads(raw_json)
-                    if isinstance(c_dict, str):
-                        c_dict = json.loads(c_dict)
-                    if isinstance(c_dict, dict) and "private_key" in c_dict:
-                        c_dict["private_key"] = c_dict["private_key"].replace("\\n", "\n").replace("\\\\n", "\n")
-                    cred = credentials.Certificate(c_dict)
-                    logger.info("Firebase kimlik bilgileri ortam değişkeninden (JSON) yüklendi.")
-                except Exception as e:
-                    logger.warning(f"Ortam değişkeninden Firebase JSON ayrıştırma hatası: {e}")
+                            file_dict = self._parse_cred_dict(p.read_text(encoding="utf-8"))
+                            if file_dict:
+                                cred = credentials.Certificate(file_dict)
+                                detected_project_id = file_dict.get("project_id")
+                            else:
+                                cred = credentials.Certificate(str(p))
+                            source_name = f"Ortam Değişkeni Dosya Yolu ({var_name}={p.name})"
+                            logger.info(f"Firebase kimlik bilgileri {source_name} üzerinden yüklendi.")
+                            break
+                        except Exception as e_path:
+                            logger.warning(f"{var_name} dosyasından sertifika alma uyarısı: {e_path}")
+                except Exception:
+                    pass
 
-            if not cred and env_path and Path(env_path).exists():
-                cred = credentials.Certificate(env_path)
-                logger.info(f"Firebase kimlik bilgileri ortam yolundan ({env_path}) yüklendi.")
+                # Değer doğrudan JSON / Base64 içeriği mi?
+                c_dict = self._parse_cred_dict(val)
+                if c_dict:
+                    try:
+                        cred = credentials.Certificate(c_dict)
+                        detected_project_id = c_dict.get("project_id")
+                        source_name = f"Ortam Değişkeni JSON ({var_name})"
+                        logger.info(f"Firebase kimlik bilgileri {source_name} üzerinden yüklendi.")
+                        break
+                    except Exception as e_cert:
+                        logger.warning(f"{var_name} JSON sertifika alma uyarısı: {e_cert}")
 
-            if not cred and file_path and file_path.exists():
+            # 2. Disk Üzerindeki Aday Dosyalar Kontrolü
+            if not cred:
+                candidate_paths = [
+                    DATA_DIR / "firebase_credentials.json",
+                    DATA_DIR / "firebase_key.json",
+                    DATA_DIR.parent / "firebase_credentials.json",
+                    DATA_DIR.parent / "firebase_key.json",
+                    Path(__file__).resolve().parent.parent.parent / "firebase_credentials.json",
+                    Path(__file__).resolve().parent.parent.parent / "firebase-credentials.json",
+                    Path(__file__).resolve().parent.parent.parent / "serviceAccountKey.json",
+                    Path(__file__).resolve().parent.parent.parent / "firebase-key.json",
+                    Path.cwd() / "firebase_credentials.json",
+                    Path.cwd() / "firebase-credentials.json",
+                    Path.cwd() / "serviceAccountKey.json",
+                    Path.cwd() / "firebase-key.json",
+                    Path("/etc/secrets/firebase_credentials.json"),
+                    Path("/etc/secrets/firebase-credentials.json"),
+                    Path("/etc/secrets/serviceAccountKey.json"),
+                    Path("/etc/secrets/firebase-key.json"),
+                    Path("/etc/secrets/service_account.json"),
+                    Path("/etc/secrets/google-services.json"),
+                ]
+                for p in candidate_paths:
+                    try:
+                        if p.exists() and p.is_file():
+                            c_dict = self._parse_cred_dict(p.read_text(encoding="utf-8"))
+                            if c_dict:
+                                cred = credentials.Certificate(c_dict)
+                                detected_project_id = c_dict.get("project_id")
+                            else:
+                                cred = credentials.Certificate(str(p))
+                            source_name = f"Yerel Dosya ({p})"
+                            logger.info(f"Firebase kimlik bilgileri {source_name} üzerinden yüklendi.")
+                            break
+                    except Exception as e_cand:
+                        logger.warning(f"Aday dosya ({p}) okuma uyarısı: {e_cand}")
+
+            # 3. Google Application Default Credentials Fallback
+            if not cred and any(k in os.environ for k in ("GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_CLOUD_PROJECT", "GCP_PROJECT")):
                 try:
-                    c_dict = json.loads(file_path.read_text(encoding="utf-8"))
-                    if isinstance(c_dict, str):
-                        c_dict = json.loads(c_dict)
-                    if isinstance(c_dict, dict) and "private_key" in c_dict:
-                        c_dict["private_key"] = c_dict["private_key"].replace("\\n", "\n").replace("\\\\n", "\n")
-                    cred = credentials.Certificate(c_dict)
-                    logger.info(f"Firebase kimlik bilgileri yerel dosyadan ({file_path.name}) yüklendi.")
-                except Exception as e:
-                    logger.warning(f"Yerel Firebase JSON ayrıştırma uyarısı: {e}")
-                    cred = credentials.Certificate(str(file_path))
+                    cred = credentials.ApplicationDefault()
+                    source_name = "Application Default Credentials"
+                except Exception:
+                    pass
 
             if cred:
                 try:
                     firebase_admin.initialize_app(cred)
                 except ValueError:
-                    # Varsayılan uygulama zaten başlatılmışsa geç
                     pass
                 self.firestore_db = firestore.client()
+                self.firebase_cred_source = source_name
+                self.firebase_project_id = detected_project_id or getattr(cred, "project_id", None)
+                self.firebase_last_error = None
+                logger.info(f"Firebase Firestore başarıyla aktifleştirildi ({source_name}). Proje: {self.firebase_project_id}")
             else:
+                self.firestore_db = None
+                self.firebase_cred_source = None
+                self.firebase_last_error = "Firebase kimlik bilgisi (Service Account JSON) bulunamadı. Lütfen Firebase ayarlarını yapılandırınız."
                 logger.info("Firebase kimlik bilgileri bulunamadı, SQLite yerel mod aktif.")
         except Exception as exc:
+            self.firestore_db = None
+            self.firebase_last_error = f"Firebase istemci başlatma hatası: {exc}"
             logger.warning(f"Firebase Firestore istemcisi çevrimdışı modda başlatıldı: {exc}")
+
+    def save_firebase_credentials(self, cred_input: Union[str, dict]) -> tuple[bool, str]:
+        """Arayüzden veya API'den gelen Firebase Service Account JSON kimlik bilgilerini doğrular,
+        DATA_DIR / 'firebase_credentials.json' dosyasına kaydeder ve bağlantıyı anında kurar.
+        """
+        try:
+            c_dict = self._parse_cred_dict(cred_input)
+            if not c_dict:
+                return False, "Geçersiz kimlik formatı! Lütfen geçerli bir Firebase Service Account JSON metni giriniz."
+
+            if "private_key" not in c_dict or ("project_id" not in c_dict and "client_email" not in c_dict):
+                return False, "Eksik alan: JSON anahtarında 'private_key' ve 'project_id' veya 'client_email' bulunmalıdır."
+
+            target_file = DATA_DIR / "firebase_credentials.json"
+            target_file.parent.mkdir(parents=True, exist_ok=True)
+            target_file.write_text(json.dumps(c_dict, indent=2, ensure_ascii=False), encoding="utf-8")
+
+            self._init_firebase_optional(force=True)
+
+            if not self.firestore_db:
+                err_msg = self.firebase_last_error or "Firestore istemcisi başlatılamadı."
+                return False, f"Kimlik kaydedildi ancak Firebase bağlantısı kurulamadı: {err_msg}"
+
+            # Hızlı bağlantı testi
+            try:
+                list(self.firestore_db.collection("users").limit(1).stream())
+            except Exception as test_err:
+                logger.warning(f"Firestore test sorgusu uyarısı: {test_err}")
+                err_str = str(test_err)
+                if "Quota exceeded" in err_str or "ResourceExhausted" in err_str:
+                    self.firebase_last_error = "Firestore günlük kota sınırı aşıldı."
+                    return False, "Firebase bağlantısı sağlandı ancak günlük okuma kotası (50.000 limit) aşıldığı için Firestore sorguları reddediliyor."
+
+            threading.Thread(target=self.ensure_initial_hydration, kwargs={"force": True}, daemon=True).start()
+
+            proj = self.firebase_project_id or c_dict.get("project_id", "")
+            return True, f"Firebase bağlantısı başarıyla kuruldu! (Proje: {proj})"
+        except Exception as exc:
+            logger.exception("save_firebase_credentials hatası")
+            return False, f"Kimlik kaydetme hatası: {exc}"
 
     def ensure_firebase(self) -> bool:
         """Firebase bağlantısının hazır olduğunu doğrular; kopmuşsa yeniden bağlanmayı dener."""
@@ -831,9 +976,10 @@ class CloudDatabase:
             self._init_firebase_optional()
 
         if not self.firestore_db:
+            err_msg = self.firebase_last_error or "Kimlik bilgisi bulunamadı."
             return {
                 "synced": False,
-                "reason": "Firebase bağlantısı çevrimdışı. Veriler yerel SQLite üzerinde saklanmaktadır.",
+                "reason": f"Firebase çevrimdışı ({err_msg}). Veriler yerel SQLite üzerinde saklanmaktadır.",
                 "pushed": 0,
                 "pulled": 0,
             }
@@ -1104,9 +1250,10 @@ class CloudDatabase:
             self._init_firebase_optional()
 
         if not self.firestore_db:
+            err_msg = self.firebase_last_error or "Kimlik bilgisi bulunamadı."
             return {
                 "synced": False,
-                "reason": "Firebase bağlantısı çevrimdışı. Lütfen internet bağlantınızı kontrol ediniz.",
+                "reason": f"Firebase bağlantısı kurulamadı ({err_msg}). Lütfen Firebase ayarlarını kontrol ediniz.",
                 "pushed": 0,
                 "pulled": 0,
             }

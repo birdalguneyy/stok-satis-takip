@@ -349,24 +349,64 @@ def full_sync():
 @app.route("/api/sync/status", methods=["GET"])
 def sync_status():
     user_id = get_current_user_id()
-    if user_id is None:
-        return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
-    has_firebase = bool(cloud_db.firestore_db)
-    with cloud_db.db.get_connection() as conn:
-        un_prods = conn.execute("SELECT COUNT(*) as cnt FROM products WHERE synced_to_cloud = 0 AND user_id = ?", (user_id,)).fetchone()["cnt"]
-        un_sales = conn.execute("SELECT COUNT(*) as cnt FROM sales WHERE synced_to_cloud = 0 AND user_id = ?", (user_id,)).fetchone()["cnt"]
-        un_exp = conn.execute("SELECT COUNT(*) as cnt FROM expenses WHERE synced_to_cloud = 0 AND user_id = ?", (user_id,)).fetchone()["cnt"]
-        total_unsynced = un_prods + un_sales + un_exp
+    has_firebase = bool(cloud_db.ensure_firebase())
+    
+    un_prods = 0
+    un_sales = 0
+    un_exp = 0
+    if user_id is not None:
+        with cloud_db.db.get_connection() as conn:
+            un_prods = conn.execute("SELECT COUNT(*) as cnt FROM products WHERE synced_to_cloud = 0 AND (user_id = ? OR user_id IS NULL)", (user_id,)).fetchone()["cnt"]
+            un_sales = conn.execute("SELECT COUNT(*) as cnt FROM sales WHERE synced_to_cloud = 0 AND (user_id = ? OR user_id IS NULL)", (user_id,)).fetchone()["cnt"]
+            un_exp = conn.execute("SELECT COUNT(*) as cnt FROM expenses WHERE synced_to_cloud = 0 AND (user_id = ? OR user_id IS NULL)", (user_id,)).fetchone()["cnt"]
+    total_unsynced = un_prods + un_sales + un_exp
 
     return jsonify({
         "ok": True,
         "has_firebase": has_firebase,
+        "authenticated": bool(user_id is not None),
+        "project_id": cloud_db.firebase_project_id,
+        "cred_source": cloud_db.firebase_cred_source,
+        "last_error": cloud_db.firebase_last_error,
         "unsynced_items": total_unsynced,
         "details": {
             "products": un_prods,
             "sales": un_sales,
             "expenses": un_exp,
         }
+    })
+
+
+@app.route("/api/firebase/config", methods=["POST"])
+def configure_firebase():
+    """Web arayüzünden Firebase Service Account JSON kimlik bilgilerini yükler ve kaydeder."""
+    data = request.json or {}
+    cred_content = data.get("credentials")
+    if not cred_content:
+        return jsonify({"ok": False, "message": "Lütfen geçerli bir Firebase Service Account JSON metni sağlayınız!"}), 400
+
+    ok, msg = cloud_db.save_firebase_credentials(cred_content)
+    if ok:
+        return jsonify({
+            "ok": True,
+            "message": msg,
+            "project_id": cloud_db.firebase_project_id,
+            "cred_source": cloud_db.firebase_cred_source,
+        })
+    return jsonify({"ok": False, "message": msg, "last_error": cloud_db.firebase_last_error}), 400
+
+
+@app.route("/api/firebase/status", methods=["GET"])
+def firebase_status():
+    """Firebase bağlantı ve ortam teşhis bilgilerini döndürür."""
+    connected = bool(cloud_db.ensure_firebase())
+    return jsonify({
+        "ok": True,
+        "connected": connected,
+        "project_id": cloud_db.firebase_project_id,
+        "cred_source": cloud_db.firebase_cred_source,
+        "last_error": cloud_db.firebase_last_error,
+        "file_exists": (DATA_DIR / "firebase_credentials.json").exists(),
     })
 
 

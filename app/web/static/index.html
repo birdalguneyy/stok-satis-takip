@@ -754,6 +754,79 @@
     </div>
   </div>
 
+  <!-- FIREBASE CONFIGURATION & STATUS MODAL -->
+  <div id="firebase-modal-overlay" class="modal-overlay" style="display:none; z-index:99999;">
+    <div class="modal-card" style="max-width:520px; max-height:90vh; overflow-y:auto;">
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:14px;">
+        <h3 style="margin:0; font-size:1.15rem; color:#f59e0b; display:flex; align-items:center; gap:8px;">
+          <span>🔥</span> Firebase Bulut Senkronizasyonu
+        </h3>
+        <button type="button" style="background:none; border:none; color:var(--text-muted); font-size:1.4rem; cursor:pointer;" onclick="closeFirebaseModal()">&times;</button>
+      </div>
+
+      <!-- Live Diagnostic Box -->
+      <div id="fb-diag-box" style="background:rgba(255,255,255,0.04); border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:14px; font-size:0.85rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <span style="font-weight:600; color:var(--text-muted);">Bağlantı Durumu:</span>
+          <span id="fb-diag-status" style="font-weight:700; padding:2px 8px; border-radius:6px; background:rgba(245,158,11,0.2); color:#f59e0b;">Kontrol ediliyor...</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+          <span style="color:var(--text-muted);">Proje ID:</span>
+          <span id="fb-diag-project" style="font-weight:600; color:var(--text);">-</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+          <span style="color:var(--text-muted);">Kimlik Kaynağı:</span>
+          <span id="fb-diag-source" style="font-weight:600; color:var(--text);">-</span>
+        </div>
+        <div id="fb-diag-error-row" style="display:none; margin-top:8px; padding-top:8px; border-top:1px dashed var(--border); color:#ef4444;">
+          <span style="font-weight:600;">Hata / Teşhis:</span>
+          <div id="fb-diag-error" style="font-size:0.8rem; margin-top:2px; word-break:break-word;"></div>
+        </div>
+      </div>
+
+      <!-- Quick Sync Actions -->
+      <div style="display:flex; gap:8px; margin-bottom:16px;">
+        <button type="button" class="btn" style="flex:1; padding:8px; font-size:0.82rem; background:linear-gradient(135deg, #10B981, #059669); color:#fff; border-radius:8px;" onclick="triggerManualSync()">
+          🔄 Şimdi Eşitle
+        </button>
+        <button type="button" class="btn btn-secondary" style="flex:1; padding:8px; font-size:0.82rem; border-radius:8px;" onclick="triggerFullCloudSync()">
+          ☁️ Tam Eşitle (Force)
+        </button>
+      </div>
+
+      <!-- Credentials Upload Form -->
+      <div style="border-top:1px solid var(--border); padding-top:14px;">
+        <h4 style="margin:0 0 8px 0; font-size:0.92rem; color:var(--text);">🔑 Firebase Service Account JSON Yükle</h4>
+        <p style="font-size:0.78rem; color:var(--text-muted); margin-bottom:10px; line-height:1.4;">
+          Firebase Console &gt; Proje Ayarları &gt; Hizmet Hesapları (Service Accounts) &gt; "Yeni özel anahtar oluştur" ile indirdiğiniz JSON dosyasını seçin veya metnini yapıştırın:
+        </p>
+
+        <div class="form-group" style="margin-bottom:10px;">
+          <input type="file" id="fb-json-file-input" accept=".json,application/json" style="font-size:0.82rem;" onchange="handleFirebaseFileSelected(event)">
+        </div>
+
+        <div class="form-group" style="margin-bottom:10px;">
+          <textarea id="fb-json-text-input" placeholder='{"type": "service_account", "project_id": "...", ...}' style="width:100%; height:90px; font-size:0.75rem; font-family:monospace; padding:8px; resize:vertical; background:var(--input-bg, rgba(0,0,0,0.2)); color:var(--text); border:1px solid var(--border); border-radius:8px;"></textarea>
+        </div>
+
+        <div style="display:flex; gap:8px;">
+          <button type="button" id="fb-save-btn" class="btn" style="flex:1; padding:10px; background:#f59e0b; color:#000; font-weight:700; border-radius:8px;" onclick="saveFirebaseCredentialsFromModal()">
+            💾 Bağlan & Kaydet
+          </button>
+          <button type="button" class="btn btn-secondary" style="width:auto; padding:10px 14px; border-radius:8px;" onclick="closeFirebaseModal()">
+            Kapat
+          </button>
+        </div>
+      </div>
+
+      <!-- Render Guidance Note -->
+      <div style="margin-top:14px; background:rgba(59,130,246,0.08); border:1px solid rgba(59,130,246,0.25); border-radius:8px; padding:10px; font-size:0.75rem; color:var(--text-muted); line-height:1.4;">
+        <strong style="color:#60a5fa;">💡 Render.com / Bulut İpucu:</strong><br>
+        Web sitesi her Git güncellemesinde sıfırlanıyorsa, bu JSON içeriğini Render panelinde <code>FIREBASE_CREDENTIALS_JSON</code> ortam değişkenine (Environment Variable) yapıştırarak kalıcı hale getirebilirsiniz.
+      </div>
+    </div>
+  </div>
+
   <!-- SALES DELETE CONFIRMATION MODAL -->
   <div id="delete-sale-modal-overlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(15,23,42,0.9); backdrop-filter:blur(10px); z-index:9999; justify-content:center; align-items:center; padding:16px;">
     <div class="card" style="width:100%; max-width:420px; border:1px solid var(--danger); box-shadow:0 15px 40px rgba(239,68,68,0.25);">
@@ -1482,7 +1555,7 @@
       <div id="farm-badge" class="status-badge" style="font-weight:700; background:#059669; color:#fff; cursor:pointer;" onclick="openFarmModal()">🚜 Çiftlik</div>
       <div id="p2p-status-badge" class="status-badge" style="font-weight:700;" onclick="openP2PModal()">🔴 PC Bağlı Değil</div>
 
-      <div id="sync-status-badge" class="status-badge" style="font-weight:700;" onclick="triggerManualSync()">🟢 Firebase Aktif</div>
+      <div id="sync-status-badge" class="status-badge" style="font-weight:700; cursor:pointer;" onclick="openFirebaseSettingsModal()" title="Firebase Bağlantı Durumu ve Ayarları">🟢 Firebase Aktif</div>
       <div id="user-profile-badge" class="status-badge" onclick="openAuthModal()">🏢 <span id="user-profile-name">Giriş / Profil</span></div>
 
       <div id="pwa-install-badge" class="status-badge" style="display:none;" onclick="installPWA()">📲 Yükle</div>
@@ -2231,7 +2304,7 @@
 
     async function checkAIStatus() {
       try {
-        const res = await fetch('/api/info');
+        const res = await fetchWithAuth('/api/info');
         const json = await res.json();
         if (!json.has_ai) {
           document.getElementById('ai-key-banner').style.display = 'block';
@@ -2242,7 +2315,7 @@
     async function saveGeminiKey() {
       const key = document.getElementById('gemini-key-input').value.trim();
       if (!key) return;
-      const res = await fetch('/api/settings/gemini-key', {
+      const res = await fetchWithAuth('/api/settings/gemini-key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: key })
@@ -2666,7 +2739,7 @@
         const formData = new FormData();
         formData.append('file', highQualityBlob, 'barcode.jpg');
 
-        const res = await fetch('/api/barcode/decode', { method: 'POST', body: formData });
+        const res = await fetchWithAuth('/api/barcode/decode', { method: 'POST', body: formData });
         const json = await res.json();
         if (json.ok && json.barcode && isValidBarcode(json.barcode)) {
           return json.barcode;
@@ -2917,7 +2990,7 @@
       p2pRole = 'pc';
       updateP2PStatus('connecting', 'PC kodu oluşturuluyor...');
       try {
-        const res = await fetch('/api/webrtc/create-pair', { method: 'POST' });
+        const res = await fetchWithAuth('/api/webrtc/create-pair', { method: 'POST' });
         const json = await res.json();
         if (json.ok && json.pair_code) {
           activePairCode = json.pair_code;
@@ -3022,7 +3095,7 @@
     async function postSignal(payload) {
       if (!activePairCode) return;
       try {
-        await fetch('/api/webrtc/signal', {
+        await fetchWithAuth('/api/webrtc/signal', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -3040,7 +3113,7 @@
       signalingPollInterval = setInterval(async () => {
         if (!activePairCode) return;
         try {
-          const res = await fetch(`/api/webrtc/signal?pair_code=${activePairCode}&role=${p2pRole}`);
+          const res = await fetchWithAuth(`/api/webrtc/signal?pair_code=${activePairCode}&role=${p2pRole}`);
           const json = await res.json();
           if (json.ok && json.signals && json.signals.length > 0) {
             for (const sig of json.signals) {
@@ -6055,22 +6128,29 @@
       const badge = document.getElementById('sync-status-badge');
       if (!badge) return;
       try {
-        const res = await fetch('/api/sync/status');
+        const res = await fetchWithAuth('/api/sync/status');
         const json = await res.json();
         if (json.ok) {
           if (!json.has_firebase) {
-            badge.innerText = '🔥 🟡 Firebase Yerel (SQLite)';
-            badge.style.background = 'rgba(245, 158, 11, 0.2)';
-            badge.style.color = '#F59E0B';
+            const shortReason = json.last_error && json.last_error.includes('bulunamadı') ? 'Yapılandırılmadı' : 'Bağlantı Yok';
+            badge.innerText = `🔥 🔴 Firebase (${shortReason})`;
+            badge.style.background = 'rgba(239, 68, 68, 0.2)';
+            badge.style.color = '#EF4444';
+            badge.title = json.last_error || 'Firebase bağlantısı kurulamadı. Tıklayarak ayarlayınız.';
           } else if (json.unsynced_items > 0) {
             badge.innerText = `🔥 🔄 Firebase Eşitleniyor (${json.unsynced_items})`;
             badge.style.background = 'rgba(234, 179, 8, 0.2)';
             badge.style.color = '#EAB308';
+            badge.title = `${json.unsynced_items} adet bekleyen veri Firestore'a aktarılıyor.`;
           } else {
             badge.innerText = '🔥 🟢 Firebase Aktif';
             badge.style.background = 'rgba(16, 185, 129, 0.2)';
             badge.style.color = '#10B981';
+            badge.title = `Firebase Projesi: ${json.project_id || 'Bağlı'} (${json.cred_source || 'Aktif'})`;
           }
+
+          // Eğer Firebase ayar modalı açıksa onun içeriğini de canlı güncelle
+          updateFirebaseModalDiagnostic(json);
         }
       } catch (err) {
         badge.innerText = '🔥 🟡 Firebase Çevrimdışı';
@@ -6087,20 +6167,136 @@
         badge.innerText = '🔥 🔄 Eşitleniyor...';
       }
       try {
-        const token = localStorage.getItem('stok_auth_token') || sessionStorage.getItem('stok_auth_token');
-        const res = await fetch('/api/sync/trigger', {
-          headers: token ? { 'Authorization': 'Bearer ' + token } : {}
-        });
+        const res = await fetchWithAuth('/api/sync/trigger');
         const json = await res.json();
         if (json.ok && json.result) {
           showToast(json.result.reason || "Firebase ile eşitlendi.");
+        } else if (json.message) {
+          showToast(json.message);
         }
       } catch (err) {
-        showToast("🌐 İnternet bağlantısı bekleniyor...");
+        showToast("🌐 Senkronizasyon isteği iletilemedi!");
       } finally {
         isSyncingProcess = false;
       }
       await checkSyncStatus();
+    }
+
+    function openFirebaseSettingsModal() {
+      const modal = document.getElementById('firebase-modal-overlay');
+      if (modal) {
+        modal.style.display = 'flex';
+        loadFirebaseDiagnosticInfo();
+      }
+    }
+
+    function closeFirebaseModal() {
+      const modal = document.getElementById('firebase-modal-overlay');
+      if (modal) modal.style.display = 'none';
+    }
+
+    async function loadFirebaseDiagnosticInfo() {
+      try {
+        const res = await fetchWithAuth('/api/sync/status');
+        const json = await res.json();
+        if (json.ok) {
+          updateFirebaseModalDiagnostic(json);
+        }
+      } catch (e) {
+        const statusEl = document.getElementById('fb-diag-status');
+        if (statusEl) {
+          statusEl.innerText = 'Çevrimdışı (Sunucuya Erişilemedi)';
+          statusEl.style.color = '#EF4444';
+          statusEl.style.background = 'rgba(239, 68, 68, 0.2)';
+        }
+      }
+    }
+
+    function updateFirebaseModalDiagnostic(data) {
+      const statusEl = document.getElementById('fb-diag-status');
+      const projEl = document.getElementById('fb-diag-project');
+      const srcEl = document.getElementById('fb-diag-source');
+      const errRow = document.getElementById('fb-diag-error-row');
+      const errEl = document.getElementById('fb-diag-error');
+
+      if (!statusEl) return;
+
+      if (data.has_firebase) {
+        statusEl.innerText = '🟢 Bağlı (Aktif)';
+        statusEl.style.color = '#10B981';
+        statusEl.style.background = 'rgba(16, 185, 129, 0.2)';
+      } else {
+        statusEl.innerText = '🔴 Bağlantı Yok / Çevrimdışı';
+        statusEl.style.color = '#EF4444';
+        statusEl.style.background = 'rgba(239, 68, 68, 0.2)';
+      }
+
+      if (projEl) projEl.innerText = data.project_id || '(Belirtilmemiş)';
+      if (srcEl) srcEl.innerText = data.cred_source || '(Kimlik kaynağı yok)';
+
+      if (errRow && errEl) {
+        if (data.last_error && !data.has_firebase) {
+          errEl.innerText = data.last_error;
+          errRow.style.display = 'block';
+        } else {
+          errRow.style.display = 'none';
+        }
+      }
+    }
+
+    function handleFirebaseFileSelected(e) {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        const content = evt.target.result;
+        const textInput = document.getElementById('fb-json-text-input');
+        if (textInput) textInput.value = content;
+      };
+      reader.readAsText(file);
+    }
+
+    async function saveFirebaseCredentialsFromModal() {
+      const textInput = document.getElementById('fb-json-text-input');
+      const btn = document.getElementById('fb-save-btn');
+      const rawText = textInput ? textInput.value.trim() : '';
+
+      if (!rawText) {
+        showToast("⚠️ Lütfen Firebase Service Account JSON içeriğini yapıştırınız veya dosya seçiniz.");
+        return;
+      }
+
+      if (btn) {
+        btn.disabled = true;
+        btn.innerText = "⏳ Doğrulanıyor & Bağlanıyor...";
+      }
+
+      try {
+        const res = await fetchWithAuth('/api/firebase/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ credentials: rawText })
+        });
+        const json = await res.json();
+        if (json.ok) {
+          showToast("✅ " + json.message);
+          if (textInput) textInput.value = '';
+          const fileInput = document.getElementById('fb-json-file-input');
+          if (fileInput) fileInput.value = '';
+          await checkSyncStatus();
+          await loadFirebaseDiagnosticInfo();
+        } else {
+          showToast("❌ " + (json.message || "Firebase bağlantı hatası!"));
+          await loadFirebaseDiagnosticInfo();
+        }
+      } catch (err) {
+        showToast("⚠️ Sunucu ile iletişim hatası!");
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerText = "💾 Bağlan & Kaydet";
+        }
+      }
     }
 
     async function handleLoginSubmit(e) {
@@ -6120,7 +6316,7 @@
       const remember = document.getElementById('login-remember').checked;
 
       try {
-        const res = await fetch('/api/auth/login', {
+        const res = await fetchWithAuth('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ phone_or_email: identifier, password: password, remember_me: remember })
@@ -6169,7 +6365,7 @@
       const password = document.getElementById('reg-password').value.trim();
 
       try {
-        const res = await fetch('/api/auth/register', {
+        const res = await fetchWithAuth('/api/auth/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ company_name, full_name, phone, email, password })
@@ -6252,7 +6448,7 @@
       const listEl = document.getElementById('quick-store-list');
       if (!container || !listEl) return;
       try {
-        const res = await fetch('/api/auth/stores');
+        const res = await fetchWithAuth('/api/auth/stores');
         const json = await res.json();
         if (json.ok && json.stores && json.stores.length > 0) {
           listEl.innerHTML = json.stores.map(st => `
@@ -6281,7 +6477,7 @@
 
     async function quickSwitchStore(storeId, token) {
       try {
-        const res = await fetch('/api/auth/switch-store', {
+        const res = await fetchWithAuth('/api/auth/switch-store', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ user_id: storeId })
@@ -6301,12 +6497,10 @@
     }
 
     async function triggerFullCloudSync() {
-      const token = localStorage.getItem('stok_auth_token') || sessionStorage.getItem('stok_auth_token');
       showToast("☁️ Firebase tam senkronizasyonu başlatıldı...");
       try {
-        const res = await fetch('/api/sync/full', {
-          method: 'POST',
-          headers: token ? { 'Authorization': 'Bearer ' + token } : {}
+        const res = await fetchWithAuth('/api/sync/full', {
+          method: 'POST'
         });
         const json = await res.json();
         if (json.ok && json.result) {
@@ -6341,7 +6535,7 @@
 
       if (token) {
         try {
-          const res = await fetch('/api/auth/me?token=' + encodeURIComponent(token));
+          const res = await fetchWithAuth('/api/auth/me?token=' + encodeURIComponent(token));
           const json = await res.json();
           if (json.authenticated && json.user) {
             setLoggedInUser(json.user);
@@ -6363,7 +6557,7 @@
 
       // Telefon veya yeni tarayıcıdan ilk kez giriliyorsa otomatik olarak en çok ürünü olan aktif mağazayı (GALLUS2) seç
       try {
-        const storeRes = await fetch('/api/auth/stores');
+        const storeRes = await fetchWithAuth('/api/auth/stores');
         const storeJson = await storeRes.json();
         if (storeJson.ok && storeJson.stores && storeJson.stores.length > 0) {
           const primaryStore = storeJson.stores[0];

@@ -417,6 +417,55 @@ class TestFarmModule(unittest.TestCase):
         self.assertEqual(records[0]["source"], "Dükkan")
         self.assertEqual(records[0]["total_amount"], 150.0)
 
+    def test_farm_egg_sales_limit(self):
+        # 15 adet yumurta satışı kaydet
+        for i in range(15):
+            self.cloud_db.add_farm_egg_sale(
+                customer_name=f"Müşteri {i}",
+                box_count=1.0,
+                unit_price=100.0,
+                total_amount=100.0,
+                sale_date=f"2026-10-10 10:{i:02d}:00",
+                source="Ciftlik",
+            )
+
+        # Limit 10 ile çağır
+        limited = self.cloud_db.get_farm_egg_sales(limit=10)
+        self.assertEqual(len(limited), 10)
+
+        # Limit 25 ile çağır
+        limited_25 = self.cloud_db.get_farm_egg_sales(limit=25)
+        self.assertEqual(len(limited_25), 15)
+
+        # Limitsiz çağır
+        all_sales = self.cloud_db.get_farm_egg_sales()
+        self.assertEqual(len(all_sales), 15)
+
+    def test_farm_feed_purchases_limit_and_summary(self):
+        # 12 adet yem alımı kaydet (her biri 10 çuval = 0.5 ton = 4.500 TL)
+        for i in range(12):
+            self.cloud_db.add_farm_feed_purchase(
+                bag_count=10.0,
+                unit_price=450.0,
+                total_amount=4500.0,
+                purchase_date=f"2026-10-10",
+                supplier=f"Fabrika {i}",
+            )
+
+        # Limit 10 ile çağır
+        limited = self.cloud_db.get_farm_feed_purchases(limit=10)
+        self.assertEqual(len(limited), 10)
+
+        # Limitsiz çağır
+        all_purchases = self.cloud_db.get_farm_feed_purchases()
+        self.assertEqual(len(all_purchases), 12)
+
+        # Özet (summary) kontrolü: 12 * 10 = 120 çuval, 12 * 0.5 = 6.0 ton, 12 * 4500 = 54.000 TL
+        summary = self.cloud_db.get_farm_feed_summary()
+        self.assertEqual(summary["total_bags"], 120.0)
+        self.assertEqual(summary["total_tons"], 6.0)
+        self.assertEqual(summary["total_cost"], 54000.0)
+
 
 if __name__ == '__main__':
     unittest.main()

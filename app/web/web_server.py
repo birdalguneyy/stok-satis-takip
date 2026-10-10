@@ -4,7 +4,7 @@ import socket
 import threading
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
 try:
     import cv2
@@ -47,6 +47,55 @@ def make_gate_token() -> str:
 
 EXPECTED_GATE_TOKEN = make_gate_token()
 
+# IP Brute-Force & Bot Koruması
+failed_pin_attempts: Dict[str, List[float]] = {}
+blocked_ips: Dict[str, float] = {}
+
+DISALLOWED_BOT_KEYWORDS = (
+    "gptbot", "chatgpt", "google-extended", "ccbot", "anthropic",
+    "claudebot", "claude-web", "bytespider", "perplexity", "facebookbot",
+    "facebookexternalhit", "meta-externalagent", "cohere-ai", "diffbot",
+    "amazonbot", "omgilibot", "scrapy", "python-requests", "aiohttp",
+    "httpx", "headlesschrome", "phantomjs", "puppeteer", "selenium",
+    "postmanruntime", "sqlmap", "nikto", "semrushbot", "ahrefsbot",
+    "mj12bot", "dotbot", "petalbot", "zoominfobot", "dataforseo", "youbot",
+    "applebot-extended"
+)
+
+
+def get_client_ip() -> str:
+    xfwd = request.headers.get("X-Forwarded-For", "").strip()
+    if xfwd:
+        return xfwd.split(",")[0].strip()
+    return (request.remote_addr or "127.0.0.1").strip()
+
+
+def is_ip_blocked(ip: str) -> bool:
+    now = time.time()
+    unblock_time = blocked_ips.get(ip)
+    if unblock_time:
+        if now < unblock_time:
+            return True
+        else:
+            blocked_ips.pop(ip, None)
+            failed_pin_attempts.pop(ip, None)
+    return False
+
+
+def record_failed_pin_attempt(ip: str) -> int:
+    now = time.time()
+    attempts = [t for t in failed_pin_attempts.get(ip, []) if now - t < 300]
+    attempts.append(now)
+    failed_pin_attempts[ip] = attempts
+    if len(attempts) >= 5:
+        blocked_ips[ip] = now + 900  # 15 dakika engelle
+    return len(attempts)
+
+
+def record_successful_pin_attempt(ip: str):
+    failed_pin_attempts.pop(ip, None)
+    blocked_ips.pop(ip, None)
+
 
 def is_gate_unlocked_request() -> bool:
     token = (
@@ -60,12 +109,21 @@ def is_gate_unlocked_request() -> bool:
 
 @app.before_request
 def gatekeeper_check():
+    # 1. Bot ve AI Crawler Kontrolü (Tüm yollar için geçerli!)
+    user_agent = (request.headers.get("User-Agent") or "").lower().strip()
+    if any(bot in user_agent for bot in DISALLOWED_BOT_KEYWORDS):
+        return jsonify({
+            "ok": False,
+            "error": "Forbidden",
+            "message": "🤖 Güvenlik Politikası: Otomatik botların ve yapay zeka tarayıcılarının erişimi engellenmiştir."
+        }), 403
+
     path = request.path
-    # Muaf tutulan yollar: Statik dosyalar, favicon, manifest, sw, gate API'leri ve sağlık kontrolleri
+    # Muaf tutulan yollar: Statik dosyalar, favicon, manifest, sw, robots.txt, gate API'leri ve sağlık kontrolleri
     if (
         path == "/"
         or path.startswith("/static/")
-        or path in ("/favicon.ico", "/manifest.json", "/sw.js", "/health", "/ping")
+        or path in ("/favicon.ico", "/manifest.json", "/sw.js", "/robots.txt", "/health", "/ping")
         or path.startswith("/api/gate/")
     ):
         return None
@@ -79,11 +137,39 @@ def gatekeeper_check():
         }), 401
 
 
+@app.after_request
+def add_security_headers(response):
+    response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive, nosnippet, noimageindex"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if request.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+    return response
+
+
+@app.route("/robots.txt")
+def robots_txt():
+    robots_path = Path(__file__).resolve().parent / "static" / "robots.txt"
+    if robots_path.exists():
+        return send_from_directory(str(robots_path.parent), "robots.txt", mimetype="text/plain")
+    return "User-agent: *\nDisallow: /\n", 200, {"Content-Type": "text/plain"}
+
+
 @app.route("/api/gate/verify", methods=["POST"])
 def gate_verify():
+    client_ip = get_client_ip()
+    if is_ip_blocked(client_ip):
+        return jsonify({
+            "ok": False,
+            "blocked": True,
+            "message": "🚫 Güvenlik: Çok fazla hatalı PIN denemesi yapıldı. Erişiminiz 15 dakika süreyle geçici olarak engellendi."
+        }), 429
+
     data = request.json or {}
     pin = str(data.get("pin", "")).strip()
     if pin == str(GATE_PIN).strip():
+        record_successful_pin_attempt(client_ip)
         token = EXPECTED_GATE_TOKEN
         resp = jsonify({"ok": True, "token": token, "message": "Giriş başarılı!"})
         resp.set_cookie(
@@ -94,7 +180,19 @@ def gate_verify():
             samesite="Lax"
         )
         return resp
-    return jsonify({"ok": False, "message": "Geçersiz PIN şifresi!"}), 401
+
+    attempts_count = record_failed_pin_attempt(client_ip)
+    remaining = max(0, 5 - attempts_count)
+    if remaining == 0:
+        return jsonify({
+            "ok": False,
+            "blocked": True,
+            "message": "🚫 Güvenlik: 5 kez hatalı PIN girildi. Erişiminiz 15 dakika süreyle engellendi."
+        }), 429
+    return jsonify({
+        "ok": False,
+        "message": f"Geçersiz PIN şifresi! ({remaining} deneme hakkı kaldı)"
+    }), 401
 
 
 @app.route("/api/gate/status", methods=["GET"])
@@ -1111,7 +1209,8 @@ def api_farm_egg_sales():
     start = request.args.get("start_date")
     end = request.args.get("end_date")
     source = request.args.get("source")
-    sales = cloud_db.get_farm_egg_sales(user_id=uid, customer_name=cust, start_date=start, end_date=end, source=source)
+    limit = request.args.get("limit", type=int)
+    sales = cloud_db.get_farm_egg_sales(user_id=uid, customer_name=cust, start_date=start, end_date=end, source=source, limit=limit)
     return jsonify({"ok": True, "sales": sales})
 
 
@@ -1150,8 +1249,10 @@ def api_farm_feed_purchases():
     # GET
     start = request.args.get("start_date")
     end = request.args.get("end_date")
-    purchases = cloud_db.get_farm_feed_purchases(user_id=uid, start_date=start, end_date=end)
-    return jsonify({"ok": True, "purchases": purchases})
+    limit = request.args.get("limit", type=int)
+    purchases = cloud_db.get_farm_feed_purchases(user_id=uid, start_date=start, end_date=end, limit=limit)
+    summary = cloud_db.get_farm_feed_summary(user_id=uid)
+    return jsonify({"ok": True, "purchases": purchases, "summary": summary})
 
 
 @app.route("/api/farm/feed-purchases/<int:purchase_id>", methods=["DELETE"])

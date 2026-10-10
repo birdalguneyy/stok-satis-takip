@@ -1366,6 +1366,14 @@
             </tbody>
           </table>
         </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px; flex-wrap:wrap; gap:8px;">
+          <div id="farm-egg-count-info" style="font-size:0.75rem; color:var(--text-muted); font-weight:600;">Son 10 işlem listeleniyor</div>
+          <div style="display:flex; gap:6px;">
+            <button type="button" id="btn-farm-egg-10" class="btn" style="padding:4px 10px; font-size:0.75rem; background:#10B981; color:#fff;" onclick="setFarmEggLimit(10)">Son 10</button>
+            <button type="button" id="btn-farm-egg-25" class="btn btn-secondary" style="padding:4px 10px; font-size:0.75rem; background:transparent; color:var(--text);" onclick="setFarmEggLimit(25)">Son 25</button>
+            <button type="button" id="btn-farm-egg-all" class="btn btn-secondary" style="padding:4px 10px; font-size:0.75rem; background:transparent; color:var(--text);" onclick="setFarmEggLimit(0)">Tümü</button>
+          </div>
+        </div>
       </div>
 
       <!-- TAB 2: YEM ALIMI (1 Çuval = 50 kg -> Ton) -->
@@ -1437,29 +1445,37 @@
             </tbody>
           </table>
         </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px; flex-wrap:wrap; gap:8px;">
+          <div id="farm-feed-count-info" style="font-size:0.75rem; color:var(--text-muted); font-weight:600;">Son 10 işlem listeleniyor</div>
+          <div style="display:flex; gap:6px;">
+            <button type="button" id="btn-farm-feed-10" class="btn" style="padding:4px 10px; font-size:0.75rem; background:#0284C7; color:#fff;" onclick="setFarmFeedLimit(10)">Son 10</button>
+            <button type="button" id="btn-farm-feed-25" class="btn btn-secondary" style="padding:4px 10px; font-size:0.75rem; background:transparent; color:var(--text);" onclick="setFarmFeedLimit(25)">Son 25</button>
+            <button type="button" id="btn-farm-feed-all" class="btn btn-secondary" style="padding:4px 10px; font-size:0.75rem; background:transparent; color:var(--text);" onclick="setFarmFeedLimit(0)">Tümü</button>
+          </div>
+        </div>
       </div>
 
       <!-- TAB 3: GELİŞMİŞ FİLTRELEME & MÜŞTERİ ANALİZİ -->
       <div id="farm-view-analytics" style="display:none;">
         <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:14px;">
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-            <div style="display:flex; align-items:center; gap:8px;">
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
               <label style="font-size:0.8rem; font-weight:700; color:var(--text);">👤 Müşteri:</label>
-              <select id="farm-filter-cust-select" onchange="loadFarmAnalyticsWeb()" style="padding:6px 10px; border-radius:8px; border:1px solid var(--border); background:var(--input-bg); color:var(--text); font-size:0.85rem;">
+              <select id="farm-filter-cust-select" style="padding:6px 10px; border-radius:8px; border:1px solid var(--border); background:var(--input-bg); color:var(--text); font-size:0.85rem;">
                 <option value="">Tüm Müşteriler (Genel)</option>
               </select>
+              <button type="button" class="btn" onclick="loadFarmAnalyticsWeb()" style="padding:6px 12px; font-size:0.8rem; background:var(--accent); color:#fff; font-weight:700;">🔍 Filtrele & Listele</button>
             </div>
             <!-- Periyot Butonları -->
             <div style="display:flex; gap:4px; background:var(--bg); padding:3px; border-radius:8px; border:1px solid var(--border); flex-wrap:wrap;">
-              <button id="pbtn-today" class="btn" style="padding:5px 9px; font-size:0.75rem; background:#10B981; color:#fff;" onclick="setFarmPeriod('today')">📅 Bugün</button>
-              <button id="pbtn-yesterday" class="btn btn-secondary" style="padding:5px 9px; font-size:0.75rem;" onclick="setFarmPeriod('yesterday')">⏮️ Dün</button>
-              <button id="pbtn-weekly" class="btn btn-secondary" style="padding:5px 9px; font-size:0.75rem;" onclick="setFarmPeriod('weekly')">📅 Bu Hafta</button>
-              <button id="pbtn-monthly" class="btn btn-secondary" style="padding:5px 9px; font-size:0.75rem;" onclick="setFarmPeriod('monthly')">📅 Bu Ay</button>
-              <button id="pbtn-3_months" class="btn btn-secondary" style="padding:5px 9px; font-size:0.75rem;" onclick="setFarmPeriod('3_months')">📅 3 Aylık</button>
-              <button id="pbtn-all" class="btn btn-secondary" style="padding:5px 9px; font-size:0.75rem;" onclick="setFarmPeriod('all')">📅 Tümü</button>
-              <button id="pbtn-custom" class="btn btn-secondary" style="padding:5px 9px; font-size:0.75rem;" onclick="setFarmPeriod('custom')">🗓️ Özel Aralık</button>
+              <button id="pbtn-today" class="btn btn-secondary" style="padding:5px 9px; font-size:0.75rem; background:transparent; color:var(--text);" onclick="setFarmPeriod('today')">📅 Bugün</button>
+              <button id="pbtn-yesterday" class="btn btn-secondary" style="padding:5px 9px; font-size:0.75rem; background:transparent; color:var(--text);" onclick="setFarmPeriod('yesterday')">⏮️ Dün</button>
+              <button id="pbtn-weekly" class="btn btn-secondary" style="padding:5px 9px; font-size:0.75rem; background:transparent; color:var(--text);" onclick="setFarmPeriod('weekly')">📅 Bu Hafta</button>
+              <button id="pbtn-monthly" class="btn btn-secondary" style="padding:5px 9px; font-size:0.75rem; background:transparent; color:var(--text);" onclick="setFarmPeriod('monthly')">📅 Bu Ay</button>
+              <button id="pbtn-3_months" class="btn btn-secondary" style="padding:5px 9px; font-size:0.75rem; background:transparent; color:var(--text);" onclick="setFarmPeriod('3_months')">📅 3 Aylık</button>
+              <button id="pbtn-all" class="btn btn-secondary" style="padding:5px 9px; font-size:0.75rem; background:transparent; color:var(--text);" onclick="setFarmPeriod('all')">📅 Tümü</button>
+              <button id="pbtn-custom" class="btn btn-secondary" style="padding:5px 9px; font-size:0.75rem; background:transparent; color:var(--text);" onclick="setFarmPeriod('custom')">🗓️ Özel Aralık</button>
             </div>
-            <button class="btn btn-secondary" onclick="loadFarmAnalyticsWeb()" style="padding:6px 12px; font-size:0.8rem;">🔄 Yenile</button>
           </div>
 
           <!-- Özel Tarih Aralığı Seçici -->
@@ -1475,27 +1491,27 @@
             <button type="button" class="btn" style="padding:5px 12px; font-size:0.78rem; width:auto; background:var(--accent); color:#fff; font-weight:700;" onclick="applyFarmCustomDateRange()">🔍 Tarihleri Filtrele</button>
           </div>
 
-          <div id="farm-active-period-info" style="font-size:0.75rem; color:var(--text-muted); margin-top:8px; font-weight:600;"></div>
+          <div id="farm-active-period-info" style="font-size:0.75rem; color:var(--text-muted); margin-top:8px; font-weight:600;">Seçim bekleniyor: Lütfen periyot veya müşteri belirleyip "Filtrele & Listele" butonuna basınız.</div>
         </div>
 
         <!-- KPI Kartları -->
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:14px;">
           <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:10px; padding:10px; text-align:center;">
             <div style="font-size:0.72rem; color:var(--text-muted);">TOPLAM SATILAN KOLİ</div>
-            <div id="farm-kpi-boxes" style="font-size:1.2rem; font-weight:800; color:#10B981;">0 Koli</div>
+            <div id="farm-kpi-boxes" style="font-size:1.2rem; font-weight:800; color:#10B981;">- Koli</div>
             <div id="farm-kpi-boxes-sub" style="font-size:0.72rem; color:var(--text-muted); margin-top:2px;"></div>
           </div>
           <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:10px; padding:10px; text-align:center;">
             <div style="font-size:0.72rem; color:var(--text-muted);">TOPLAM CİRO</div>
-            <div id="farm-kpi-revenue" style="font-size:1.2rem; font-weight:800; color:#0284C7;">0,00 ₺</div>
+            <div id="farm-kpi-revenue" style="font-size:1.2rem; font-weight:800; color:#0284C7;">- ₺</div>
           </div>
           <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:10px; padding:10px; text-align:center;">
             <div style="font-size:0.72rem; color:var(--text-muted);">ORTALAMA KOLİ FİYATI</div>
-            <div id="farm-kpi-avg" style="font-size:1.2rem; font-weight:800; color:#F59E0B;">0,00 ₺</div>
+            <div id="farm-kpi-avg" style="font-size:1.2rem; font-weight:800; color:#F59E0B;">- ₺</div>
           </div>
           <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:10px; padding:10px; text-align:center;">
             <div style="font-size:0.72rem; color:var(--text-muted);">MÜŞTERİ SAYISI</div>
-            <div id="farm-kpi-custs" style="font-size:1.2rem; font-weight:800; color:#8B5CF6;">0 Kişi</div>
+            <div id="farm-kpi-custs" style="font-size:1.2rem; font-weight:800; color:#8B5CF6;">- Kişi</div>
           </div>
         </div>
 
@@ -1514,7 +1530,7 @@
               </tr>
             </thead>
             <tbody id="farm-cust-summary-tbody">
-              <tr><td colspan="6" style="text-align:center; padding:16px; color:var(--text-muted);">Yükleniyor...</td></tr>
+              <tr><td colspan="6" style="text-align:center; padding:24px; color:var(--text-muted); font-size:0.85rem;">🔍 Lütfen yukarıdan bir Dönem veya Müşteri seçip <b>Filtrele & Listele</b> butonuna basınız.</td></tr>
             </tbody>
           </table>
         </div>
@@ -1536,9 +1552,17 @@
               </tr>
             </thead>
             <tbody id="farm-analytics-details-tbody">
-              <tr><td colspan="8" style="text-align:center; padding:16px; color:var(--text-muted);">Yükleniyor...</td></tr>
+              <tr><td colspan="8" style="text-align:center; padding:24px; color:var(--text-muted); font-size:0.85rem;">🔍 Filtrelenen satış hareketleri burada listelenecektir.</td></tr>
             </tbody>
           </table>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px; flex-wrap:wrap; gap:8px;">
+          <div id="farm-analytics-count-info" style="font-size:0.75rem; color:var(--text-muted); font-weight:600;">Son 10 hareket gösteriliyor</div>
+          <div style="display:flex; gap:6px;">
+            <button type="button" id="btn-farm-ana-10" class="btn" style="padding:4px 10px; font-size:0.75rem; background:#10B981; color:#fff;" onclick="setFarmAnalyticsLimit(10)">Son 10</button>
+            <button type="button" id="btn-farm-ana-25" class="btn btn-secondary" style="padding:4px 10px; font-size:0.75rem; background:transparent; color:var(--text);" onclick="setFarmAnalyticsLimit(25)">Son 25</button>
+            <button type="button" id="btn-farm-ana-all" class="btn btn-secondary" style="padding:4px 10px; font-size:0.75rem; background:transparent; color:var(--text);" onclick="setFarmAnalyticsLimit(0)">Tümü</button>
+          </div>
         </div>
       </div>
 
@@ -6763,7 +6787,75 @@
     // ÇİFTLİK YÖNETİM MODÜLÜ (2805 ŞİFRE & İŞ MANTIĞI)
 
     // ════════════════════════════════════════════════════════════════════
-    let currentFarmPeriod = 'today';
+    let currentFarmPeriod = '';
+    let currentFarmEggLimit = 10;
+    let currentFarmFeedLimit = 10;
+    let currentFarmAnalyticsLimit = 10;
+
+    function setFarmEggLimit(limit) {
+      currentFarmEggLimit = limit;
+      [10, 25, 0].forEach(l => {
+        const btn = document.getElementById(l === 0 ? 'btn-farm-egg-all' : 'btn-farm-egg-' + l);
+        if (btn) {
+          if (l === limit) {
+            btn.className = 'btn';
+            btn.style.background = '#10B981';
+            btn.style.color = '#fff';
+          } else {
+            btn.className = 'btn btn-secondary';
+            btn.style.background = 'transparent';
+            btn.style.color = 'var(--text)';
+          }
+        }
+      });
+      const lbl = document.getElementById('farm-egg-count-info');
+      if (lbl) lbl.innerText = limit === 0 ? 'Tüm işlemler listeleniyor' : `Son ${limit} işlem listeleniyor`;
+      loadFarmEggSalesWeb();
+    }
+
+    function setFarmFeedLimit(limit) {
+      currentFarmFeedLimit = limit;
+      [10, 25, 0].forEach(l => {
+        const btn = document.getElementById(l === 0 ? 'btn-farm-feed-all' : 'btn-farm-feed-' + l);
+        if (btn) {
+          if (l === limit) {
+            btn.className = 'btn';
+            btn.style.background = '#0284C7';
+            btn.style.color = '#fff';
+          } else {
+            btn.className = 'btn btn-secondary';
+            btn.style.background = 'transparent';
+            btn.style.color = 'var(--text)';
+          }
+        }
+      });
+      const lbl = document.getElementById('farm-feed-count-info');
+      if (lbl) lbl.innerText = limit === 0 ? 'Tüm işlemler listeleniyor' : `Son ${limit} işlem listeleniyor`;
+      loadFarmFeedPurchasesWeb();
+    }
+
+    function setFarmAnalyticsLimit(limit) {
+      currentFarmAnalyticsLimit = limit;
+      [10, 25, 0].forEach(l => {
+        const btn = document.getElementById(l === 0 ? 'btn-farm-ana-all' : 'btn-farm-ana-' + l);
+        if (btn) {
+          if (l === limit) {
+            btn.className = 'btn';
+            btn.style.background = '#10B981';
+            btn.style.color = '#fff';
+          } else {
+            btn.className = 'btn btn-secondary';
+            btn.style.background = 'transparent';
+            btn.style.color = 'var(--text)';
+          }
+        }
+      });
+      const lbl = document.getElementById('farm-analytics-count-info');
+      if (lbl) lbl.innerText = limit === 0 ? 'Tüm hareketler gösteriliyor' : `Son ${limit} hareket gösteriliyor`;
+      if (document.getElementById('farm-view-analytics').style.display !== 'none' && currentFarmPeriod) {
+        loadFarmAnalyticsWeb();
+      }
+    }
 
     function openFarmModal() {
       if (sessionStorage.getItem('farm_unlocked') === 'true') {
@@ -6823,7 +6915,7 @@
       });
       if (tab === 'egg') loadFarmEggSalesWeb();
       else if (tab === 'feed') loadFarmFeedPurchasesWeb();
-      else if (tab === 'analytics') loadFarmAnalyticsWeb();
+      // Tab 3 'analytics' için otomatik listeleme yapılmaz; kullanıcı filtre/periyot seçince yüklenir.
     }
 
     function initFarmData() {
@@ -6964,14 +7056,15 @@
 
     async function loadFarmEggSalesWeb() {
       try {
-        const res = await apiFetch('/api/farm/egg-sales');
+        const q = (currentFarmEggLimit > 0) ? `?limit=${currentFarmEggLimit}` : '';
+        const res = await apiFetch('/api/farm/egg-sales' + q);
         const json = await res.json();
         const tbody = document.getElementById('farm-egg-sales-tbody');
         if (!json.ok || !json.sales || json.sales.length === 0) {
           tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:16px; color:var(--text-muted);">Henüz kayıtlı yumurta satışı yok.</td></tr>';
           return;
         }
-        tbody.innerHTML = json.sales.slice(0, 50).map(s => {
+        tbody.innerHTML = json.sales.map(s => {
           const isAdet = (s.unit_type === 'adet');
           const pCnt = s.piece_count || Math.round(s.box_count * 30);
           const qtyBadge = isAdet
@@ -7062,21 +7155,27 @@
 
     async function loadFarmFeedPurchasesWeb() {
       try {
-        const res = await apiFetch('/api/farm/feed-purchases');
+        const q = (currentFarmFeedLimit > 0) ? `?limit=${currentFarmFeedLimit}` : '';
+        const res = await apiFetch('/api/farm/feed-purchases' + q);
         const json = await res.json();
         const tbody = document.getElementById('farm-feed-tbody');
         const purchases = json.purchases || [];
 
-        let totalBags = 0, totalTons = 0, totalCost = 0;
-        purchases.forEach(p => {
-          totalBags += parseFloat(p.bag_count || 0);
-          totalTons += parseFloat(p.total_weight_ton || 0);
-          totalCost += parseFloat(p.total_amount || 0);
-        });
-
-        document.getElementById('farm-feed-kpi-bags').innerText = totalBags + ' Çuval';
-        document.getElementById('farm-feed-kpi-tons').innerText = totalTons.toFixed(2) + ' Ton';
-        document.getElementById('farm-feed-kpi-cost').innerText = totalCost.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺';
+        if (json.summary) {
+          document.getElementById('farm-feed-kpi-bags').innerText = json.summary.total_bags + ' Çuval';
+          document.getElementById('farm-feed-kpi-tons').innerText = Number(json.summary.total_tons).toFixed(2) + ' Ton';
+          document.getElementById('farm-feed-kpi-cost').innerText = Number(json.summary.total_cost).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺';
+        } else {
+          let totalBags = 0, totalTons = 0, totalCost = 0;
+          purchases.forEach(p => {
+            totalBags += parseFloat(p.bag_count || 0);
+            totalTons += parseFloat(p.total_weight_ton || 0);
+            totalCost += parseFloat(p.total_amount || 0);
+          });
+          document.getElementById('farm-feed-kpi-bags').innerText = totalBags + ' Çuval';
+          document.getElementById('farm-feed-kpi-tons').innerText = totalTons.toFixed(2) + ' Ton';
+          document.getElementById('farm-feed-kpi-cost').innerText = totalCost.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺';
+        }
 
         if (purchases.length === 0) {
           tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:16px; color:var(--text-muted);">Henüz yem alım kaydı yok.</td></tr>';
@@ -7201,6 +7300,9 @@
     }
 
     async function loadFarmAnalyticsWeb() {
+      if (!currentFarmPeriod) {
+        currentFarmPeriod = 'all';
+      }
       const cust = document.getElementById('farm-filter-cust-select').value;
       const sDate = document.getElementById('farm-custom-start') ? document.getElementById('farm-custom-start').value : '';
       const eDate = document.getElementById('farm-custom-end') ? document.getElementById('farm-custom-end').value : '';
@@ -7276,11 +7378,24 @@
         }
 
         // Details Table
+        const allSales = d.sales || [];
+        const displaySales = (currentFarmAnalyticsLimit > 0) ? allSales.slice(0, currentFarmAnalyticsLimit) : allSales;
+        const countInfoEl = document.getElementById('farm-analytics-count-info');
+        if (countInfoEl) {
+          if (allSales.length === 0) {
+            countInfoEl.innerText = 'Kayıt bulunamadı';
+          } else if (currentFarmAnalyticsLimit > 0 && allSales.length > currentFarmAnalyticsLimit) {
+            countInfoEl.innerText = `Toplam ${allSales.length} hareketten son ${displaySales.length} tanesi listeleniyor`;
+          } else {
+            countInfoEl.innerText = `Toplam ${allSales.length} hareket listeleniyor`;
+          }
+        }
+
         const dTbody = document.getElementById('farm-analytics-details-tbody');
-        if (d.sales.length === 0) {
+        if (allSales.length === 0) {
           dTbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:16px; color:var(--text-muted);">Satış hareketi bulunamadı.</td></tr>';
         } else {
-          dTbody.innerHTML = d.sales.map(s => {
+          dTbody.innerHTML = displaySales.map(s => {
             const isAdet = (s.unit_type === 'adet');
             const pCnt = s.piece_count || Math.round(s.box_count * 30);
             const qtyBadge = isAdet

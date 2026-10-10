@@ -3430,6 +3430,7 @@ class CloudDatabase:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         source: Optional[str] = None,
+        limit: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """Yumurta satış kayıtlarını filtreli ve tarih sırasına göre döner."""
         uid = self._resolve_user_id(user_id)
@@ -3453,6 +3454,9 @@ class CloudDatabase:
             params.append(source.strip())
 
         query += " ORDER BY replace(sale_date, 'T', ' ') DESC, id DESC"
+
+        if limit is not None and int(limit) > 0:
+            query += f" LIMIT {int(limit)}"
 
         with self.db.get_connection() as conn:
             rows = conn.execute(query, params).fetchall()
@@ -3587,6 +3591,7 @@ class CloudDatabase:
         user_id: Optional[Union[int, str]] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
+        limit: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """Yem alım kayıtlarını tarih sırasına göre döner."""
         uid = self._resolve_user_id(user_id)
@@ -3602,6 +3607,9 @@ class CloudDatabase:
             params.append(end_date.strip())
 
         query += " ORDER BY purchase_date DESC, id DESC"
+
+        if limit is not None and int(limit) > 0:
+            query += f" LIMIT {int(limit)}"
 
         with self.db.get_connection() as conn:
             rows = conn.execute(query, params).fetchall()
@@ -3623,6 +3631,57 @@ class CloudDatabase:
                     purchases = [dict(r) for r in fb_rows]
 
             return purchases
+
+    def get_farm_feed_summary(self, user_id: Optional[Union[int, str]] = None) -> Dict[str, float]:
+        """Yem alımları için genel toplam özetini döner."""
+        uid = self._resolve_user_id(user_id)
+        with self.db.get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    COALESCE(SUM(bag_count), 0) as total_bags,
+                    COALESCE(SUM(total_weight_ton), 0) as total_tons,
+                    COALESCE(SUM(total_amount), 0) as total_cost
+                FROM farm_feed_purchases
+                WHERE (user_id = ? OR user_id IS NULL)
+                """,
+                (uid,)
+            ).fetchone()
+            if not row or (row["total_bags"] == 0 and not self._hydration_completed):
+                try:
+                    self.ensure_initial_hydration()
+                    row = conn.execute(
+                        """
+                        SELECT
+                            COALESCE(SUM(bag_count), 0) as total_bags,
+                            COALESCE(SUM(total_weight_ton), 0) as total_tons,
+                            COALESCE(SUM(total_amount), 0) as total_cost
+                        FROM farm_feed_purchases
+                        WHERE (user_id = ? OR user_id IS NULL)
+                        """,
+                        (uid,)
+                    ).fetchone()
+                except Exception:
+                    pass
+            if not row or row["total_bags"] == 0:
+                fb_row = conn.execute(
+                    """
+                    SELECT
+                        COALESCE(SUM(bag_count), 0) as total_bags,
+                        COALESCE(SUM(total_weight_ton), 0) as total_tons,
+                        COALESCE(SUM(total_amount), 0) as total_cost
+                    FROM farm_feed_purchases
+                    """
+                ).fetchone()
+                if fb_row:
+                    row = fb_row
+
+            return {
+                "total_bags": float(row["total_bags"] if row else 0),
+                "total_tons": float(row["total_tons"] if row else 0),
+                "total_cost": float(row["total_cost"] if row else 0),
+            }
+
 
     def delete_farm_feed_purchase(self, purchase_id: int, user_id: Optional[int] = None) -> tuple[bool, str]:
         """Yem alım kaydını siler."""

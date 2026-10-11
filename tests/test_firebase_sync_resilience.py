@@ -584,6 +584,56 @@ class TestFirebaseSyncResilience(unittest.TestCase):
             else:
                 os.environ.pop("FIREBASE_CREDENTIALS_JSON", None)
 
+    def test_pull_products_with_negative_values_and_constraint_resilience(self):
+        """Products with negative prices/stocks in Firestore must be safely clamped to >= 0 without crashing the pull."""
+        doc1 = MagicMock()
+        doc1.id = "p901"
+        doc1.to_dict.return_value = {
+            "id": 901,
+            "name": "Bozuk Stoklu Ürün",
+            "barcode": "BAR901",
+            "stock_quantity": -10.0,
+            "purchase_price": -5.0,
+            "sale_price": -15.0,
+        }
+        doc2 = MagicMock()
+        doc2.id = "p902"
+        doc2.to_dict.return_value = {
+            "id": 902,
+            "name": "Normal Ürün",
+            "barcode": "BAR902",
+            "stock_quantity": 20.0,
+            "purchase_price": 50.0,
+            "sale_price": 75.0,
+        }
+        self.mock_firestore.collection.return_value.stream.return_value = [doc1, doc2]
+
+        pulled = self.cloud_db.pull_all_from_firebase(user_id=1)
+        self.assertGreaterEqual(pulled, 2)
+
+        # Verify products in SQLite
+        with self.db.get_connection() as conn:
+            p1 = conn.execute("SELECT * FROM products WHERE id = 901").fetchone()
+            self.assertIsNotNone(p1)
+            self.assertEqual(p1["stock_quantity"], 0.0)
+            self.assertEqual(p1["purchase_price"], 0.0)
+            self.assertEqual(p1["sale_price"], 0.0)
+
+            p2 = conn.execute("SELECT * FROM products WHERE id = 902").fetchone()
+            self.assertIsNotNone(p2)
+            self.assertEqual(p2["stock_quantity"], 20.0)
+            self.assertEqual(p2["sale_price"], 75.0)
+
+    def test_get_products_endpoint_returns_list_never_crashes(self):
+        """GET /api/products must always return 200 and a list, even when empty or facing errors."""
+        from app.web.web_server import app, EXPECTED_GATE_TOKEN
+        client = app.test_client()
+        headers = {"X-Gate-Token": EXPECTED_GATE_TOKEN}
+        res = client.get("/api/products", headers=headers)
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertIsInstance(data, list)
+
 
 if __name__ == "__main__":
     unittest.main()

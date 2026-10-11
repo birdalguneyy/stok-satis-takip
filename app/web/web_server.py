@@ -554,12 +554,21 @@ def get_categories():
 
 @app.route("/api/products", methods=["GET"])
 def get_products():
-    user_id = get_current_user_id()
-    if user_id is None:
-        return jsonify([])
-    search = request.args.get("search", "")
-    products = cloud_db.get_products(user_id=user_id, search=search)
-    return jsonify(products)
+    try:
+        user_id = get_current_user_id()
+        if user_id is None:
+            return jsonify([])
+        search = request.args.get("search", "")
+        products = cloud_db.get_products(user_id=user_id, search=search)
+        return jsonify(products)
+    except Exception as e:
+        logger.error(f"/api/products rotası hatası: {e}", exc_info=True)
+        try:
+            with cloud_db.db.get_connection() as conn:
+                rows = conn.execute("SELECT p.*, c.name as category_name FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.is_active = 1").fetchall()
+                return jsonify([dict(r) for r in rows])
+        except Exception:
+            return jsonify([])
 
 
 @app.route("/api/products/barcode/<barcode>")

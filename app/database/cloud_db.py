@@ -125,7 +125,7 @@ class CloudDatabase:
             pass
 
         self._hydration_completed = False
-        self._hydration_lock = threading.Lock()
+        self._hydration_lock = threading.RLock()
         self._last_pull_timestamp = 0.0
 
         self._init_firebase_optional()
@@ -507,76 +507,90 @@ class CloudDatabase:
                 try:
                     p_docs = self.firestore_db.collection("products").stream()
                     for doc in p_docs:
-                        d = doc.to_dict()
-                        pid = d.get("id")
-                        if pid is None:
-                            if doc.id.isdigit():
-                                pid = int(doc.id)
-                            elif "_p" in doc.id:
+                        try:
+                            d = doc.to_dict()
+                            pid = d.get("id")
+                            if pid is None:
+                                if doc.id.isdigit():
+                                    pid = int(doc.id)
+                                elif "_p" in doc.id:
+                                    try:
+                                        pid = int(doc.id.split("_p")[-1])
+                                    except Exception:
+                                        pass
+                                if pid is None:
+                                    nums = re.findall(r"\d+", doc.id)
+                                    if nums:
+                                        pid = int(nums[-1])
+                                if pid is None:
+                                    max_p = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM products").fetchone()[0]
+                                    pid = int(max_p)
+                            else:
                                 try:
-                                    pid = int(doc.id.split("_p")[-1])
+                                    pid = int(pid)
                                 except Exception:
                                     pass
-                            if pid is None:
-                                nums = re.findall(r"\d+", doc.id)
-                                if nums:
-                                    pid = int(nums[-1])
-                            if pid is None:
-                                max_p = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM products").fetchone()[0]
-                                pid = int(max_p)
-                        else:
-                            try:
-                                pid = int(pid)
-                            except Exception:
-                                pass
 
-                        doc_user_id = d.get("user_id")
-                        if doc_user_id is None and doc.id.startswith("u") and "_" in doc.id:
+                            doc_user_id = d.get("user_id")
+                            if doc_user_id is None and doc.id.startswith("u") and "_" in doc.id:
+                                try:
+                                    doc_user_id = int(doc.id.split("_")[0][1:])
+                                except Exception:
+                                    pass
                             try:
-                                doc_user_id = int(doc.id.split("_")[0][1:])
+                                final_uid = int(doc_user_id) if doc_user_id is not None else (int(user_id) if user_id is not None else 1)
                             except Exception:
-                                pass
-                        try:
-                            final_uid = int(doc_user_id) if doc_user_id is not None else (int(user_id) if user_id is not None else 1)
-                        except Exception:
-                            final_uid = 1
+                                final_uid = 1
 
-                        if pid and d.get("name"):
-                            cat_id = d.get("category_id") or 1
-                            try:
-                                cat_id = int(cat_id)
-                            except Exception:
-                                cat_id = 1
-                            # Ensure category exists for foreign key
-                            conn.execute(
-                                "INSERT OR IGNORE INTO categories (id, name, user_id, synced_to_cloud) VALUES (?, 'Genel', ?, 1)",
-                                (cat_id, final_uid),
-                            )
-                            conn.execute(
-                                """
-                                INSERT OR REPLACE INTO products (
-                                    id, user_id, category_id, name, barcode, purchase_price, sale_price,
-                                    stock_quantity, critical_stock_level, unit, image_path, is_active, synced_to_cloud, created_at, updated_at
-                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-                                """,
-                                (
-                                    pid,
-                                    final_uid,
-                                    cat_id,
-                                    d.get("name", "Ürün"),
-                                    d.get("barcode", f"KOD{pid}"),
-                                    float(d.get("purchase_price", 0)),
-                                    float(d.get("sale_price", 0)),
-                                    float(d.get("stock_quantity", 0)),
-                                    float(d.get("critical_stock_level", 5)),
-                                    str(d.get("unit", "adet")),
-                                    d.get("image_path", ""),
-                                    int(d.get("is_active", 1)),
-                                    normalize_datetime_str(d.get("created_at")),
-                                    normalize_datetime_str(d.get("updated_at")),
-                                ),
-                            )
-                            pulled_count += 1
+                            if pid and d.get("name"):
+                                cat_id = d.get("category_id") or 1
+                                try:
+                                    cat_id = int(cat_id)
+                                except Exception:
+                                    cat_id = 1
+                                # Ensure category exists for foreign key
+                                conn.execute(
+                                    "INSERT OR IGNORE INTO categories (id, name, user_id, synced_to_cloud) VALUES (?, 'Genel', ?, 1)",
+                                    (cat_id, final_uid),
+                                )
+                                pur_price = max(0.0, float(d.get("purchase_price") or 0.0))
+                                sal_price = max(0.0, float(d.get("sale_price") or 0.0))
+                                stk_qty = max(0.0, float(d.get("stock_quantity") or 0.0))
+                                crit_level = max(0.0, float(d.get("critical_stock_level") or 5.0))
+                                conn.execute(
+                                    """
+                                    INSERT OR REPLACE INTO products (
+                                        id, user_id, category_id, name, barcode, purchase_price, sale_price,
+                                        stock_quantity, critical_stock_level, unit, image_path, is_active, synced_to_cloud, created_at, updated_at
+                                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                                    """,
+                                    (
+                                        pid,
+                                        final_uid,
+                                        cat_id,
+                                        str(d.get("name", "Ürün")),
+                                        str(d.get("barcode") or f"KOD{pid}"),
+                                        pur_price,
+                                        sal_price,
+                                        stk_qty,
+                                        crit_level,
+                                        str(d.get("unit") or "adet"),
+                                        str(d.get("image_path") or ""),
+                                        int(d.get("is_active", 1)),
+                                        normalize_datetime_str(d.get("created_at")),
+                                        normalize_datetime_str(d.get("updated_at")),
+                                    ),
+                                )
+                                pulled_count += 1
+                        except Exception as p_item_err:
+                            logger.warning(f"Ürün satırı çekme hatası (doc {doc.id}): {p_item_err}")
+
+                    try:
+                        max_p = conn.execute("SELECT COALESCE(MAX(id), 0) FROM products").fetchone()[0]
+                        if max_p:
+                            conn.execute("INSERT OR REPLACE INTO sqlite_sequence (name, seq) VALUES ('products', ?)", (max_p,))
+                    except Exception:
+                        pass
                 except Exception as e:
                     logger.warning(f"Ürünleri buluttan çekme hatası: {e}")
 
@@ -1456,26 +1470,37 @@ class CloudDatabase:
     # ════════════════════════════════════════════════════════════════════
     def get_categories(self, user_id: Optional[Union[int, str]] = None) -> List[Dict[str, Any]]:
         uid = self._resolve_user_id(user_id)
-        with self.db.get_connection() as conn:
-            rows = conn.execute(
-                "SELECT id, name FROM categories WHERE (user_id = ? OR user_id IS NULL) ORDER BY name ASC",
-                (uid,),
-            ).fetchall()
-            cats = [{"id": r["id"], "name": r["name"]} for r in rows]
-            if not cats and not self._hydration_completed:
-                try:
-                    self.ensure_initial_hydration()
+        cats = []
+        try:
+            with self.db.get_connection() as conn:
+                rows = conn.execute(
+                    "SELECT id, name FROM categories WHERE (user_id = ? OR user_id IS NULL) ORDER BY name ASC",
+                    (uid,),
+                ).fetchall()
+                cats = [{"id": r["id"], "name": r["name"]} for r in rows]
+        except Exception:
+            pass
+
+        if not cats and not self._hydration_completed and self.ensure_firebase():
+            try:
+                self.ensure_initial_hydration()
+                with self.db.get_connection() as conn:
                     rows = conn.execute(
                         "SELECT id, name FROM categories WHERE (user_id = ? OR user_id IS NULL) ORDER BY name ASC",
                         (uid,),
                     ).fetchall()
                     cats = [{"id": r["id"], "name": r["name"]} for r in rows]
-                except Exception:
-                    pass
-            if not cats:
-                rows = conn.execute("SELECT id, name FROM categories ORDER BY name ASC").fetchall()
-                cats = [{"id": r["id"], "name": r["name"]} for r in rows]
-            return cats
+            except Exception:
+                pass
+
+        if not cats:
+            try:
+                with self.db.get_connection() as conn:
+                    rows = conn.execute("SELECT id, name FROM categories ORDER BY name ASC").fetchall()
+                    cats = [{"id": r["id"], "name": r["name"]} for r in rows]
+            except Exception:
+                pass
+        return cats
 
     def add_category(self, name: str, user_id: Optional[int] = None) -> Optional[int]:
         name_clean = name.strip()
@@ -1561,31 +1586,43 @@ class CloudDatabase:
 
         query += " ORDER BY p.name ASC"
 
-        with self.db.get_connection() as conn:
-            rows = conn.execute(query, params).fetchall()
-            products = [dict(r) for r in rows]
+        # 1. Hızlı gerçek ürün sayısı kontrolü (bağlantı anında kapanır)
+        real_count = 1
+        try:
+            with self.db.get_connection() as conn:
+                real_count = conn.execute("""
+                    SELECT COUNT(*) FROM products 
+                    WHERE barcode NOT IN ('869000000001', '869000000002', '869000000003', '869000000004', '869000000005', '869000000006')
+                """).fetchone()[0]
+        except Exception:
+            pass
 
-            real_count = conn.execute("SELECT COUNT(*) FROM products WHERE barcode NOT LIKE '86900000000%'").fetchone()[0]
-            if real_count == 0 and not search and self.ensure_firebase():
-                now_ts = time.time()
-                if now_ts - self._last_pull_timestamp > 10:
-                    try:
-                        self.pull_all_from_firebase(user_id=uid)
-                        self._last_pull_timestamp = now_ts
-                        self._hydration_completed = True
-                        rows = conn.execute(query, params).fetchall()
-                        products = [dict(r) for r in rows]
-                    except Exception as e:
-                        logger.warning(f"get_products auto-pull uyarısı: {e}")
+        # 2. Eğer gerçek ürün yoksa ve Firebase aktifse, hydration'ı açık bağlantı olmadan güvenle çağır
+        if real_count == 0 and not search and self.ensure_firebase():
+            now_ts = time.time()
+            if now_ts - self._last_pull_timestamp > 10:
+                try:
+                    self.ensure_initial_hydration()
+                except Exception as e:
+                    logger.warning(f"get_products hydration uyarısı: {e}")
 
-            if not products:
-                fb_query = query.replace("(p.user_id = ? OR p.user_id IS NULL)", "1=1")
-                fb_params = params[1:]
-                fb_rows = conn.execute(fb_query, fb_params).fetchall()
-                if fb_rows:
-                    products = [dict(r) for r in fb_rows]
+        # 3. Ürünleri oku
+        try:
+            with self.db.get_connection() as conn:
+                rows = conn.execute(query, params).fetchall()
+                products = [dict(r) for r in rows]
 
-            return products
+                if not products:
+                    fb_query = query.replace("(p.user_id = ? OR p.user_id IS NULL)", "1=1")
+                    fb_params = params[1:]
+                    fb_rows = conn.execute(fb_query, fb_params).fetchall()
+                    if fb_rows:
+                        products = [dict(r) for r in fb_rows]
+
+                return products
+        except Exception as e:
+            logger.error(f"get_products sorgu hatası: {e}")
+            return []
 
     def get_product_by_barcode(self, barcode: str, user_id: Optional[Union[int, str]] = None) -> Optional[Dict[str, Any]]:
         uid = self._resolve_user_id(user_id)

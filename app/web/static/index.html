@@ -4370,17 +4370,38 @@
     }
 
     async function loadProducts(search = '') {
+      const container = document.getElementById('product-list-container');
       try {
         const res = await fetchWithAuth('/api/products' + (search ? '?search=' + encodeURIComponent(search) : ''));
+        if (!res.ok) {
+          throw new Error('HTTP ' + res.status);
+        }
         const products = await res.json();
+        if (!Array.isArray(products)) {
+          throw new Error('Geçersiz veri biçimi');
+        }
         if (!search) {
-          _allProductsCache = products || [];
+          _allProductsCache = products;
           allProductsCache = _allProductsCache;
         }
-        renderProductList(products || []);
+        renderProductList(products);
       } catch (e) {
-        const container = document.getElementById('product-list-container');
-        if (container) container.innerHTML = '<div style="text-align:center; color:var(--danger); padding:20px;">Ürünler yüklenemedi!</div>';
+        console.warn('loadProducts uyarısı:', e);
+        if (_allProductsCache && _allProductsCache.length > 0) {
+          renderProductList(_allProductsCache);
+        } else if (container) {
+          const safeSearch = (search || '').replace(/'/g, "\\'");
+          container.innerHTML = `
+            <div style="text-align:center; padding:30px 15px; background:var(--card-bg); border-radius:12px; border:1px solid var(--border-subtle); margin:15px 0;">
+              <div style="font-size:2rem; margin-bottom:8px;">⏳</div>
+              <div style="font-size:0.95rem; font-weight:700; color:var(--text); margin-bottom:6px;">Ürünler Senkronize Ediliyor</div>
+              <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:16px;">Firebase bağlantısı yeni açıldığı için veriler yükleniyor olabilir. Lütfen tekrar deneyiniz.</div>
+              <button class="btn btn-primary" style="padding:8px 22px; font-size:0.85rem; font-weight:700; display:inline-flex; align-items:center; gap:6px; margin:0 auto; border-radius:8px;" onclick="loadProducts('${safeSearch}')">
+                🔄 Tekrar Dene
+              </button>
+            </div>
+          `;
+        }
       }
     }
 
@@ -4596,7 +4617,10 @@
     async function loadPOSProductPicker() {
       try {
         const res = await fetchWithAuth('/api/products');
-        allProductsCache = await res.json();
+        if (!res.ok) return;
+        const products = await res.json();
+        if (!Array.isArray(products)) return;
+        allProductsCache = products;
         const select = document.getElementById('pos-product-picker');
         if (!select) return;
 

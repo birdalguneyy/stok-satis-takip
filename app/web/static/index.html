@@ -778,6 +778,10 @@
           <span style="color:var(--text-muted);">Kimlik Kaynağı:</span>
           <span id="fb-diag-source" style="font-weight:600; color:var(--text);">-</span>
         </div>
+        <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+          <span style="color:var(--text-muted);">Kalıcılık Durumu:</span>
+          <span id="fb-diag-permanence" style="font-weight:600; color:var(--text);">-</span>
+        </div>
         <div id="fb-diag-error-row" style="display:none; margin-top:8px; padding-top:8px; border-top:1px dashed var(--border); color:#ef4444;">
           <span style="font-weight:600;">Hata / Teşhis:</span>
           <div id="fb-diag-error" style="font-size:0.8rem; margin-top:2px; word-break:break-word;"></div>
@@ -798,7 +802,7 @@
       <div style="border-top:1px solid var(--border); padding-top:14px;">
         <h4 style="margin:0 0 8px 0; font-size:0.92rem; color:var(--text);">🔑 Firebase Service Account JSON Yükle</h4>
         <p style="font-size:0.78rem; color:var(--text-muted); margin-bottom:10px; line-height:1.4;">
-          Firebase Console &gt; Proje Ayarları &gt; Hizmet Hesapları (Service Accounts) &gt; "Yeni özel anahtar oluştur" ile indirdiğiniz JSON dosyasını seçin veya metnini yapıştırın:
+          Firebase Console &gt; Proje Ayarları &gt; Hizmet Hesapları &gt; "Yeni özel anahtar oluştur" ile indirdiğiniz JSON dosyasını seçin veya yapıştırın:
         </p>
 
         <div class="form-group" style="margin-bottom:10px;">
@@ -819,10 +823,27 @@
         </div>
       </div>
 
-      <!-- Render Guidance Note -->
-      <div style="margin-top:14px; background:rgba(59,130,246,0.08); border:1px solid rgba(59,130,246,0.25); border-radius:8px; padding:10px; font-size:0.75rem; color:var(--text-muted); line-height:1.4;">
-        <strong style="color:#60a5fa;">💡 Render.com / Bulut İpucu:</strong><br>
-        Web sitesi her Git güncellemesinde sıfırlanıyorsa, bu JSON içeriğini Render panelinde <code>FIREBASE_CREDENTIALS_JSON</code> ortam değişkenine (Environment Variable) yapıştırarak kalıcı hale getirebilirsiniz.
+      <!-- Render Permanent Setup Box -->
+      <div style="margin-top:14px; background:rgba(245,158,11,0.06); border:1.5px solid rgba(245,158,11,0.25); border-radius:10px; padding:12px; font-size:0.78rem;">
+        <div style="font-weight:800; color:#f59e0b; margin-bottom:6px; display:flex; align-items:center; gap:6px;">
+          <span>📌</span> Sunucu Açılıp Kapandığında Asla Çevrimdışı Kalmaması İçin:
+        </div>
+        <p style="color:var(--text-muted); margin:0 0 10px 0; line-height:1.45;">
+          Render platformu sunucuyu yeniden başlattığında diskteki geçici dosyaları sıfırlar. Bu tarayıcıyı her açtığınızda sistem otomatik bağlanır. Sunucunun <b>7/24 kalıcı bağlı kalmasını</b> sağlamak için:
+        </p>
+        <div style="margin-bottom:10px;">
+          <button type="button" class="btn" style="width:100%; padding:8px; font-size:0.8rem; font-weight:700; background:rgba(59,130,246,0.15); color:#60a5fa; border:1px solid #3b82f6; border-radius:8px; cursor:pointer;" onclick="copyFirebaseJsonForRender()">
+            📋 Render İçin JSON'ı Panoya Kopyala
+          </button>
+        </div>
+        <div style="background:rgba(0,0,0,0.2); border-radius:6px; padding:8px 10px; color:var(--text-muted); line-height:1.5; font-size:0.75rem;">
+          <b>1.</b> <a href="https://dashboard.render.com" target="_blank" style="color:#60a5fa; text-decoration:underline; font-weight:600;">Render Dashboard</a> &gt; Web Servisinizi açın.<br>
+          <b>2.</b> Sol menüden <b>Environment</b> sekmesine tıklayın.<br>
+          <b>3.</b> <b>Add Environment Variable</b> diyerek:<br>
+          &nbsp;&nbsp;&bull; Key: <code style="color:#f59e0b; font-weight:700;">FIREBASE_CREDENTIALS_JSON</code><br>
+          &nbsp;&nbsp;&bull; Value: <i>(Yukarıdan kopyaladığınız JSON içeriği)</i><br>
+          <b>4.</b> <b>Save Changes</b> butonuna basın. Artık sunucu kapansa bile Firebase asla çevrimdışı kalmaz!
+        </div>
       </div>
     </div>
   </div>
@@ -6189,6 +6210,37 @@
     }
 
     let isSyncingProcess = false;
+    let _isAutoRestoringFirebase = false;
+    let _firebaseAutoRestoreFailed = false;
+
+    async function autoRestoreFirebaseCredentials(backupCred) {
+      if (_isAutoRestoringFirebase || _firebaseAutoRestoreFailed) return;
+      _isAutoRestoringFirebase = true;
+      try {
+        const res = await fetchWithAuth('/api/firebase/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ credentials: backupCred })
+        });
+        const json = await res.json();
+        if (json.ok) {
+          showToast("🔄 Firebase bağlantısı tarayıcı önbelleğinden otomatik yenilendi.");
+          await checkSyncStatus();
+          try { await loadProducts(); } catch(e) {}
+          try { if (typeof loadPOSProductPicker === 'function') loadPOSProductPicker(); } catch(e) {}
+          try { if (typeof loadSalesHistory === 'function') await loadSalesHistory(); } catch(e) {}
+          try { if (typeof loadFarmEggSalesWeb === 'function') await loadFarmEggSalesWeb(); } catch(e) {}
+          try { if (typeof loadFarmFeedPurchasesWeb === 'function') await loadFarmFeedPurchasesWeb(); } catch(e) {}
+          try { if (typeof loadExpenses === 'function') await loadExpenses(); } catch(e) {}
+        } else {
+          _firebaseAutoRestoreFailed = true;
+        }
+      } catch (err) {
+        _firebaseAutoRestoreFailed = true;
+      } finally {
+        _isAutoRestoringFirebase = false;
+      }
+    }
 
     async function checkSyncStatus() {
       const badge = document.getElementById('sync-status-badge');
@@ -6198,21 +6250,38 @@
         const json = await res.json();
         if (json.ok) {
           if (!json.has_firebase) {
+            const backupCred = localStorage.getItem('stok_firebase_cred_backup');
+            if (backupCred && !_isAutoRestoringFirebase && !_firebaseAutoRestoreFailed) {
+              autoRestoreFirebaseCredentials(backupCred);
+            }
             const shortReason = json.last_error && json.last_error.includes('bulunamadı') ? 'Yapılandırılmadı' : 'Bağlantı Yok';
             badge.innerText = `🔥 🔴 Firebase (${shortReason})`;
             badge.style.background = 'rgba(239, 68, 68, 0.2)';
             badge.style.color = '#EF4444';
             badge.title = json.last_error || 'Firebase bağlantısı kurulamadı. Tıklayarak ayarlayınız.';
-          } else if (json.unsynced_items > 0) {
-            badge.innerText = `🔥 🔄 Firebase Eşitleniyor (${json.unsynced_items})`;
-            badge.style.background = 'rgba(234, 179, 8, 0.2)';
-            badge.style.color = '#EAB308';
-            badge.title = `${json.unsynced_items} adet bekleyen veri Firestore'a aktarılıyor.`;
           } else {
-            badge.innerText = '🔥 🟢 Firebase Aktif';
-            badge.style.background = 'rgba(16, 185, 129, 0.2)';
-            badge.style.color = '#10B981';
-            badge.title = `Firebase Projesi: ${json.project_id || 'Bağlı'} (${json.cred_source || 'Aktif'})`;
+            // Sunucuda Firebase bağlıysa ve yerel yedek henüz yoksa, arka planda güvenle yedek al
+            if (!localStorage.getItem('stok_firebase_cred_backup')) {
+              fetchWithAuth('/api/firebase/export-config')
+                .then(r => r.json())
+                .then(res => {
+                  if (res && res.ok && res.raw_json) {
+                    try { localStorage.setItem('stok_firebase_cred_backup', res.raw_json); } catch(e) {}
+                  }
+                }).catch(() => {});
+            }
+
+            if (json.unsynced_items > 0) {
+              badge.innerText = `🔥 🔄 Firebase Eşitleniyor (${json.unsynced_items})`;
+              badge.style.background = 'rgba(234, 179, 8, 0.2)';
+              badge.style.color = '#EAB308';
+              badge.title = `${json.unsynced_items} adet bekleyen veri Firestore'a aktarılıyor.`;
+            } else {
+              badge.innerText = '🔥 🟢 Firebase Aktif';
+              badge.style.background = 'rgba(16, 185, 129, 0.2)';
+              badge.style.color = '#10B981';
+              badge.title = `Firebase Projesi: ${json.project_id || 'Bağlı'} (${json.cred_source || 'Aktif'})`;
+            }
           }
 
           // Eğer Firebase ayar modalı açıksa onun içeriğini de canlı güncelle
@@ -6263,6 +6332,13 @@
       const modal = document.getElementById('firebase-modal-overlay');
       if (modal) {
         modal.style.display = 'flex';
+        const textInput = document.getElementById('fb-json-text-input');
+        if (textInput && !textInput.value.trim()) {
+          const backupCred = localStorage.getItem('stok_firebase_cred_backup');
+          if (backupCred) {
+            textInput.value = backupCred;
+          }
+        }
         loadFirebaseDiagnosticInfo();
       }
     }
@@ -6293,6 +6369,7 @@
       const statusEl = document.getElementById('fb-diag-status');
       const projEl = document.getElementById('fb-diag-project');
       const srcEl = document.getElementById('fb-diag-source');
+      const permEl = document.getElementById('fb-diag-permanence');
       const errRow = document.getElementById('fb-diag-error-row');
       const errEl = document.getElementById('fb-diag-error');
 
@@ -6310,6 +6387,26 @@
 
       if (projEl) projEl.innerText = data.project_id || '(Belirtilmemiş)';
       if (srcEl) srcEl.innerText = data.cred_source || '(Kimlik kaynağı yok)';
+
+      if (permEl) {
+        if (data.is_permanent) {
+          permEl.innerHTML = '<span style="color:#10B981;">🛡️ Kalıcı (Ortam Değişkeni / Gizli Dosya)</span>';
+        } else if (data.has_firebase) {
+          const hasBackup = !!localStorage.getItem('stok_firebase_cred_backup');
+          if (hasBackup) {
+            permEl.innerHTML = '<span style="color:#f59e0b;">⚡ Geçici (Tarayıcı Oto-Yenileme Aktif)</span>';
+          } else {
+            permEl.innerHTML = '<span style="color:#ef4444;">⚠️ Geçici (Sunucu Kapanınca Sıfırlanır)</span>';
+          }
+        } else {
+          const hasBackup = !!localStorage.getItem('stok_firebase_cred_backup');
+          if (hasBackup) {
+            permEl.innerHTML = '<span style="color:#3b82f6;">🔄 Çevrimdışı (Önbellekten Bağlanmaya Hazır)</span>';
+          } else {
+            permEl.innerText = '-';
+          }
+        }
+      }
 
       if (errRow && errEl) {
         if (data.last_error && !data.has_firebase) {
@@ -6331,6 +6428,51 @@
         if (textInput) textInput.value = content;
       };
       reader.readAsText(file);
+    }
+
+    async function copyFirebaseJsonForRender() {
+      let rawJson = '';
+      try {
+        const res = await fetchWithAuth('/api/firebase/export-config');
+        const json = await res.json();
+        if (json && json.ok && json.raw_json) {
+          rawJson = json.raw_json;
+        }
+      } catch (e) {}
+
+      if (!rawJson) {
+        rawJson = localStorage.getItem('stok_firebase_cred_backup') || '';
+      }
+
+      if (!rawJson) {
+        const textInput = document.getElementById('fb-json-text-input');
+        if (textInput && textInput.value.trim()) {
+          rawJson = textInput.value.trim();
+        }
+      }
+
+      if (!rawJson) {
+        showToast("⚠️ Kopyalanacak Firebase JSON bulunamadı! Lütfen önce JSON dosyanızı yükleyin.");
+        return;
+      }
+
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(rawJson);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = rawJson;
+          ta.style.position = 'fixed';
+          ta.style.left = '-9999px';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        }
+        showToast("📋 Firebase JSON panoya kopyalandı! Render Environment alanına yapıştırabilirsiniz.");
+      } catch (err) {
+        showToast("⚠️ Panoya kopyalanamadı. Lütfen metin kutusundan elle kopyalayınız.");
+      }
     }
 
     async function saveFirebaseCredentialsFromModal() {
@@ -6356,6 +6498,10 @@
         });
         const json = await res.json();
         if (json.ok) {
+          try {
+            localStorage.setItem('stok_firebase_cred_backup', rawText);
+          } catch(e) {}
+          _firebaseAutoRestoreFailed = false;
           showToast("✅ " + json.message);
           if (textInput) textInput.value = '';
           const fileInput = document.getElementById('fb-json-file-input');

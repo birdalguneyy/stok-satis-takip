@@ -459,6 +459,10 @@ def sync_status():
             un_exp = conn.execute("SELECT COUNT(*) as cnt FROM expenses WHERE synced_to_cloud = 0 AND (user_id = ? OR user_id IS NULL)", (user_id,)).fetchone()["cnt"]
     total_unsynced = un_prods + un_sales + un_exp
 
+    src = cloud_db.firebase_cred_source or ""
+    is_perm = bool(src and ("Ortam Değişkeni" in src or "secrets" in src))
+    is_ephem = bool(src and "Yerel Dosya" in src)
+
     return jsonify({
         "ok": True,
         "has_firebase": has_firebase,
@@ -466,6 +470,8 @@ def sync_status():
         "project_id": cloud_db.firebase_project_id,
         "cred_source": cloud_db.firebase_cred_source,
         "last_error": cloud_db.firebase_last_error,
+        "is_permanent": is_perm,
+        "is_ephemeral": is_ephem,
         "unsynced_items": total_unsynced,
         "details": {
             "products": un_prods,
@@ -485,11 +491,14 @@ def configure_firebase():
 
     ok, msg = cloud_db.save_firebase_credentials(cred_content)
     if ok:
+        src = cloud_db.firebase_cred_source or ""
         return jsonify({
             "ok": True,
             "message": msg,
             "project_id": cloud_db.firebase_project_id,
             "cred_source": cloud_db.firebase_cred_source,
+            "is_permanent": bool(src and ("Ortam Değişkeni" in src or "secrets" in src)),
+            "is_ephemeral": bool(src and "Yerel Dosya" in src),
         })
     return jsonify({"ok": False, "message": msg, "last_error": cloud_db.firebase_last_error}), 400
 
@@ -498,6 +507,7 @@ def configure_firebase():
 def firebase_status():
     """Firebase bağlantı ve ortam teşhis bilgilerini döndürür."""
     connected = bool(cloud_db.ensure_firebase())
+    src = cloud_db.firebase_cred_source or ""
     return jsonify({
         "ok": True,
         "connected": connected,
@@ -505,7 +515,33 @@ def firebase_status():
         "cred_source": cloud_db.firebase_cred_source,
         "last_error": cloud_db.firebase_last_error,
         "file_exists": (DATA_DIR / "firebase_credentials.json").exists(),
+        "is_permanent": bool(src and ("Ortam Değişkeni" in src or "secrets" in src)),
+        "is_ephemeral": bool(src and "Yerel Dosya" in src),
     })
+
+
+@app.route("/api/firebase/export-config", methods=["GET"])
+def export_firebase_config():
+    """Kullanıcının Render panelinde FIREBASE_CREDENTIALS_JSON ortam değişkenine ekleyebilmesi için JSON metnini döndürür."""
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"ok": False, "message": "Yetkisiz erişim! Lütfen önce giriş yapınız."}), 401
+
+    # 1. Dosyadan oku
+    cred_file = DATA_DIR / "firebase_credentials.json"
+    if cred_file.exists():
+        try:
+            return jsonify({"ok": True, "raw_json": cred_file.read_text(encoding="utf-8")})
+        except Exception as e:
+            return jsonify({"ok": False, "message": f"Dosya okuma hatası: {e}"}), 500
+
+    # 2. Ortam değişkenlerinden oku
+    for env_k in ["FIREBASE_CREDENTIALS_JSON", "FIREBASE_SERVICE_ACCOUNT", "GOOGLE_APPLICATION_CREDENTIALS"]:
+        env_val = os.environ.get(env_k)
+        if env_val and env_val.strip():
+            return jsonify({"ok": True, "raw_json": env_val.strip()})
+
+    return jsonify({"ok": False, "message": "Sunucuda kayıtlı Firebase kimlik bilgisi bulunamadı."}), 404
 
 
 @app.route("/api/categories")

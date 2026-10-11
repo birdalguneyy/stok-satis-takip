@@ -517,6 +517,74 @@ class TestFirebaseSyncResilience(unittest.TestCase):
             self.assertIn(50, ids)
             self.assertIn(51, ids)
 
+    def test_export_firebase_config_and_status_flags(self):
+        """Export config endpoint and status permanence flags should work securely and correctly."""
+        from app.web.web_server import app, EXPECTED_GATE_TOKEN
+        import os
+        from app.config import DATA_DIR
+        client = app.test_client()
+
+        # 1. Without gate token -> 401
+        res = client.get("/api/firebase/export-config")
+        self.assertEqual(res.status_code, 401)
+
+        # 2. With gate token
+        headers = {"X-Gate-Token": EXPECTED_GATE_TOKEN}
+
+        # Case A: Credential file exists
+        cred_path = DATA_DIR / "firebase_credentials.json"
+        original_content = None
+        if cred_path.exists():
+            original_content = cred_path.read_text(encoding="utf-8")
+        try:
+            cred_path.write_text('{"project_id": "test-file-proj", "type": "service_account"}', encoding="utf-8")
+            res_export = client.get("/api/firebase/export-config", headers=headers)
+            self.assertEqual(res_export.status_code, 200)
+            data = res_export.get_json()
+            self.assertTrue(data["ok"])
+            self.assertIn("test-file-proj", data["raw_json"])
+
+            # Check status flags when cred source is local file
+            from app.web.web_server import cloud_db
+            orig_src = cloud_db.firebase_cred_source
+            cloud_db.firebase_cred_source = "Yerel Dosya: data/firebase_credentials.json"
+            res_status = client.get("/api/firebase/status", headers=headers)
+            self.assertEqual(res_status.status_code, 200)
+            status_data = res_status.get_json()
+            self.assertFalse(status_data["is_permanent"])
+            self.assertTrue(status_data["is_ephemeral"])
+
+            # Check status flags when cred source is environment variable
+            cloud_db.firebase_cred_source = "Ortam Değişkeni (FIREBASE_CREDENTIALS_JSON)"
+            res_sync = client.get("/api/sync/status", headers=headers)
+            self.assertEqual(res_sync.status_code, 200)
+            sync_data = res_sync.get_json()
+            self.assertTrue(sync_data["is_permanent"])
+            self.assertFalse(sync_data["is_ephemeral"])
+            cloud_db.firebase_cred_source = orig_src
+
+        finally:
+            if original_content is not None:
+                cred_path.write_text(original_content, encoding="utf-8")
+            elif cred_path.exists():
+                cred_path.unlink()
+
+        # Case B: No file, but env var exists
+        orig_env = os.environ.get("FIREBASE_CREDENTIALS_JSON")
+        try:
+            os.environ["FIREBASE_CREDENTIALS_JSON"] = '{"project_id": "test-env-proj"}'
+            res_export_env = client.get("/api/firebase/export-config", headers=headers)
+            self.assertEqual(res_export_env.status_code, 200)
+            data_env = res_export_env.get_json()
+            self.assertTrue(data_env["ok"])
+            self.assertIn("test-env-proj", data_env["raw_json"])
+        finally:
+            if orig_env is not None:
+                os.environ["FIREBASE_CREDENTIALS_JSON"] = orig_env
+            else:
+                os.environ.pop("FIREBASE_CREDENTIALS_JSON", None)
+
 
 if __name__ == "__main__":
     unittest.main()
+

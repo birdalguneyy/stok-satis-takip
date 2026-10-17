@@ -54,9 +54,10 @@ class ReportsView(ctk.CTkFrame):
         self._sub_frames: Dict[str, ctk.CTkFrame] = {}
 
         # Revenue Date Filter State
-        self._rev_start_date: Optional[str] = None
-        self._rev_end_date: Optional[str] = None
-        self._rev_date_preset: str = "all"
+        today_str = get_turkey_now().strftime("%Y-%m-%d")
+        self._rev_start_date: Optional[str] = today_str
+        self._rev_end_date: Optional[str] = today_str
+        self._rev_date_preset: str = "today"
         self._rev_date_buttons: Dict[str, ctk.CTkButton] = {}
 
         # Cached forecast data
@@ -150,7 +151,7 @@ class ReportsView(ctk.CTkFrame):
 
     def on_show(self) -> None:
         if self._current_subtab == "sales":
-            self.history_view.refresh()
+            self.history_view._set_date_preset("today")
         elif self._current_subtab == "revenue":
             self._refresh_revenue()
         elif self._current_subtab == "forecasts":
@@ -183,7 +184,6 @@ class ReportsView(ctk.CTkFrame):
         ).pack(side="left", padx=(0, 6))
 
         preset_defs = [
-            ("all", "🌐 Tümü"),
             ("today", "⚡ Bugün"),
             ("yesterday", "⏮️ Dün"),
             ("this_week", "📅 Bu Hafta"),
@@ -191,6 +191,7 @@ class ReportsView(ctk.CTkFrame):
             ("this_month", "🗓️ Bu Ay"),
             ("last_month", "⏮️ Geçen Ay"),
             ("last_30", "📊 Son 30 Gün"),
+            ("all", "🌐 Tümü"),
         ]
 
         for p_key, p_label in preset_defs:
@@ -212,7 +213,7 @@ class ReportsView(ctk.CTkFrame):
 
         self._rev_date_badge = ctk.CTkLabel(
             presets_row,
-            text="Tüm Zamanlar",
+            text=f"📅 {self._rev_start_date} (Bugün)",
             font=FONT_SMALL,
             text_color=ACCENT,
         )

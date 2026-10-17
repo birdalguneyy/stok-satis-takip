@@ -159,7 +159,7 @@ class SalesView(ctk.CTkFrame):
         self.channel_selector.set("🏬 Mağaza Satışı")
         self.channel_selector.pack(side="left", padx=10)
 
-        ctk.CTkButton(
+        self.complete_sale_btn = ctk.CTkButton(
             footer,
             text="Satışı Tamamla (Enter)",
             font=FONT_HEADING,
@@ -167,7 +167,8 @@ class SalesView(ctk.CTkFrame):
             width=220,
             fg_color=ACCENT,
             command=self._complete_sale,
-        ).pack(side="right")
+        )
+        self.complete_sale_btn.pack(side="right")
 
         self.after(100, self._bind_keys)
 
@@ -444,21 +445,53 @@ class SalesView(ctk.CTkFrame):
         self.on_toast("Genel toplam hesaplanan değere döndürüldü", "info")
         self.refresh()
 
+    def _set_pos_controls_state(self, state: str) -> None:
+        for w in (
+            getattr(self, "complete_sale_btn", None),
+            getattr(self, "clear_cart_btn", None),
+            getattr(self, "edit_total_btn", None),
+            getattr(self, "reset_total_btn", None),
+            getattr(self, "customer_entry", None),
+            getattr(self, "channel_selector", None),
+            getattr(self.barcode_entry, "entry", None),
+        ):
+            if w is not None:
+                try:
+                    w.configure(state=state)
+                except Exception:
+                    pass
+
     def _complete_sale(self) -> None:
-        raw_val = self.channel_selector.get() if hasattr(self, "channel_selector") else ""
-        channel = "internet" if "İnternet" in str(raw_val) else "magaza"
-        cust_name = self.customer_entry.get().strip() if hasattr(self, "customer_entry") else ""
-        ok, message = self.sale_service.complete_sale(
-            channel=channel,
-            customer_name=cust_name or None,
-        )
-        level = "success" if ok else "error"
-        self.on_toast(message, level)
-        if ok:
-            if hasattr(self, "customer_entry"):
-                self.customer_entry.delete(0, "end")
-            self.on_sale_complete()
-        self.refresh()
-        self.barcode_entry.clear_and_focus()
+        if getattr(self, "_is_completing_sale", False):
+            return
+
+        self._is_completing_sale = True
+        self._set_pos_controls_state("disabled")
+        if hasattr(self, "complete_sale_btn"):
+            self.complete_sale_btn.configure(text="⏳ Satış Tamamlanıyor...")
+        self.update_idletasks()
+
+        try:
+            raw_val = self.channel_selector.get() if hasattr(self, "channel_selector") else ""
+            channel = "internet" if "İnternet" in str(raw_val) else "magaza"
+            cust_name = self.customer_entry.get().strip() if hasattr(self, "customer_entry") else ""
+            ok, message = self.sale_service.complete_sale(
+                channel=channel,
+                customer_name=cust_name or None,
+            )
+            level = "success" if ok else "error"
+            self.on_toast(message, level)
+            self._set_pos_controls_state("normal")
+            if ok:
+                if hasattr(self, "customer_entry"):
+                    self.customer_entry.delete(0, "end")
+                self.on_sale_complete()
+        finally:
+            self._is_completing_sale = False
+            self._set_pos_controls_state("normal")
+            if hasattr(self, "complete_sale_btn"):
+                self.complete_sale_btn.configure(text="Satışı Tamamla (Enter)")
+            self.refresh()
+            self.barcode_entry.clear_and_focus()
 
 

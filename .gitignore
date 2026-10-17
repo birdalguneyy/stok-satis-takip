@@ -18,4 +18,5 @@ build/
 .vscode/
 .env
 firebase_credentials.json
+data/firebase_credentials.json
 scratch/

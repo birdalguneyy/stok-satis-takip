@@ -54,7 +54,7 @@ class App(ctk.CTk):
         self.show_view("dashboard")
         self.bind("<F2>", self._on_f2_pressed)
 
-        # Sağ Üst Köşe Çubuğu: Çiftlik Giriş Butonu ve Firebase Durum Rozeti
+        # Sağ Üst Köşe Çubuğu: Çiftlik Giriş, Bulut Eşitle, Web Modu ve Firebase Durum Rozeti
         self.top_actions_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.top_actions_frame.place(relx=0.985, rely=0.015, anchor="ne")
 
@@ -70,12 +70,43 @@ class App(ctk.CTk):
             corner_radius=12,
             command=self._open_farm_module,
         )
-        self.farm_btn.pack(side="left", padx=(0, 8))
+        self.farm_btn.pack(side="left", padx=(0, 6))
+
+        # 🔄 Bulut Eşitle Butonu
+        self.sync_btn = ctk.CTkButton(
+            self.top_actions_frame,
+            text="🔄 Bulut Eşitle",
+            font=("Segoe UI", 11, "bold"),
+            fg_color="#2563EB",
+            hover_color="#1D4ED8",
+            height=28,
+            width=105,
+            corner_radius=12,
+            command=self._manual_firebase_sync,
+        )
+        self.sync_btn.pack(side="left", padx=(0, 6))
+
+        # 🌐 Tam Özellikli Yerel Web Arayüzü Butonu
+        self.web_btn = ctk.CTkButton(
+            self.top_actions_frame,
+            text="🌐 Web Modu",
+            font=("Segoe UI", 11, "bold"),
+            fg_color="#4F46E5",
+            hover_color="#4338CA",
+            height=28,
+            width=96,
+            corner_radius=12,
+            command=self._open_local_web_app,
+        )
+        self.web_btn.pack(side="left", padx=(0, 8))
+
+        self.active_view_key = "dashboard"
+        self._is_syncing_cloud = False
 
         try:
             from app.database.cloud_db import CloudDatabase
             cloud_db = CloudDatabase()
-            has_fb = bool(cloud_db.firestore_db)
+            has_fb = bool(cloud_db.ensure_firebase())
             status_text = "🔥 🟢 Firebase Cloud Aktif" if has_fb else "🔥 🟡 Firebase Yerel (SQLite)"
             status_color = "#10B981" if has_fb else "#F59E0B"
 
@@ -92,6 +123,96 @@ class App(ctk.CTk):
             self.fb_badge.pack(side="left")
         except Exception:
             pass
+
+        # Başlangıçta ve periyodik olarak Firebase ile çift yönlü eşitleme başlat
+        self.after(1200, lambda: self._run_background_firebase_sync(manual=False))
+
+    def _open_local_web_app(self) -> None:
+        """Render'a gerek kalmadan yerel sunucuyu (http://localhost:5000) uygulama penceresi olarak açar."""
+        import subprocess
+        import webbrowser
+        url = "http://localhost:5000"
+        for browser_cmd in [
+            ["cmd", "/c", "start", "msedge", f"--app={url}"],
+            ["cmd", "/c", "start", "chrome", f"--app={url}"],
+        ]:
+            try:
+                res = subprocess.run(browser_cmd, capture_output=True)
+                if res.returncode == 0:
+                    return
+            except Exception:
+                pass
+        webbrowser.open(url)
+
+    def _manual_firebase_sync(self) -> None:
+        self._run_background_firebase_sync(manual=True)
+
+    def _run_background_firebase_sync(self, manual: bool = False) -> None:
+        if getattr(self, "_is_syncing_cloud", False):
+            if manual:
+                self.show_toast("Bulut eşitleme zaten devam ediyor...", "info")
+            return
+        self._is_syncing_cloud = True
+        if manual and hasattr(self, "sync_btn"):
+            try:
+                self.sync_btn.configure(state="disabled", text="⏳ Eşitleniyor...")
+            except Exception:
+                pass
+
+        import threading
+        def _worker():
+            res = {"synced": False, "pushed": 0, "pulled": 0, "reason": ""}
+            has_fb = False
+            try:
+                from app.database.cloud_db import CloudDatabase
+                cdb = CloudDatabase()
+                has_fb = bool(cdb.ensure_firebase())
+                if has_fb:
+                    if manual:
+                        cdb._last_pull_timestamp = 0.0
+                    res = cdb.sync_offline_data_with_firebase(allow_pull=True)
+            except Exception as exc:
+                res["reason"] = str(exc)
+
+            def _on_done():
+                self._is_syncing_cloud = False
+                if hasattr(self, "sync_btn"):
+                    try:
+                        self.sync_btn.configure(state="normal", text="🔄 Bulut Eşitle")
+                    except Exception:
+                        pass
+                if hasattr(self, "fb_badge"):
+                    try:
+                        self.fb_badge.configure(
+                            text="🔥 🟢 Firebase Cloud Aktif" if has_fb else "🔥 🟡 Firebase Yerel (SQLite)",
+                            text_color="#10B981" if has_fb else "#F59E0B",
+                        )
+                    except Exception:
+                        pass
+                if res.get("pulled", 0) > 0 or res.get("pushed", 0) > 0 or manual:
+                    cur_view = self.views.get(getattr(self, "active_view_key", "dashboard"))
+                    if cur_view:
+                        if hasattr(cur_view, "refresh"):
+                            cur_view.refresh()
+                        if hasattr(cur_view, "on_show"):
+                            cur_view.on_show()
+                if manual:
+                    if res.get("synced"):
+                        self.show_toast(res.get("reason") or "Firebase bulut eşitlemesi tamamlandı.", "success")
+                    else:
+                        self.show_toast(res.get("reason") or "Firebase bağlantısı kurulamadı.", "warning")
+
+            try:
+                self.after(0, _on_done)
+            except Exception:
+                self._is_syncing_cloud = False
+
+        threading.Thread(target=_worker, daemon=True).start()
+        if not manual:
+            try:
+                self.after(60000, lambda: self._run_background_firebase_sync(manual=False))
+            except Exception:
+                pass
 
     def _open_farm_module(self) -> None:
         """Sağ üstteki Çiftlik butonuna tıklandığında 2805 şifresini sorgular."""
@@ -146,6 +267,7 @@ class App(ctk.CTk):
 
     def show_view(self, key: str) -> None:
         target_key = "reports" if key == "history" else key
+        self.active_view_key = target_key
         if target_key in self.sidebar._buttons:
             self.sidebar.set_active(target_key)
         else:

@@ -25,11 +25,20 @@ class TestFarmModule(unittest.TestCase):
         run_migrations()
         cls.cloud_db = CloudDatabase()
         cls.cloud_db.db = cls.db
+        cls._orig_firestore_db = cls.cloud_db.firestore_db
+        cls._orig_ensure_firebase = cls.cloud_db.ensure_firebase
+        cls.cloud_db.firestore_db = None
+        cls.cloud_db.ensure_firebase = lambda: False
         cls.farm_service = FarmService(cls.cloud_db)
         cls.sale_repo = SaleRepository(cls.db)
 
     @classmethod
     def tearDownClass(cls):
+        if hasattr(cls, "cloud_db"):
+            if hasattr(cls, "_orig_ensure_firebase"):
+                cls.cloud_db.ensure_firebase = cls._orig_ensure_firebase
+            if hasattr(cls, "_orig_firestore_db"):
+                cls.cloud_db.firestore_db = cls._orig_firestore_db
         Database.reset_instance()
         if hasattr(cls, "test_db_path") and cls.test_db_path.exists():
             try:

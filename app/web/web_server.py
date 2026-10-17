@@ -1232,6 +1232,33 @@ def api_farm_egg_sales():
         unit_type = data.get("unit_type", "koli")
         piece_count = data.get("piece_count")
         tot_amount = data.get("total_amount")
+        idempotency_key = (data.get("idempotency_key") or "").strip()
+
+        raw_fp = f"farm_egg|{uid}|{cust.lower()}|{boxes}|{unit_type}|{piece_count}|{price}|{tot_amount}|{s_date}|{(note or '').strip()}"
+        payload_hash = hashlib.md5(raw_fp.encode("utf-8")).hexdigest()
+        dedup_keys = [f"fegg_hash:{payload_hash}"]
+        if idempotency_key:
+            dedup_keys.append(f"fegg_key:{uid}:{idempotency_key}")
+
+        with _sale_idempotency_lock:
+            now_ts = time.time()
+            expired = [k for k, v in _sale_idempotency_cache.items() if now_ts - v.get("timestamp", 0) > 8.0]
+            for k in expired:
+                _sale_idempotency_cache.pop(k, None)
+
+            for dk in dedup_keys:
+                if dk in _sale_idempotency_cache:
+                    entry = _sale_idempotency_cache[dk]
+                    if now_ts - entry.get("timestamp", 0) <= 8.0:
+                        if entry.get("in_progress"):
+                            return jsonify({"ok": True, "message": "İşlem kaydediliyor...", "deduplicated": True})
+                        if entry.get("response"):
+                            resp = dict(entry["response"])
+                            resp["deduplicated"] = True
+                            return jsonify(resp)
+
+            for dk in dedup_keys:
+                _sale_idempotency_cache[dk] = {"timestamp": now_ts, "in_progress": True, "response": None}
 
         ok, msg, sale_id = cloud_db.add_farm_egg_sale(
             customer_name=cust,
@@ -1245,8 +1272,19 @@ def api_farm_egg_sales():
             piece_count=piece_count,
             total_amount=tot_amount,
         )
+        with _sale_idempotency_lock:
+            if ok:
+                finish_ts = time.time()
+                resp_payload = {"ok": True, "message": msg, "sale_id": sale_id}
+                for dk in dedup_keys:
+                    _sale_idempotency_cache[dk] = {"timestamp": finish_ts, "in_progress": False, "response": resp_payload}
+            else:
+                for dk in dedup_keys:
+                    _sale_idempotency_cache.pop(dk, None)
+
         if not ok:
             return jsonify({"ok": False, "message": msg}), 400
+        notify_data_change(uid)
         return jsonify({"ok": True, "message": msg, "sale_id": sale_id})
 
     # GET
@@ -1263,6 +1301,8 @@ def api_farm_egg_sales():
 def api_farm_delete_egg_sale(sale_id: int):
     uid = get_current_user_id()
     ok, msg = cloud_db.delete_farm_egg_sale(sale_id, user_id=uid)
+    if ok:
+        notify_data_change(uid)
     return jsonify({"ok": ok, "message": msg}), (200 if ok else 400)
 
 
@@ -1277,6 +1317,29 @@ def api_farm_feed_purchases():
         p_date = data.get("purchase_date")
         supplier = data.get("supplier")
         note = data.get("note")
+        idempotency_key = (data.get("idempotency_key") or "").strip()
+
+        raw_fp = f"farm_feed|{uid}|{bags}|{price}|{total}|{p_date}|{(supplier or '').strip()}|{(note or '').strip()}"
+        payload_hash = hashlib.md5(raw_fp.encode("utf-8")).hexdigest()
+        dedup_keys = [f"ffeed_hash:{payload_hash}"]
+        if idempotency_key:
+            dedup_keys.append(f"ffeed_key:{uid}:{idempotency_key}")
+
+        with _sale_idempotency_lock:
+            now_ts = time.time()
+            for dk in dedup_keys:
+                if dk in _sale_idempotency_cache:
+                    entry = _sale_idempotency_cache[dk]
+                    if now_ts - entry.get("timestamp", 0) <= 8.0:
+                        if entry.get("in_progress"):
+                            return jsonify({"ok": True, "message": "İşlem kaydediliyor...", "deduplicated": True})
+                        if entry.get("response"):
+                            resp = dict(entry["response"])
+                            resp["deduplicated"] = True
+                            return jsonify(resp)
+
+            for dk in dedup_keys:
+                _sale_idempotency_cache[dk] = {"timestamp": now_ts, "in_progress": True, "response": None}
 
         ok, msg, pid = cloud_db.add_farm_feed_purchase(
             bag_count=bags,
@@ -1287,8 +1350,19 @@ def api_farm_feed_purchases():
             note=note,
             user_id=uid,
         )
+        with _sale_idempotency_lock:
+            if ok:
+                finish_ts = time.time()
+                resp_payload = {"ok": True, "message": msg, "purchase_id": pid}
+                for dk in dedup_keys:
+                    _sale_idempotency_cache[dk] = {"timestamp": finish_ts, "in_progress": False, "response": resp_payload}
+            else:
+                for dk in dedup_keys:
+                    _sale_idempotency_cache.pop(dk, None)
+
         if not ok:
             return jsonify({"ok": False, "message": msg}), 400
+        notify_data_change(uid)
         return jsonify({"ok": True, "message": msg, "purchase_id": pid})
 
     # GET
@@ -1304,6 +1378,8 @@ def api_farm_feed_purchases():
 def api_farm_delete_feed_purchase(purchase_id: int):
     uid = get_current_user_id()
     ok, msg = cloud_db.delete_farm_feed_purchase(purchase_id, user_id=uid)
+    if ok:
+        notify_data_change(uid)
     return jsonify({"ok": ok, "message": msg}), (200 if ok else 400)
 
 

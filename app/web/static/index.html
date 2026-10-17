@@ -1325,7 +1325,7 @@
 
       <!-- TAB 1: YUMURTA SATIŞI -->
       <div id="farm-view-egg" style="display:block;">
-        <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:14px;">
+        <div id="farm-egg-form-box" style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:14px;">
           <div style="font-weight:700; font-size:0.95rem; margin-bottom:10px; color:var(--text);">🥚 Yeni Yumurta Satışı Kaydı</div>
           <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; margin-bottom:10px;">
             <div>
@@ -1362,7 +1362,7 @@
             </div>
             <div style="display:flex; align-items:center; gap:12px;">
               <span id="farm-egg-total-preview" style="font-weight:800; font-size:1.1rem; color:#10B981;">Toplam: 0,00 ₺</span>
-              <button class="btn" onclick="saveFarmEggSaleWeb()" style="background:#10B981; padding:8px 16px;">💾 Satışı Kaydet</button>
+              <button id="farm-egg-save-btn" class="btn" onclick="saveFarmEggSaleWeb()" style="background:#10B981; padding:8px 16px;">💾 Satışı Kaydet</button>
             </div>
           </div>
         </div>
@@ -1399,7 +1399,7 @@
 
       <!-- TAB 2: YEM ALIMI (1 Çuval = 50 kg -> Ton) -->
       <div id="farm-view-feed" style="display:none;">
-        <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:14px;">
+        <div id="farm-feed-form-box" style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:14px;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
             <div style="font-weight:700; font-size:0.95rem; color:var(--text);">🌾 Yem Alımı Girişi (1 Çuval = 50 kg)</div>
             <div id="farm-feed-ton-badge" style="font-weight:800; font-size:0.85rem; color:#0284C7; background:rgba(2,132,199,0.12); padding:4px 10px; border-radius:8px;">⚖️ 0 Çuval = 0 kg = 0.00 Ton</div>
@@ -1426,7 +1426,7 @@
             <div style="flex:1; min-width:200px;">
               <input type="text" id="farm-feed-supplier" placeholder="Tedarikçi / Fabrika / Not..." style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--border); background:var(--input-bg); color:var(--text);">
             </div>
-            <button class="btn" onclick="saveFarmFeedPurchaseWeb()" style="background:#0284C7; padding:8px 16px;">💾 Yem Alımını Kaydet</button>
+            <button id="farm-feed-save-btn" class="btn" onclick="saveFarmFeedPurchaseWeb()" style="background:#0284C7; padding:8px 16px;">💾 Yem Alımını Kaydet</button>
           </div>
         </div>
 
@@ -1746,21 +1746,21 @@
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
             <div style="font-weight:700; font-size:0.82rem; color:var(--text); display:flex; align-items:center; gap:6px;">
               <span>📅 Hızlı Tarih Seçici:</span>
-              <span id="active-date-range-badge" class="active-date-badge">🌐 Tüm Zamanlar</span>
+              <span id="active-date-range-badge" class="active-date-badge">⚡ Bugün</span>
             </div>
             <button class="btn btn-secondary" style="width:auto; padding:3px 8px; font-size:0.72rem;" onclick="toggleCustomDateDrawer()">✏️ Özel Aralık</button>
           </div>
 
           <!-- Quick Date Pills Row -->
           <div class="date-pills-row">
-            <button class="date-pill" onclick="setDatePreset('today', this)">⚡ Bugün</button>
+            <button class="date-pill active" onclick="setDatePreset('today', this)">⚡ Bugün</button>
             <button class="date-pill" onclick="setDatePreset('yesterday', this)">⏮️ Dün</button>
             <button class="date-pill" onclick="setDatePreset('this_week', this)">📅 Bu Hafta</button>
             <button class="date-pill" onclick="setDatePreset('last_week', this)">⏪ Geçen Hafta</button>
             <button class="date-pill" onclick="setDatePreset('this_month', this)">🗓️ Bu Ay</button>
             <button class="date-pill" onclick="setDatePreset('last_month', this)">⏮️ Geçen Ay</button>
             <button class="date-pill" onclick="setDatePreset('last_30_days', this)">📊 Son 30 Gün</button>
-            <button class="date-pill active" onclick="setDatePreset('all', this)">🌐 Tümü</button>
+            <button class="date-pill" onclick="setDatePreset('all', this)">🌐 Tümü</button>
           </div>
 
           <!-- Collapsible Custom Date Drawer -->
@@ -2313,6 +2313,7 @@
         if (tabId === 'pos') loadPOSProductPicker();
         if (tabId === 'stock') loadProducts();
         if (tabId === 'reports') {
+          setDatePreset('today', null, false);
           switchReportsSubTab(currentReportsSubTab || 'sales-list');
         }
       } catch(err) {
@@ -3809,6 +3810,72 @@
 
     let isCompletingPOSSale = false;
 
+    function setContainerInteractive(containerEl, interactive) {
+      if (!containerEl) return;
+      if (!interactive) {
+        containerEl.style.pointerEvents = 'none';
+        containerEl.style.userSelect = 'none';
+        containerEl.setAttribute('aria-busy', 'true');
+        containerEl.querySelectorAll('input, select, textarea, button').forEach(el => {
+          if (!el.hasAttribute('data-prev-disabled')) {
+            el.setAttribute('data-prev-disabled', el.disabled ? '1' : '0');
+          }
+          el.disabled = true;
+        });
+      } else {
+        containerEl.style.pointerEvents = '';
+        containerEl.style.userSelect = '';
+        containerEl.removeAttribute('aria-busy');
+        containerEl.querySelectorAll('input, select, textarea, button').forEach(el => {
+          const prev = el.getAttribute('data-prev-disabled');
+          if (prev !== null) {
+            el.disabled = (prev === '1');
+            el.removeAttribute('data-prev-disabled');
+          } else {
+            el.disabled = false;
+          }
+        });
+      }
+    }
+
+    function lockScreenDuringTransaction(msg = '⏳ İşlem kaydediliyor, lütfen bekleyiniz...') {
+      let overlay = document.getElementById('global-tx-lock-overlay');
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'global-tx-lock-overlay';
+        overlay.style.cssText = 'position:fixed; inset:0; z-index:999999; background:rgba(15,23,42,0.45); backdrop-filter:blur(2px); display:flex; align-items:center; justify-content:center; pointer-events:all; cursor:wait; user-select:none;';
+        overlay.innerHTML = `
+          <div style="background:var(--card, #1e293b); color:var(--text, #f8fafc); border:1px solid var(--border, #334155); border-radius:14px; padding:18px 26px; box-shadow:0 20px 40px rgba(0,0,0,0.4); display:flex; align-items:center; gap:12px; font-weight:700; font-size:0.95rem;">
+            <svg style="animation: btnSpin 0.7s linear infinite; width:22px; height:22px; color:#10B981; flex-shrink:0;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8">
+              <circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle>
+              <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"></path>
+            </svg>
+            <span id="global-tx-lock-msg"></span>
+          </div>
+        `;
+        ['click', 'dblclick', 'mousedown', 'mouseup', 'touchstart', 'touchend', 'keydown'].forEach(evtName => {
+          overlay.addEventListener(evtName, (ev) => {
+            ev.stopPropagation();
+            ev.preventDefault();
+          }, true);
+        });
+        document.body.appendChild(overlay);
+      }
+      const msgEl = document.getElementById('global-tx-lock-msg');
+      if (msgEl) msgEl.textContent = msg;
+      overlay.style.display = 'flex';
+      document.body.style.pointerEvents = 'none';
+      overlay.style.pointerEvents = 'all';
+    }
+
+    function unlockScreenDuringTransaction() {
+      const overlay = document.getElementById('global-tx-lock-overlay');
+      if (overlay) {
+        overlay.style.display = 'none';
+      }
+      document.body.style.pointerEvents = '';
+    }
+
     async function completePOSSale() {
       if (isCompletingPOSSale) {
         return;
@@ -3821,14 +3888,17 @@
       const btn = document.getElementById('pos-complete-sale-btn');
       const dropBtn = document.getElementById('pos-sale-dropdown-btn');
       const cartContainer = document.getElementById('pos-cart-list');
+      const posTab = document.getElementById('tab-pos');
       const custNameInput = document.getElementById('pos-customer-name');
       const customerName = custNameInput ? custNameInput.value.trim() : '';
 
       const calcTotal = Math.round(posCart.reduce((sum, item) => sum + item.subtotal, 0) * 100) / 100;
       const finalTotal = posCustomTotal !== null ? posCustomTotal : calcTotal;
 
-      // 1. Kullanıcının tekrar tekrar basmasını önlemek için anında kilitle
+      // 1. Satış tamamlanana kadar ekranda hiçbir yere tıklanamasın
       isCompletingPOSSale = true;
+      lockScreenDuringTransaction("⏳ Satış tamamlanıyor, lütfen bekleyiniz...");
+      setContainerInteractive(posTab, false);
       if (btn) {
         btn.disabled = true;
         btn.classList.add('btn-loading');
@@ -3876,11 +3946,7 @@
           if (custNameInput) custNameInput.value = '';
           renderPOSCart();
           loadProducts();
-          loadPOSProductPicker();
           loadSalesHistory();
-          loadSalesAnalytics();
-          loadForecastData();
-          triggerManualSync();
         } else {
           showToast("❌ " + (json.message || "Satış kaydedilemedi!"));
         }
@@ -3890,6 +3956,8 @@
       } finally {
         // Satış bittiğinde veya hata aldığında kilidi aç ve butonu eski haline getir
         isCompletingPOSSale = false;
+        setContainerInteractive(posTab, true);
+        unlockScreenDuringTransaction();
         if (btn) {
           btn.disabled = false;
           btn.classList.remove('btn-loading');
@@ -4036,6 +4104,8 @@
       const orderNoInput = document.getElementById('pos-net-order-no');
       const custNameInput = document.getElementById('pos-net-customer-name');
       const submitBtn = document.getElementById('pos-net-submit-btn');
+      const netModal = document.getElementById('pos-internet-modal-overlay');
+      const posTab = document.getElementById('tab-pos');
 
       const platform = (platformInput ? platformInput.value.trim() : '') || 'İnternet';
       const orderNo = orderNoInput ? orderNoInput.value.trim() : '';
@@ -4050,6 +4120,9 @@
       }
 
       isSubmittingPOSInternetSale = true;
+      lockScreenDuringTransaction("⏳ İnternet satışı tamamlanıyor, lütfen bekleyiniz...");
+      setContainerInteractive(netModal, false);
+      setContainerInteractive(posTab, false);
       if (submitBtn) {
         submitBtn.disabled = true;
         submitBtn.classList.add('btn-loading');
@@ -4095,11 +4168,7 @@
 
           // Verileri güncelle
           loadProducts();
-          loadPOSProductPicker();
           loadSalesHistory();
-          loadSalesAnalytics();
-          loadForecastData();
-          triggerManualSync();
         } else {
           showToast("❌ " + (json.message || "Satış kaydedilemedi!"));
         }
@@ -4108,6 +4177,9 @@
         showToast("⚠️ Satış işlenirken bağlantı hatası oluştu!");
       } finally {
         isSubmittingPOSInternetSale = false;
+        setContainerInteractive(netModal, true);
+        setContainerInteractive(posTab, true);
+        unlockScreenDuringTransaction();
         if (submitBtn) {
           submitBtn.disabled = false;
           submitBtn.classList.remove('btn-loading');
@@ -4383,6 +4455,9 @@
         if (!search) {
           _allProductsCache = products;
           allProductsCache = _allProductsCache;
+          if (typeof rebuildPOSProductPickerFromCache === 'function') {
+            rebuildPOSProductPickerFromCache(_allProductsCache);
+          }
         }
         renderProductList(products);
       } catch (e) {
@@ -4614,40 +4689,49 @@
 
     let allProductsCache = [];
 
+    function rebuildPOSProductPickerFromCache(products) {
+      if (!Array.isArray(products)) return;
+      allProductsCache = products;
+      const select = document.getElementById('pos-product-picker');
+      if (!select) return;
+
+      select.innerHTML = '<option value="">-- Ürün Listesinden Seçin --</option>';
+
+      const grouped = {};
+      allProductsCache.forEach(p => {
+        const cat = p.category_name || 'Genel';
+        if (!grouped[cat]) grouped[cat] = [];
+        grouped[cat].push(p);
+      });
+
+      for (const [catName, prods] of Object.entries(grouped)) {
+        const groupEl = document.createElement('optgroup');
+        groupEl.label = '📁 ' + catName;
+        prods.forEach(p => {
+          const opt = document.createElement('option');
+          opt.value = p.id;
+          const isKg = (p.unit === 'kg');
+          const uStr = isKg ? 'kg' : 'adet';
+          const sStr = isKg ? Number(p.stock_quantity).toFixed(3) : p.stock_quantity;
+          opt.textContent = `${p.name} - ${Number(p.sale_price).toFixed(2)} ₺/${uStr} (Stok: ${sStr} ${uStr})`;
+          groupEl.appendChild(opt);
+        });
+        select.appendChild(groupEl);
+      }
+    }
+
     async function loadPOSProductPicker() {
       try {
+        if (_allProductsCache && _allProductsCache.length > 0) {
+          rebuildPOSProductPickerFromCache(_allProductsCache);
+          return;
+        }
         const res = await fetchWithAuth('/api/products');
         if (!res.ok) return;
         const products = await res.json();
         if (!Array.isArray(products)) return;
-        allProductsCache = products;
-        const select = document.getElementById('pos-product-picker');
-        if (!select) return;
-
-        select.innerHTML = '<option value="">-- Ürün Listesinden Seçin --</option>';
-
-        // Group products by category
-        const grouped = {};
-        allProductsCache.forEach(p => {
-          const cat = p.category_name || 'Genel';
-          if (!grouped[cat]) grouped[cat] = [];
-          grouped[cat].push(p);
-        });
-
-        for (const [catName, prods] of Object.entries(grouped)) {
-          const groupEl = document.createElement('optgroup');
-          groupEl.label = '📁 ' + catName;
-          prods.forEach(p => {
-            const opt = document.createElement('option');
-            opt.value = p.id;
-            const isKg = (p.unit === 'kg');
-            const uStr = isKg ? 'kg' : 'adet';
-            const sStr = isKg ? Number(p.stock_quantity).toFixed(3) : p.stock_quantity;
-            opt.textContent = `${p.name} - ${Number(p.sale_price).toFixed(2)} ₺/${uStr} (Stok: ${sStr} ${uStr})`;
-            groupEl.appendChild(opt);
-          });
-          select.appendChild(groupEl);
-        }
+        _allProductsCache = products;
+        rebuildPOSProductPickerFromCache(products);
       } catch (e) {}
     }
 
@@ -4663,8 +4747,16 @@
       selectEl.value = '';
     }
 
-    let currentStartDate = '';
-    let currentEndDate = '';
+    function getTodayYMDStr() {
+      const d = new Date();
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    let currentStartDate = getTodayYMDStr();
+    let currentEndDate = getTodayYMDStr();
 
     function openAIKeyModal() {
       const modal = document.getElementById('ai-key-modal-overlay');
@@ -4695,7 +4787,7 @@
     }
 
     let currentReportsSubTab = 'sales-list';
-    let currentDatePreset = 'all';
+    let currentDatePreset = 'today';
 
     function switchReportsSubTab(subTabName, btnEl) {
       currentReportsSubTab = subTabName;
@@ -4731,7 +4823,7 @@
       drawer.style.display = (drawer.style.display === 'none' || !drawer.style.display) ? 'flex' : 'none';
     }
 
-    function setDatePreset(preset, btnEl) {
+    function setDatePreset(preset, btnEl, triggerRefresh = true) {
       currentDatePreset = preset;
       document.querySelectorAll('.date-pill').forEach(p => p.classList.remove('active'));
       if (btnEl) {
@@ -4811,8 +4903,9 @@
 
       updateActiveDateRangeBadge();
 
-      // Refresh data (loadSalesHistory internally triggers analytics & expenses)
-      loadSalesHistory();
+      if (triggerRefresh) {
+        loadSalesHistory();
+      }
     }
 
     function updateActiveDateRangeBadge() {
@@ -6138,6 +6231,7 @@
       const platformSelect = document.getElementById('online-sale-platform');
       const noteInput = document.getElementById('online-sale-note');
       const submitBtn = document.getElementById('online-sale-submit-btn');
+      const onlineModal = document.getElementById('online-sale-modal-overlay');
 
       const productId = select.value;
       if (!productId) {
@@ -6151,6 +6245,8 @@
       const note = noteInput.value.trim();
 
       isSubmittingOnlineSale = true;
+      lockScreenDuringTransaction("⏳ Online satış kaydediliyor, lütfen bekleyiniz...");
+      setContainerInteractive(onlineModal, false);
       if (submitBtn) {
         submitBtn.disabled = true;
         submitBtn.classList.add('btn-loading');
@@ -6183,11 +6279,7 @@
           showToast(`✅ ${json.message}`);
           closeOnlineSaleModal();
           loadProducts();
-          loadPOSProductPicker();
           loadSalesHistory();
-          loadSalesAnalytics();
-          loadForecastData();
-          triggerManualSync();
         } else {
           showToast(`❌ ${json.message || 'Satış kaydedilemedi!'}`);
         }
@@ -6195,6 +6287,8 @@
         showToast("⚠️ Sunucu bağlantı hatası!");
       } finally {
         isSubmittingOnlineSale = false;
+        setContainerInteractive(onlineModal, true);
+        unlockScreenDuringTransaction();
         if (submitBtn) {
           submitBtn.disabled = false;
           submitBtn.classList.remove('btn-loading');
@@ -6661,7 +6755,7 @@
       // Reset POS cart to avoid cross-user item mixing
       posCart = [];
       try { renderPOSCart(); } catch(e) {}
-      try { loadPOSProductPicker(); } catch(e) {}
+      try { setDatePreset('today', null, false); } catch(e) {}
       try { loadProducts(); } catch(e) {}
       try { loadSalesHistory(); } catch(e) {}
       try { checkSyncStatus(); } catch(e) {}
@@ -7223,7 +7317,11 @@
       }
     }
 
+    let isSavingFarmEggSale = false;
+
     async function saveFarmEggSaleWeb() {
+      if (isSavingFarmEggSale) return;
+
       const cust = document.getElementById('farm-egg-cust').value.trim();
       const unitType = document.getElementById('farm-egg-unit')?.value || 'koli';
       const bInput = parseFloat(document.getElementById('farm-egg-boxes').value);
@@ -7252,6 +7350,23 @@
 
       const totAmount = (!isNaN(t) && t > 0) ? t : (bInput * p);
 
+      const saveBtn = document.getElementById('farm-egg-save-btn');
+      const farmModal = document.getElementById('farm-modal-overlay');
+      const eggView = document.getElementById('farm-view-egg');
+
+      // Veri kaydedilene kadar veri giriş ekranında hiçbir işlem yapılmasın
+      isSavingFarmEggSale = true;
+      lockScreenDuringTransaction("⏳ Yumurta satışı kaydediliyor, lütfen bekleyiniz...");
+      setContainerInteractive(farmModal, false);
+      setContainerInteractive(eggView, false);
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.classList.add('btn-loading');
+        saveBtn.innerHTML = '⏳ Kaydediliyor...';
+      }
+
+      const idempotencyKey = 'fegg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+
       try {
         const res = await apiFetch('/api/farm/egg-sales', {
           method: 'POST',
@@ -7266,6 +7381,7 @@
             unit_type: unitType,
             piece_count: pieceCount,
             total_amount: totAmount,
+            idempotency_key: idempotencyKey,
           })
         });
         const json = await res.json();
@@ -7277,15 +7393,26 @@
           if (tEl) tEl.value = '';
           document.getElementById('farm-egg-note').value = '';
           calcFarmEggTotal('price');
-          loadFarmCustomersWeb();
-          loadFarmEggSalesWeb();
-          triggerManualSync();
+          await Promise.all([
+            loadFarmCustomersWeb(),
+            loadFarmEggSalesWeb()
+          ]);
         } else {
           showToast("❌ " + (json.message || "Kayıt başarısız!"), "danger");
         }
       } catch (e) {
         console.error("Yumurta satışı kaydetme hatası:", e);
         showToast("Sunucu iletişim hatası: " + (e.message || e), "danger");
+      } finally {
+        isSavingFarmEggSale = false;
+        setContainerInteractive(eggView, true);
+        setContainerInteractive(farmModal, true);
+        unlockScreenDuringTransaction();
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.classList.remove('btn-loading');
+          saveBtn.innerHTML = '💾 Satışı Kaydet';
+        }
       }
     }
 
@@ -7350,7 +7477,11 @@
       }
     }
 
+    let isSavingFarmFeedPurchase = false;
+
     async function saveFarmFeedPurchaseWeb() {
+      if (isSavingFarmFeedPurchase) return;
+
       const b = parseFloat(document.getElementById('farm-feed-bags').value);
       const p = parseFloat(document.getElementById('farm-feed-price').value) || 0;
       const t = parseFloat(document.getElementById('farm-feed-total').value) || 0;
@@ -7358,6 +7489,22 @@
       const supp = document.getElementById('farm-feed-supplier').value.trim();
 
       if (!b || b <= 0) { showToast("Lütfen çuval adedi giriniz!", "warning"); return; }
+
+      const saveBtn = document.getElementById('farm-feed-save-btn');
+      const farmModal = document.getElementById('farm-modal-overlay');
+      const feedView = document.getElementById('farm-view-feed');
+
+      isSavingFarmFeedPurchase = true;
+      lockScreenDuringTransaction("⏳ Yem alımı kaydediliyor, lütfen bekleyiniz...");
+      setContainerInteractive(farmModal, false);
+      setContainerInteractive(feedView, false);
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.classList.add('btn-loading');
+        saveBtn.innerHTML = '⏳ Kaydediliyor...';
+      }
+
+      const idempotencyKey = 'ffeed_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
 
       try {
         const res = await apiFetch('/api/farm/feed-purchases', {
@@ -7369,6 +7516,7 @@
             total_amount: t,
             purchase_date: d,
             supplier: supp,
+            idempotency_key: idempotencyKey,
           })
         });
         const json = await res.json();
@@ -7379,12 +7527,22 @@
           document.getElementById('farm-feed-total').value = '';
           document.getElementById('farm-feed-supplier').value = '';
           calcFarmFeedTon();
-          loadFarmFeedPurchasesWeb();
+          await loadFarmFeedPurchasesWeb();
         } else {
           showToast("❌ " + json.message, "danger");
         }
       } catch (e) {
         showToast("Sunucu hatası!", "danger");
+      } finally {
+        isSavingFarmFeedPurchase = false;
+        setContainerInteractive(feedView, true);
+        setContainerInteractive(farmModal, true);
+        unlockScreenDuringTransaction();
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.classList.remove('btn-loading');
+          saveBtn.innerHTML = '💾 Yem Alımını Kaydet';
+        }
       }
     }
 

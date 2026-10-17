@@ -35,9 +35,10 @@ class HistoryView(ctk.CTkFrame):
         self._all_sales: List[Dict[str, Any]] = []
         self._filtered_sales: List[Dict[str, Any]] = []
         self._selected_ids: Set[int] = set()
-        self._start_date: Optional[str] = None
-        self._end_date: Optional[str] = None
-        self._date_preset: str = "all"
+        today_str = get_turkey_now().strftime("%Y-%m-%d")
+        self._start_date: Optional[str] = today_str
+        self._end_date: Optional[str] = today_str
+        self._date_preset: str = "today"
         self._date_buttons: Dict[str, ctk.CTkButton] = {}
 
         # Build UI
@@ -118,7 +119,6 @@ class HistoryView(ctk.CTkFrame):
         ).pack(side="left", padx=(0, 6))
 
         preset_defs = [
-            ("all", "🌐 Tümü"),
             ("today", "⚡ Bugün"),
             ("yesterday", "⏮️ Dün"),
             ("this_week", "📅 Bu Hafta"),
@@ -126,6 +126,7 @@ class HistoryView(ctk.CTkFrame):
             ("this_month", "🗓️ Bu Ay"),
             ("last_month", "⏮️ Geçen Ay"),
             ("last_30", "📊 Son 30 Gün"),
+            ("all", "🌐 Tümü"),
         ]
 
         for p_key, p_label in preset_defs:
@@ -148,7 +149,7 @@ class HistoryView(ctk.CTkFrame):
         # Active date range badge
         self._date_badge = ctk.CTkLabel(
             presets_row,
-            text="Tüm Zamanlar",
+            text=f"📅 {self._start_date} (Bugün)",
             font=FONT_SMALL,
             text_color=ACCENT,
         )

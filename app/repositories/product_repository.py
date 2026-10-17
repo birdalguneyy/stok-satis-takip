@@ -68,16 +68,42 @@ class ProductRepository:
             ).fetchall()
         return [Product.from_row(row) for row in rows]
 
+    def _sync_to_cloud_async(self, deleted_id: Optional[int] = None) -> None:
+        try:
+            import threading
+            from app.database.cloud_db import CloudDatabase
+            def _worker():
+                try:
+                    cdb = CloudDatabase()
+                    if not cdb.ensure_firebase():
+                        return
+                    if deleted_id is not None and cdb.firestore_db:
+                        uid = cdb._resolve_user_id(None)
+                        cdb.firestore_db.collection("products").document(f"u{uid}_p{deleted_id}").update({
+                            "is_active": 0,
+                            "synced_to_cloud": 1,
+                        })
+                    else:
+                        cdb.push_offline_data_to_firebase()
+                except Exception:
+                    pass
+            threading.Thread(target=_worker, daemon=True).start()
+        except Exception:
+            pass
+
     def create(self, product: Product) -> Product:
         with self.db.get_connection() as conn:
+            uid_row = conn.execute("SELECT id FROM users ORDER BY id ASC LIMIT 1").fetchone()
+            uid = int(uid_row["id"]) if uid_row and uid_row["id"] is not None else 1
             cursor = conn.execute(
                 """
                 INSERT INTO products (
-                    category_id, name, barcode, purchase_price, sale_price,
-                    stock_quantity, critical_stock_level, image_path
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    user_id, category_id, name, barcode, purchase_price, sale_price,
+                    stock_quantity, critical_stock_level, image_path, synced_to_cloud
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
                 """,
                 (
+                    uid,
                     product.category_id,
                     product.name.strip(),
                     product.barcode.strip(),
@@ -88,7 +114,9 @@ class ProductRepository:
                     product.image_path or "",
                 ),
             )
-            return self.get_by_id(cursor.lastrowid)
+            created = self.get_by_id(cursor.lastrowid)
+        self._sync_to_cloud_async()
+        return created
 
     def update(self, product: Product) -> Product:
         with self.db.get_connection() as conn:
@@ -103,6 +131,7 @@ class ProductRepository:
                     stock_quantity = ?,
                     critical_stock_level = ?,
                     image_path = ?,
+                    synced_to_cloud = 0,
                     updated_at = datetime('now', 'localtime')
                 WHERE id = ?
                 """,
@@ -118,14 +147,17 @@ class ProductRepository:
                     product.id,
                 ),
             )
-        return self.get_by_id(product.id)
+            updated = self.get_by_id(product.id)
+        self._sync_to_cloud_async()
+        return updated
 
     def delete(self, product_id: int) -> None:
         with self.db.get_connection() as conn:
             conn.execute(
-                "UPDATE products SET is_active = 0, updated_at = datetime('now', 'localtime') WHERE id = ?",
+                "UPDATE products SET is_active = 0, synced_to_cloud = 0, updated_at = datetime('now', 'localtime') WHERE id = ?",
                 (product_id,),
             )
+        self._sync_to_cloud_async(deleted_id=product_id)
 
     def count_all(self) -> int:
         with self.db.get_connection() as conn:

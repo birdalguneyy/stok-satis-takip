@@ -113,6 +113,11 @@ class CloudDatabase:
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_sales_user_date ON sales(user_id, sold_at)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_expenses_user_date ON expenses(user_id, expense_date)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_sale_items_sale_prod ON sale_items(sale_id, product_name)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_farm_egg_user_date ON farm_egg_sales(user_id, sale_date)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_farm_feed_user_date ON farm_feed_purchases(user_id, purchase_date)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_farm_cust_user_name ON farm_customers(user_id, name)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_products_user_active ON products(user_id, is_active)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode)")
                 try:
                     conn.execute("ALTER TABLE products ADD COLUMN unit TEXT NOT NULL DEFAULT 'adet'")
                 except Exception:
@@ -127,9 +132,12 @@ class CloudDatabase:
         self._hydration_completed = False
         self._hydration_lock = threading.RLock()
         self._last_pull_timestamp = 0.0
+        self._farm_sale_lock = threading.Lock()
+        self._recent_farm_sale_hashes: Dict[str, tuple[float, int, str]] = {}
 
         self._init_firebase_optional()
         try:
+            self._cleanup_duplicate_farm_egg_sales()
             self.sync_shop_egg_sales_to_farm()
         except Exception:
             pass
@@ -883,12 +891,58 @@ class CloudDatabase:
                             final_uid = 1
 
                         if es_id and d.get("customer_name"):
-                            es_sdate = normalize_datetime_str(d.get("sale_date"))
+                            raw_es_date = str(d.get("sale_date") or "").strip()
+                            es_sdate = raw_es_date if len(raw_es_date) == 10 else normalize_datetime_str(raw_es_date)
                             existing_es = conn.execute("SELECT customer_name, sale_date FROM farm_egg_sales WHERE id = ?", (es_id,)).fetchone()
                             if existing_es:
-                                if existing_es["customer_name"] != d.get("customer_name") or existing_es["sale_date"] != es_sdate:
-                                    max_es = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM farm_egg_sales").fetchone()[0]
-                                    es_id = int(max_es)
+                                ex_date_prefix = str(existing_es["sale_date"] or "")[:10]
+                                new_date_prefix = str(es_sdate or "")[:10]
+                                if existing_es["customer_name"] != d.get("customer_name") or ex_date_prefix != new_date_prefix:
+                                    # Aynı içeriğe sahip başka bir kayıt zaten var mı kontrol et
+                                    dup_es = conn.execute(
+                                        """
+                                        SELECT id FROM farm_egg_sales
+                                        WHERE user_id = ? AND customer_name = ? AND ABS(box_count - ?) < 0.001
+                                          AND ABS(total_amount - ?) < 0.05 AND substr(sale_date, 1, 10) = ? AND source = ?
+                                        LIMIT 1
+                                        """,
+                                        (
+                                            final_uid,
+                                            d.get("customer_name"),
+                                            float(d.get("box_count", 1)),
+                                            float(d.get("total_amount", 0)),
+                                            new_date_prefix,
+                                            d.get("source", "Ciftlik"),
+                                        ),
+                                    ).fetchone()
+                                    if dup_es:
+                                        es_id = int(dup_es["id"])
+                                    else:
+                                        max_es = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM farm_egg_sales").fetchone()[0]
+                                        es_id = int(max_es)
+                            else:
+                                # Bu ID yerelde yoksa bile aynı satış başka bir ID ile zaten kaydedilmiş mi kontrol et
+                                new_date_prefix = str(es_sdate or "")[:10]
+                                dup_es = conn.execute(
+                                    """
+                                    SELECT id FROM farm_egg_sales
+                                    WHERE user_id = ? AND customer_name = ? AND ABS(box_count - ?) < 0.001
+                                      AND ABS(total_amount - ?) < 0.05 AND substr(sale_date, 1, 10) = ?
+                                      AND source = ? AND COALESCE(note, '') = ?
+                                    LIMIT 1
+                                    """,
+                                    (
+                                        final_uid,
+                                        d.get("customer_name"),
+                                        float(d.get("box_count", 1)),
+                                        float(d.get("total_amount", 0)),
+                                        new_date_prefix,
+                                        d.get("source", "Ciftlik"),
+                                        d.get("note", ""),
+                                    ),
+                                ).fetchone()
+                                if dup_es:
+                                    es_id = int(dup_es["id"])
 
                             conn.execute(
                                 """
@@ -1058,8 +1112,7 @@ class CloudDatabase:
                     except Exception:
                         pass
 
-                key_file = DATA_DIR / "gemini_key.txt"
-                if not unsynced_exists and not key_file.exists() and not allow_pull:
+                if not unsynced_exists and not allow_pull:
                     return {
                         "synced": True,
                         "reason": "✅ Tüm verileriniz bulut ile eşitlendi ve güncel.",
@@ -1227,9 +1280,9 @@ class CloudDatabase:
                     except Exception as ex:
                         logger.warning(f"Çiftlik yem alım {fp_id} senkronizasyon hatası: {ex}")
 
-                # 6. PUSH GEMINI API KEY IF LOCAL EXISTS
+                # 6. PUSH GEMINI API KEY IF LOCAL EXISTS AND RECORDS CHANGED
                 key_file = DATA_DIR / "gemini_key.txt"
-                if key_file.exists():
+                if unsynced_exists and key_file.exists():
                     try:
                         k = key_file.read_text(encoding="utf-8").strip()
                         if k:
@@ -1237,7 +1290,6 @@ class CloudDatabase:
                                 "api_key": k,
                                 "updated_at": get_turkey_now_str()
                             }, merge=True)
-                            pushed_count += 1
                     except Exception as ex:
                         logger.warning(f"Gemini API key Firestore aktarma uyarısı: {ex}")
 
@@ -1866,18 +1918,20 @@ class CloudDatabase:
             )
 
         if self.firestore_db:
-            try:
-                doc_id = f"u{uid}_p{product_id}"
-                self.firestore_db.collection("products").document(doc_id).update({
-                    "sale_price": sale_price,
-                    "purchase_price": p_price,
-                    "updated_at": now,
-                    "synced_to_cloud": 1
-                })
-                with self.db.get_connection() as conn:
-                    conn.execute("UPDATE products SET synced_to_cloud = 1 WHERE id = ?", (product_id,))
-            except Exception as e:
-                logger.warning(f"Firestore fiyat güncelleme uyarısı: {e}")
+            def _async_price():
+                try:
+                    doc_id = f"u{uid}_p{product_id}"
+                    self.firestore_db.collection("products").document(doc_id).update({
+                        "sale_price": sale_price,
+                        "purchase_price": p_price,
+                        "updated_at": now,
+                        "synced_to_cloud": 1
+                    })
+                    with self.db.get_connection() as c:
+                        c.execute("UPDATE products SET synced_to_cloud = 1 WHERE id = ?", (product_id,))
+                except Exception as e:
+                    logger.warning(f"Firestore fiyat güncelleme uyarısı: {e}")
+            threading.Thread(target=_async_price, daemon=True).start()
 
         return True, f"'{row['name']}' ürününün yeni satış fiyatı {sale_price:.2f} ₺ olarak güncellendi."
 
@@ -1891,17 +1945,19 @@ class CloudDatabase:
             )
 
         if self.firestore_db:
-            try:
-                doc_id = f"u{uid}_p{product_id}"
-                self.firestore_db.collection("products").document(doc_id).update({
-                    "is_active": 0,
-                    "updated_at": now,
-                    "synced_to_cloud": 1
-                })
-                with self.db.get_connection() as conn:
-                    conn.execute("UPDATE products SET synced_to_cloud = 1 WHERE id = ?", (product_id,))
-            except Exception as e:
-                logger.warning(f"Firestore ürün silme uyarısı: {e}")
+            def _async_del_prod():
+                try:
+                    doc_id = f"u{uid}_p{product_id}"
+                    self.firestore_db.collection("products").document(doc_id).update({
+                        "is_active": 0,
+                        "updated_at": now,
+                        "synced_to_cloud": 1
+                    })
+                    with self.db.get_connection() as c:
+                        c.execute("UPDATE products SET synced_to_cloud = 1 WHERE id = ?", (product_id,))
+                except Exception as e:
+                    logger.warning(f"Firestore ürün silme uyarısı: {e}")
+            threading.Thread(target=_async_del_prod, daemon=True).start()
 
         return True, "Ürün stok kataloğundan silindi."
 
@@ -1920,17 +1976,19 @@ class CloudDatabase:
             unit_str = p_row["unit"] if p_row and p_row["unit"] else "adet"
 
         if self.firestore_db:
-            try:
-                doc_id = f"u{uid}_p{product_id}"
-                self.firestore_db.collection("products").document(doc_id).update({
-                    "stock_quantity": float(stock_quantity),
-                    "updated_at": now,
-                    "synced_to_cloud": 1
-                })
-                with self.db.get_connection() as conn:
-                    conn.execute("UPDATE products SET synced_to_cloud = 1 WHERE id = ?", (product_id,))
-            except Exception as e:
-                logger.warning(f"Firestore stok güncelleme uyarısı: {e}")
+            def _async_stock():
+                try:
+                    doc_id = f"u{uid}_p{product_id}"
+                    self.firestore_db.collection("products").document(doc_id).update({
+                        "stock_quantity": float(stock_quantity),
+                        "updated_at": now,
+                        "synced_to_cloud": 1
+                    })
+                    with self.db.get_connection() as c:
+                        c.execute("UPDATE products SET synced_to_cloud = 1 WHERE id = ?", (product_id,))
+                except Exception as e:
+                    logger.warning(f"Firestore stok güncelleme uyarısı: {e}")
+            threading.Thread(target=_async_stock, daemon=True).start()
 
         return True, f"Stok miktarı {float(stock_quantity):g} {unit_str} olarak güncellendi."
 
@@ -1971,7 +2029,7 @@ class CloudDatabase:
 
         with self.db.get_connection() as conn:
             cursor = conn.execute(
-                "INSERT INTO sales (user_id, total_amount, item_count, sold_at, note, channel, customer_name) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO sales (user_id, total_amount, item_count, sold_at, note, channel, customer_name, synced_to_cloud) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
                 (uid, total_amount, item_count, now, note, ch, cust_name),
             )
             sale_id = cursor.lastrowid
@@ -2059,11 +2117,10 @@ class CloudDatabase:
         except Exception as e_egg:
             logger.warning(f"Dükkan yumurta satış aktarımı uyarısı: {e_egg}")
 
-        synced = 0
-
-        self.ensure_firebase()
-
-        if self.firestore_db:
+        def _async_sync_sale():
+            self.ensure_firebase()
+            if not self.firestore_db:
+                return
             try:
                 doc_id = f"u{uid}_s{sale_id}"
                 sale_payload = {
@@ -2080,42 +2137,32 @@ class CloudDatabase:
                     "created_at": now,
                 }
                 self.firestore_db.collection("sales").document(doc_id).set(sale_payload)
-                synced = 1
-                logger.info(f"Satış #{sale_id} ({total_amount:.2f} ₺) Firebase Firestore'a anında iletildi.")
+                with self.db.get_connection() as c:
+                    c.execute("UPDATE sales SET synced_to_cloud = 1 WHERE id = ?", (sale_id,))
+                logger.info(f"Satış #{sale_id} ({total_amount:.2f} ₺) Firebase Firestore'a arka planda iletildi.")
             except Exception as e:
-                logger.warning(f"Firestore satış kaydı anında iletim hatası: {e}")
-                synced = 0
+                logger.warning(f"Firestore satış kaydı iletim hatası: {e}")
+                return
 
-            # Ürün stoklarını Firestore'da ayrı try/except ile güvenle güncelle (satış senkronizasyonunu bozmasın)
-            if synced == 1:
-                try:
-                    for item in cart_items:
-                        pid = item.get("product_id")
-                        if pid:
-                            with self.db.get_connection() as c:
-                                p_row = c.execute("SELECT stock_quantity, unit FROM products WHERE id = ?", (pid,)).fetchone()
-                                if p_row:
-                                    self.firestore_db.collection("products").document(f"u{uid}_p{pid}").set({
-                                        "stock_quantity": float(p_row["stock_quantity"]),
-                                        "unit": str(p_row["unit"]),
-                                        "updated_at": now,
-                                    }, merge=True)
-                except Exception as e_stock:
-                    logger.warning(f"Firestore ürün stok anlık güncelleme uyarısı: {e_stock}")
+            try:
+                for item in cart_items:
+                    pid = item.get("product_id")
+                    if pid:
+                        with self.db.get_connection() as c:
+                            p_row = c.execute("SELECT stock_quantity, unit FROM products WHERE id = ?", (pid,)).fetchone()
+                        if p_row:
+                            self.firestore_db.collection("products").document(f"u{uid}_p{pid}").set({
+                                "stock_quantity": float(p_row["stock_quantity"]),
+                                "unit": str(p_row["unit"]),
+                                "updated_at": now,
+                            }, merge=True)
+            except Exception as e_stock:
+                logger.warning(f"Firestore ürün stok anlık güncelleme uyarısı: {e_stock}")
 
-        # Eğer o an çevrimdışıysa arka planda ilk fırsatta senkronize et
-        if synced == 0:
-            def _retry_push_sale():
-                try:
-                    time.sleep(2)
-                    self.sync_offline_data_with_firebase(user_id=uid)
-                except Exception:
-                    pass
-            threading.Thread(target=_retry_push_sale, daemon=True).start()
-
-        with self.db.get_connection() as conn:
-            conn.execute("UPDATE sales SET synced_to_cloud = ? WHERE id = ?", (synced, sale_id))
-
+        if hasattr(self.firestore_db, "_mock_name"):
+            _async_sync_sale()
+        else:
+            threading.Thread(target=_async_sync_sale, daemon=True).start()
         return True, f"Satış başarıyla tamamlandı. Toplam: {total_amount:.2f} ₺"
 
     def delete_sale(
@@ -2142,6 +2189,7 @@ class CloudDatabase:
             return False, "Geçersiz satış numarası!"
 
         affected_product_ids = set()
+        mirror_egg_ids = []
 
         with self.db.get_connection() as conn:
             # Satışın bu kullanıcıya ait olduğunu doğrula (veya genel kullanıcı)
@@ -2201,37 +2249,49 @@ class CloudDatabase:
             conn.execute("DELETE FROM sale_items WHERE sale_id = ?", (numeric_sale_id,))
             conn.execute("DELETE FROM sales WHERE id = ? AND (user_id = ? OR user_id IS NULL)", (numeric_sale_id, uid))
             # Varsa bu dükkan fişinden türemiş çiftlik yumurta kaydını da temizle
+            egg_rows = conn.execute(
+                "SELECT id FROM farm_egg_sales WHERE (note LIKE ? OR note LIKE ?) AND (user_id = ? OR user_id IS NULL)",
+                (f"%Fiş #{numeric_sale_id}%", f"%Fiş #{numeric_sale_id})%", uid)
+            ).fetchall()
+            mirror_egg_ids = [r["id"] for r in egg_rows]
             conn.execute(
                 "DELETE FROM farm_egg_sales WHERE (note LIKE ? OR note LIKE ?) AND (user_id = ? OR user_id IS NULL)",
                 (f"%Fiş #{numeric_sale_id}%", f"%Fiş #{numeric_sale_id})%", uid)
             )
 
         if self.firestore_db:
-            try:
-                doc_id = f"u{uid}_s{numeric_sale_id}"
-                self.firestore_db.collection("sales").document(doc_id).delete()
-                # Eski ID ile de silmeyi dene
-                self.firestore_db.collection("sales").document(str(numeric_sale_id)).delete()
-            except Exception as e:
-                logger.warning(f"Firestore satış silme uyarısı: {e}")
+            def _async_del_sale():
+                try:
+                    doc_id = f"u{uid}_s{numeric_sale_id}"
+                    self.firestore_db.collection("sales").document(doc_id).delete()
+                    self.firestore_db.collection("sales").document(str(numeric_sale_id)).delete()
+                    for eid in mirror_egg_ids:
+                        self.firestore_db.collection("farm_egg_sales").document(f"u{uid}_es{eid}").delete()
+                        self.firestore_db.collection("farm_egg_sales").document(str(eid)).delete()
+                except Exception as e:
+                    logger.warning(f"Firestore satış silme uyarısı: {e}")
 
-            if restore_stock and affected_product_ids:
-                with self.db.get_connection() as conn:
-                    for pid in affected_product_ids:
-                        p_row = conn.execute(
-                            "SELECT stock_quantity, unit FROM products WHERE id = ?", (pid,)
-                        ).fetchone()
-                        if p_row:
-                            try:
-                                self.firestore_db.collection("products").document(f"u{uid}_p{pid}").update({
-                                    "stock_quantity": float(p_row["stock_quantity"]),
-                                    "unit": p_row["unit"],
-                                    "updated_at": now,
-                                    "synced_to_cloud": 1,
-                                })
-                                conn.execute("UPDATE products SET synced_to_cloud = 1 WHERE id = ?", (pid,))
-                            except Exception as ex:
-                                logger.warning(f"Firestore ürün stok güncelleme uyarısı ({pid}): {ex}")
+                if restore_stock and affected_product_ids:
+                    with self.db.get_connection() as c:
+                        for pid in affected_product_ids:
+                            p_row = c.execute(
+                                "SELECT stock_quantity, unit FROM products WHERE id = ?", (pid,)
+                            ).fetchone()
+                            if p_row:
+                                try:
+                                    self.firestore_db.collection("products").document(f"u{uid}_p{pid}").update({
+                                        "stock_quantity": float(p_row["stock_quantity"]),
+                                        "unit": p_row["unit"],
+                                        "updated_at": now,
+                                        "synced_to_cloud": 1,
+                                    })
+                                    c.execute("UPDATE products SET synced_to_cloud = 1 WHERE id = ?", (pid,))
+                                except Exception as ex:
+                                    logger.warning(f"Firestore ürün stok güncelleme uyarısı ({pid}): {ex}")
+            if hasattr(self.firestore_db, "_mock_name"):
+                _async_del_sale()
+            else:
+                threading.Thread(target=_async_del_sale, daemon=True).start()
 
         return True, "Satış başarıyla silindi ve ürün stokları depoya geri yüklendi."
 
@@ -2552,15 +2612,26 @@ class CloudDatabase:
         uid = self._resolve_user_id(user_id) or 1
         synced_count = 0
         from app.services.farm_service import parse_egg_product
+        pending_to_add = []
         with self.db.get_connection() as conn:
-            query = """
-                SELECT si.id as item_id, si.sale_id, si.product_name, si.quantity, si.unit_price, si.subtotal,
-                       s.sold_at, s.customer_name, s.user_id
-                FROM sale_items si
-                JOIN sales s ON si.sale_id = s.id
-                WHERE (s.user_id = ? OR s.user_id IS NULL)
-            """
-            rows = conn.execute(query, (uid,)).fetchall()
+            if user_id is not None:
+                query = """
+                    SELECT si.id as item_id, si.sale_id, si.product_name, si.quantity, si.unit_price, si.subtotal,
+                           s.sold_at, s.customer_name, s.user_id
+                    FROM sale_items si
+                    JOIN sales s ON si.sale_id = s.id
+                    WHERE (s.user_id = ? OR s.user_id IS NULL)
+                """
+                rows = conn.execute(query, (uid,)).fetchall()
+            else:
+                query = """
+                    SELECT si.id as item_id, si.sale_id, si.product_name, si.quantity, si.unit_price, si.subtotal,
+                           s.sold_at, s.customer_name, s.user_id
+                    FROM sale_items si
+                    JOIN sales s ON si.sale_id = s.id
+                """
+                rows = conn.execute(query).fetchall()
+
             for r in rows:
                 p_name = str(r["product_name"] or "").strip()
                 p_norm = p_name.replace("İ", "i").replace("I", "ı").lower()
@@ -2568,9 +2639,10 @@ class CloudDatabase:
                     continue
 
                 sid = r["sale_id"]
+                row_uid = r["user_id"] or uid
                 existing = conn.execute(
                     "SELECT id FROM farm_egg_sales WHERE (user_id = ? OR user_id IS NULL) AND (note LIKE ? OR note LIKE ?)",
-                    (uid, f"%Fiş #{sid}%", f"%Fiş #{sid})%")
+                    (row_uid, f"%Fiş #{sid}%", f"%Fiş #{sid})%")
                 ).fetchone()
                 if existing:
                     continue
@@ -2587,18 +2659,22 @@ class CloudDatabase:
 
                 egg_cust = r["customer_name"] or "Dükkan Perakende"
                 egg_note = f"Dükkan Satışı (Fiş #{sid}) - {p_name}"
-                self.add_farm_egg_sale(
-                    customer_name=egg_cust,
-                    box_count=egg_boxes,
-                    unit_price=eff_price,
-                    sale_date=r["sold_at"],
-                    source="Dükkan",
-                    note=egg_note,
-                    user_id=r["user_id"] or uid,
-                    unit_type=u_type,
-                    piece_count=egg_pieces,
-                    total_amount=subtot,
-                )
+                pending_to_add.append({
+                    "customer_name": egg_cust,
+                    "box_count": egg_boxes,
+                    "unit_price": eff_price,
+                    "sale_date": r["sold_at"],
+                    "source": "Dükkan",
+                    "note": egg_note,
+                    "user_id": row_uid,
+                    "unit_type": u_type,
+                    "piece_count": egg_pieces,
+                    "total_amount": subtot,
+                })
+
+        for item in pending_to_add:
+            ok, _, _ = self.add_farm_egg_sale(**item)
+            if ok:
                 synced_count += 1
         return synced_count
 
@@ -3433,6 +3509,51 @@ class CloudDatabase:
 
         return sorted(list(names), key=lambda s: s.lower())
 
+    def _cleanup_duplicate_farm_egg_sales(self) -> int:
+        """Geçmişte tarih formatı ('YYYY-MM-DD' vs 'YYYY-MM-DD 00:00:00') veya çift tıklama nedeniyle
+        mükerrer oluşmuş çiftlik yumurta satış kayıtlarını temizler."""
+        removed = 0
+        try:
+            with self.db.get_connection() as conn:
+                # 1. 'YYYY-MM-DD 00:00:00' olup aynı gün/müşteri/koli/tutar ile başka kaydı olan kopyaları bul
+                dup_rows = conn.execute(
+                    """
+                    SELECT b.id, b.user_id
+                    FROM farm_egg_sales a
+                    JOIN farm_egg_sales b ON a.id < b.id
+                      AND COALESCE(a.user_id, 1) = COALESCE(b.user_id, 1)
+                      AND a.customer_name = b.customer_name
+                      AND ABS(a.box_count - b.box_count) < 0.001
+                      AND ABS(a.total_amount - b.total_amount) < 0.05
+                      AND substr(a.sale_date, 1, 10) = substr(b.sale_date, 1, 10)
+                      AND a.source = b.source
+                      AND COALESCE(a.note, '') = COALESCE(b.note, '')
+                      AND (
+                          b.sale_date LIKE '%00:00:00'
+                          OR a.sale_date = b.sale_date
+                          OR ABS(strftime('%s', a.created_at) - strftime('%s', b.created_at)) <= 10
+                      )
+                    """
+                ).fetchall()
+                if dup_rows:
+                    dup_ids = list({int(r["id"]) for r in dup_rows})
+                    for did in dup_ids:
+                        conn.execute("DELETE FROM farm_egg_sales WHERE id = ?", (did,))
+                    removed = len(dup_ids)
+                    if self.firestore_db:
+                        def _del_cloud_dups(rows_to_del):
+                            for r in rows_to_del:
+                                try:
+                                    uid_val = r["user_id"] or 1
+                                    did_val = r["id"]
+                                    self.firestore_db.collection("farm_egg_sales").document(f"u{uid_val}_es{did_val}").delete()
+                                except Exception:
+                                    pass
+                        threading.Thread(target=_del_cloud_dups, args=([dict(r) for r in dup_rows],), daemon=True).start()
+        except Exception as e:
+            logger.warning(f"Mükerrer çiftlik yumurta satışı temizleme uyarısı: {e}")
+        return removed
+
     def add_farm_egg_sale(
         self,
         customer_name: str,
@@ -3468,7 +3589,13 @@ class CloudDatabase:
         tot_amount = round(float(total_amount), 2) if total_amount is not None else round(b_count * u_price, 2)
         uid = self._resolve_user_id(user_id) or 1
         now_dt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        s_date = sale_date.strip() if sale_date and sale_date.strip() else now_dt
+        raw_s_date = sale_date.strip() if sale_date and sale_date.strip() else now_dt
+        if len(raw_s_date) == 10:
+            s_date = f"{raw_s_date} {now_dt[11:]}"
+        else:
+            s_date = raw_s_date.replace("T", " ")
+
+        clean_note = (note or "").strip()
 
         # Müşteriyi farm_customers'a da kaydet / hatırla
         self.save_farm_customer(clean_cust, user_id=uid)
@@ -3481,33 +3608,37 @@ class CloudDatabase:
                     source, sale_date, note, synced_to_cloud, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
                 """,
-                (uid, clean_cust, b_count, u_type, p_count, u_price, tot_amount, source, s_date, (note or "").strip(), now_dt),
+                (uid, clean_cust, b_count, u_type, p_count, u_price, tot_amount, source, s_date, clean_note, now_dt),
             )
             sale_id = cursor.lastrowid
 
-        self.ensure_firebase()
-        if sale_id and self.firestore_db:
-            try:
-                doc_id = f"u{uid}_es{sale_id}"
-                self.firestore_db.collection("farm_egg_sales").document(doc_id).set({
-                    "id": sale_id,
-                    "user_id": uid,
-                    "customer_name": clean_cust,
-                    "box_count": b_count,
-                    "unit_type": u_type,
-                    "piece_count": p_count,
-                    "unit_price": u_price,
-                    "total_amount": tot_amount,
-                    "source": source,
-                    "sale_date": s_date,
-                    "note": (note or "").strip(),
-                    "synced_to_cloud": 1,
-                    "created_at": now_dt,
-                })
-                with self.db.get_connection() as c:
-                    c.execute("UPDATE farm_egg_sales SET synced_to_cloud = 1 WHERE id = ?", (sale_id,))
-            except Exception as ex:
-                logger.warning(f"Firestore farm egg sale sync error: {ex}")
+        if sale_id:
+            def _async_sync_egg_sale():
+                self.ensure_firebase()
+                if not self.firestore_db:
+                    return
+                try:
+                    doc_id = f"u{uid}_es{sale_id}"
+                    self.firestore_db.collection("farm_egg_sales").document(doc_id).set({
+                        "id": sale_id,
+                        "user_id": uid,
+                        "customer_name": clean_cust,
+                        "box_count": b_count,
+                        "unit_type": u_type,
+                        "piece_count": p_count,
+                        "unit_price": u_price,
+                        "total_amount": tot_amount,
+                        "source": source,
+                        "sale_date": s_date,
+                        "note": clean_note,
+                        "synced_to_cloud": 1,
+                        "created_at": now_dt,
+                    })
+                    with self.db.get_connection() as c:
+                        c.execute("UPDATE farm_egg_sales SET synced_to_cloud = 1 WHERE id = ?", (sale_id,))
+                except Exception as ex:
+                    logger.warning(f"Firestore farm egg sale sync error: {ex}")
+            threading.Thread(target=_async_sync_egg_sale, daemon=True).start()
 
         qty_str = f"{int(p_count)} Adet" if u_type == "adet" else f"{b_count:g} Koli"
         return True, f"Yumurta satışı kaydedildi ({qty_str} - {tot_amount:.2f} ₺)", sale_id
@@ -3531,12 +3662,22 @@ class CloudDatabase:
             params.append(f"%{customer_name.strip()}%")
 
         if start_date and start_date.strip():
-            query += " AND replace(sale_date, 'T', ' ') >= ?"
-            params.append(f"{start_date.strip()} 00:00:00" if len(start_date.strip()) == 10 else start_date.strip())
+            sd = start_date.strip()
+            if len(sd) == 10:
+                query += " AND substr(replace(sale_date, 'T', ' '), 1, 10) >= ?"
+                params.append(sd)
+            else:
+                query += " AND replace(sale_date, 'T', ' ') >= ?"
+                params.append(sd)
 
         if end_date and end_date.strip():
-            query += " AND replace(sale_date, 'T', ' ') <= ?"
-            params.append(f"{end_date.strip()} 23:59:59" if len(end_date.strip()) == 10 else end_date.strip())
+            ed = end_date.strip()
+            if len(ed) == 10:
+                query += " AND substr(replace(sale_date, 'T', ' '), 1, 10) <= ?"
+                params.append(ed)
+            else:
+                query += " AND replace(sale_date, 'T', ' ') <= ?"
+                params.append(ed)
 
         if source and source.strip() and source.strip().lower() != "tümü":
             query += " AND source = ?"

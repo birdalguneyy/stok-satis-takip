@@ -404,17 +404,18 @@ class FarmView(ctk.CTkFrame):
 
             src_color = ACCENT if src == "Ciftlik" else "#0284C7"
 
-            del_btn = ctk.CTkButton(
-                self.egg_sales_table.body,
-                text="🗑️",
-                width=32,
-                height=26,
-                font=FONT_SMALL,
-                fg_color="transparent",
-                hover_color=("gray80", "gray35"),
-                text_color=ERROR,
-                command=lambda id_=sid: self._delete_egg_sale(id_),
-            )
+            def _make_del_btn(parent, id_=sid):
+                return ctk.CTkButton(
+                    parent,
+                    text="🗑️",
+                    width=32,
+                    height=26,
+                    font=FONT_SMALL,
+                    fg_color="transparent",
+                    hover_color=("gray80", "gray35"),
+                    text_color=ERROR,
+                    command=lambda: self._delete_egg_sale(id_),
+                )
 
             self.egg_sales_table.add_row(
                 values=[
@@ -429,7 +430,7 @@ class FarmView(ctk.CTkFrame):
                 ],
                 row_id=sid,
                 text_colors=[None, None, qty_color, None, None, src_color, None, None],
-                custom_widgets={7: del_btn},
+                custom_widgets={7: _make_del_btn},
             )
 
     def _delete_egg_sale(self, sale_id: int) -> None:
@@ -688,17 +689,18 @@ class FarmView(ctk.CTkFrame):
             total = float(p.get("total_amount", 0))
             supp = p.get("supplier", "") or p.get("note", "")
 
-            del_btn = ctk.CTkButton(
-                self.feed_table.body,
-                text="🗑️",
-                width=32,
-                height=26,
-                font=FONT_SMALL,
-                fg_color="transparent",
-                hover_color=("gray80", "gray35"),
-                text_color=ERROR,
-                command=lambda id_=pid: self._delete_feed_purchase(id_),
-            )
+            def _make_feed_del_btn(parent, id_=pid):
+                return ctk.CTkButton(
+                    parent,
+                    text="🗑️",
+                    width=32,
+                    height=26,
+                    font=FONT_SMALL,
+                    fg_color="transparent",
+                    hover_color=("gray80", "gray35"),
+                    text_color=ERROR,
+                    command=lambda: self._delete_feed_purchase(id_),
+                )
 
             self.feed_table.add_row(
                 values=[
@@ -713,7 +715,7 @@ class FarmView(ctk.CTkFrame):
                 ],
                 row_id=pid,
                 text_colors=[None, None, "#0284C7", None, None, ACCENT, None, None],
-                custom_widgets={7: del_btn},
+                custom_widgets={7: _make_feed_del_btn},
             )
 
     def _delete_feed_purchase(self, purchase_id: int) -> None:

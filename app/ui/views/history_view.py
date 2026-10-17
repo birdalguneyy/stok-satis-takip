@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 
 import customtkinter as ctk
 
+from app.config import get_turkey_now
 from app.services.sale_service import SaleService
 from app.ui.theme import (
     ACCENT,

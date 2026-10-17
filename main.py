@@ -14,6 +14,11 @@ if hasattr(time, "tzset"):
 from app.ui.app import App
 from app.web.web_server import get_local_ip, run_web_server_in_thread
 
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w", encoding="utf-8")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w", encoding="utf-8")
+
 logging.basicConfig(level=logging.INFO)
 
 if hasattr(sys.stdout, "reconfigure"):

@@ -135,8 +135,13 @@ class DataTable(ctk.CTkScrollableFrame):
             row_frame.grid_columnconfigure(i, weight=weight, uniform="cols" if not self.column_weights else None)
 
             if custom_widgets and i in custom_widgets:
-                widget = custom_widgets[i]
-                widget.grid(row=0, column=i, sticky="ew", padx=6, pady=6)
+                w_spec = custom_widgets[i]
+                if callable(w_spec):
+                    widget = w_spec(row_frame)
+                    widget.grid(row=0, column=i, sticky="ew", padx=6, pady=6)
+                else:
+                    widget = w_spec
+                    widget.grid(row=0, column=i, sticky="ew", padx=6, pady=6, in_=row_frame)
             else:
                 color = text_colors[i] if text_colors and i < len(text_colors) else None
                 label = ctk.CTkLabel(

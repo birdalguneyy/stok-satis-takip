@@ -631,7 +631,7 @@
       </div>
 
       <h2 style="font-size:1.35rem; font-weight:800; margin:0 0 6px; letter-spacing:-0.3px; color:#ffffff;">Sistem Koruması</h2>
-      <p style="font-size:0.85rem; color:#94a3b8; margin:0 0 20px; line-height:1.4;" id="gate-lock-subtitle">Giriş PIN Kodunu Giriniz (Personel: 2805 | Yönetici: 0528)</p>
+      <p style="font-size:0.85rem; color:#94a3b8; margin:0 0 20px; line-height:1.4;" id="gate-lock-subtitle">Lütfen Sistem Giriş PIN Kodunu Giriniz</p>
 
       <!-- PIN GÖSTERGE NOKTALARI -->
       <div id="gate-pin-dots" style="display:flex; justify-content:center; gap:16px; margin-bottom:24px;">
@@ -2356,7 +2356,7 @@
           lockBadge.style.display = 'inline-flex';
           lockBadge.style.background = '#2563EB';
           lockBadge.innerText = '👑 Yönetici Girişi Yap';
-          lockBadge.title = 'Yönetici moduna geçmek için şifre (0528) giriniz';
+          lockBadge.title = 'Yönetici moduna geçmek için şifre giriniz';
         }
 
         if (profileName) {
@@ -2376,7 +2376,7 @@
         requestAuthAction({
           type: 'role_upgrade',
           title: '👑 Yönetici Girişi',
-          desc: 'Tüm bölümleri açmak için Yönetici şifresini (0528) giriniz:'
+          desc: 'Tüm bölümleri açmak için Yönetici şifresini giriniz:'
         });
       }
     }
@@ -2387,7 +2387,7 @@
         requestAuthAction({
           type: 'auth_modal',
           title: '🏢 Mağaza & Hesap Yönetimi',
-          desc: 'İşletme ayarlarına erişmek için Yönetici şifresini (0528) giriniz:'
+          desc: 'İşletme ayarlarına erişmek için Yönetici şifresini giriniz:'
         });
         return;
       }
@@ -2407,7 +2407,7 @@
           tabId: tabId,
           btnEl: btnEl,
           title: '👑 Yönetici Girişi',
-          desc: 'Bu sekmeye erişmek için Yönetici şifresini (0528) giriniz:'
+          desc: 'Bu sekmeye erişmek için Yönetici şifresini giriniz:'
         });
         return;
       }
@@ -7358,7 +7358,7 @@
         requestAuthAction({
           type: 'farm',
           title: '🚜 Çiftlik Modülü Girişi',
-          desc: 'Çiftlik modülüne erişmek için Yönetici şifresini (0528) giriniz:'
+          desc: 'Çiftlik modülüne erişmek için Yönetici şifresini giriniz:'
         });
         return;
       }
@@ -7384,7 +7384,7 @@
       } else if (normalPins.includes(pin)) {
         // 2805 personel şifresidir. Yönetici yetkisi gerektiren yerleri ASLA açmaz!
         const errEl = document.getElementById('farm-pin-error');
-        if (errEl) errEl.innerText = '⚠️ 2805 Personel şifresidir. Yönetici yetkisi için 0528 giriniz.';
+        if (errEl) errEl.innerText = '⚠️ Personel şifresi girildi. Bu alana erişim için Yönetici şifresi gereklidir.';
         const inp = document.getElementById('farm-pin-input');
         if (inp) {
           inp.value = '';

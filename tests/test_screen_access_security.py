@@ -104,7 +104,11 @@ class TestScreenAccessSecurity(unittest.TestCase):
         self.assertIn('id="farm-badge"', content)
 
         # 3. 2805 personel şifresinin farm pin modalında hata verip executePendingAuthAction çağırmadığı
-        self.assertIn("2805 Personel şifresidir", content)
+        self.assertIn("Personel şifresi girildi. Bu alana erişim için Yönetici şifresi gereklidir.", content)
+
+        # 4. Kullanıcıya açık arayüzde şifrelerin (2805, 0528) ipucu olarak yazılmadığı
+        self.assertNotIn("Personel: 2805", content)
+        self.assertNotIn("Yönetici: 0528", content)
 
     def test_sidebar_role_visibility(self):
         """Sidebar nesnesinde personel rolünde sadece sales butonunun kalması testi."""

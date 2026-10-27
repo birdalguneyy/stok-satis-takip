@@ -288,7 +288,7 @@ class App(ctk.CTk):
             self,
             title="🔐 Sistem Girişi",
             heading="🔐 Giriş Doğrulama",
-            prompt="Lütfen erişim şifrenizi giriniz\n(2805: Personel | 0528: Yönetici):",
+            prompt="Lütfen erişim PIN / şifrenizi giriniz:",
             on_success=on_login,
             on_cancel=on_cancel,
         )
@@ -304,13 +304,13 @@ class App(ctk.CTk):
                     self.set_user_role("admin")
                     self.show_toast("👑 Yönetici Modu Aktif. Tüm bölümler açıldı.", "success")
                 else:
-                    self.show_toast("⚠️ 2805 Personel şifresidir. Tüm bölümler için 0528 yönetici şifresini giriniz.", "warning")
+                    self.show_toast("⚠️ Personel şifresi girildi. Tüm bölümlere erişim için Yönetici şifresi gereklidir.", "warning")
 
             AccessPasswordDialog(
                 self,
                 title="👑 Yönetici Girişi",
                 heading="👑 Yönetici Yetkilendirmesi",
-                prompt="Tüm bölümleri açmak için yönetici şifresini (0528) giriniz:",
+                prompt="Tüm bölümleri açmak için yönetici şifresini giriniz:",
                 on_success=on_auth_success,
             )
 
@@ -333,13 +333,13 @@ class App(ctk.CTk):
                     self.show_toast("👑 Yönetici Modu Aktif.", "success")
                     self.show_view(target_key)
                 else:
-                    self.show_toast("⚠️ Bu bölüme sadece Yönetici (0528) erişebilir!", "warning")
+                    self.show_toast("⚠️ Bu bölüme sadece Yönetici erişebilir!", "warning")
 
             AccessPasswordDialog(
                 self,
                 title="👑 Yönetici Girişi",
                 heading="👑 Yönetici Yetkisi Gerekli",
-                prompt="Bu alana sadece yönetici (0528) erişebilir. Şifre giriniz:",
+                prompt="Bu alana sadece yönetici erişebilir. Şifre giriniz:",
                 on_success=on_auth_success,
             )
             return

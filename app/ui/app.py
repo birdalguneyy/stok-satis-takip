@@ -5,7 +5,7 @@ from app.database.migrations import run_migrations
 from app.services.dashboard_service import DashboardService
 from app.services.product_service import ProductService
 from app.services.sale_service import SaleService
-from app.ui.components.farm_password_dialog import FarmPasswordDialog
+from app.ui.components.farm_password_dialog import AccessPasswordDialog, FarmPasswordDialog
 from app.ui.components.sidebar import Sidebar
 from app.ui.components.toast import Toast
 from app.ui.views.dashboard_view import DashboardView
@@ -35,9 +35,12 @@ class App(ctk.CTk):
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
+        self.user_role: str = "personnel"
+        self.is_unlocked: bool = False
+
         self.sidebar = Sidebar(
             self,
-            on_navigate=self.show_view,
+            on_navigate=self.request_navigation,
             on_toggle_theme=self.toggle_theme,
         )
         self.sidebar.grid(row=0, column=0, sticky="ns")
@@ -51,14 +54,30 @@ class App(ctk.CTk):
         self._build_views()
         self.toast = Toast(self)
 
-        self.show_view("dashboard")
+        self.active_view_key = "sales"
+        self.show_view("sales")
         self.bind("<F2>", self._on_f2_pressed)
 
-        # Sağ Üst Köşe Çubuğu: Çiftlik Giriş, Bulut Eşitle, Web Modu ve Firebase Durum Rozeti
+        # Sağ Üst Köşe Çubuğu: Kilit Durumu, Çiftlik Giriş, Bulut Eşitle, Web Modu ve Firebase Rozeti
         self.top_actions_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.top_actions_frame.place(relx=0.985, rely=0.015, anchor="ne")
 
-        # 🚜 Sağ Üst Köşe Çiftlik Butonu (Şifre: 2805)
+        # 🔒 / 🔓 Kilit ve Güvenlik Durumu Butonu
+        self.lock_btn = ctk.CTkButton(
+            self.top_actions_frame,
+            text="🔒 Korumalı",
+            font=("Segoe UI", 11, "bold"),
+            fg_color=("#E2E8F0", "#334155"),
+            text_color=("gray20", "gray85"),
+            hover_color=("#CBD5E1", "#475569"),
+            height=28,
+            width=88,
+            corner_radius=12,
+            command=self.toggle_lock_mode,
+        )
+        self.lock_btn.pack(side="left", padx=(0, 6))
+
+        # 🚜 Sağ Üst Köşe Çiftlik Butonu
         self.farm_btn = ctk.CTkButton(
             self.top_actions_frame,
             text="🚜 Çiftlik",
@@ -100,7 +119,6 @@ class App(ctk.CTk):
         )
         self.web_btn.pack(side="left", padx=(0, 8))
 
-        self.active_view_key = "dashboard"
         self._is_syncing_cloud = False
 
         try:
@@ -124,6 +142,10 @@ class App(ctk.CTk):
         except Exception:
             pass
 
+        # Rolü personel olarak başlatıp diğer bölümleri gizle
+        self.set_user_role("personnel")
+        # Açılışta şifre sor (2805: Personel - Yalnızca POS, 0528: Yönetici - Tam yetki)
+        self.after(200, self._show_startup_login)
         # Başlangıçta ve periyodik olarak Firebase ile çift yönlü eşitleme başlat
         self.after(1200, lambda: self._run_background_firebase_sync(manual=False))
 
@@ -214,13 +236,120 @@ class App(ctk.CTk):
             except Exception:
                 pass
 
-    def _open_farm_module(self) -> None:
-        """Sağ üstteki Çiftlik butonuna tıklandığında 2805 şifresini sorgular."""
-        FarmPasswordDialog(self, on_success=self._on_farm_auth_success)
+    def set_user_role(self, role: str) -> None:
+        """Kullanıcı rolünü ayarlar: 'admin' (0528) veya 'personnel' (2805)."""
+        self.user_role = role
+        self.is_unlocked = (role == "admin")
+        if hasattr(self, "sidebar"):
+            self.sidebar.set_role(role)
+        self._update_role_ui()
+        if role == "personnel":
+            self.show_view("sales")
 
-    def _on_farm_auth_success(self) -> None:
-        self.show_toast("Çiftlik Modülüne başarıyla giriş yapıldı.", "success")
-        self.show_view("farm")
+    def _update_role_ui(self) -> None:
+        if not hasattr(self, "lock_btn"):
+            return
+        if self.user_role == "admin":
+            self.lock_btn.configure(
+                text="🔒 Personel Moduna Geç",
+                fg_color="#D97706",
+                hover_color="#B45309",
+                text_color="#FFFFFF",
+                width=175,
+            )
+            # Çiftlik butonunu göster
+            if hasattr(self, "farm_btn") and hasattr(self, "sync_btn"):
+                self.farm_btn.pack(side="left", padx=(0, 6), before=self.sync_btn)
+        else:
+            self.lock_btn.configure(
+                text="👑 Yönetici Girişi",
+                fg_color="#2563EB",
+                hover_color="#1D4ED8",
+                text_color="#FFFFFF",
+                width=140,
+            )
+            # Çiftlik butonunu personel modunda tamamen gizle
+            if hasattr(self, "farm_btn"):
+                self.farm_btn.pack_forget()
+
+    def _show_startup_login(self) -> None:
+        def on_login(is_master: bool = False):
+            if is_master:
+                self.set_user_role("admin")
+                self.show_toast("👑 Yönetici Modu Aktif. Tüm bölümler açık.", "success")
+            else:
+                self.set_user_role("personnel")
+                self.show_toast("👤 Personel Modu Aktif. Yalnızca Satış (POS) açık.", "info")
+
+        def on_cancel():
+            self.set_user_role("personnel")
+
+        AccessPasswordDialog(
+            self,
+            title="🔐 Sistem Girişi",
+            heading="🔐 Giriş Doğrulama",
+            prompt="Lütfen erişim şifrenizi giriniz\n(2805: Personel | 0528: Yönetici):",
+            on_success=on_login,
+            on_cancel=on_cancel,
+        )
+
+    def toggle_lock_mode(self) -> None:
+        """Yönetici ve Personel modu arasında geçiş yapar."""
+        if self.user_role == "admin":
+            self.set_user_role("personnel")
+            self.show_toast("🔒 Personel moduna geçildi. Diğer bölümler gizlendi.", "info")
+        else:
+            def on_auth_success(is_master: bool = False):
+                if is_master:
+                    self.set_user_role("admin")
+                    self.show_toast("👑 Yönetici Modu Aktif. Tüm bölümler açıldı.", "success")
+                else:
+                    self.show_toast("⚠️ 2805 Personel şifresidir. Tüm bölümler için 0528 yönetici şifresini giriniz.", "warning")
+
+            AccessPasswordDialog(
+                self,
+                title="👑 Yönetici Girişi",
+                heading="👑 Yönetici Yetkilendirmesi",
+                prompt="Tüm bölümleri açmak için yönetici şifresini (0528) giriniz:",
+                on_success=on_auth_success,
+            )
+
+    def request_navigation(self, key: str) -> None:
+        target_key = "reports" if key == "history" else key
+
+        if target_key == self.active_view_key:
+            return
+
+        # Satış ekranı (POS) her zaman açıktır
+        if target_key == "sales":
+            self.show_view("sales")
+            return
+
+        # Personel modundaysa diğer kısımlar tamamen kapalıdır ve gözükmez. Yönetici şifresi (0528) istenir.
+        if self.user_role == "personnel":
+            def on_auth_success(is_master: bool = False):
+                if is_master:
+                    self.set_user_role("admin")
+                    self.show_toast("👑 Yönetici Modu Aktif.", "success")
+                    self.show_view(target_key)
+                else:
+                    self.show_toast("⚠️ Bu bölüme sadece Yönetici (0528) erişebilir!", "warning")
+
+            AccessPasswordDialog(
+                self,
+                title="👑 Yönetici Girişi",
+                heading="👑 Yönetici Yetkisi Gerekli",
+                prompt="Bu alana sadece yönetici (0528) erişebilir. Şifre giriniz:",
+                on_success=on_auth_success,
+            )
+            return
+
+        # Yönetici modunda ise serbestçe geçiş yapılır
+        self.show_view(target_key)
+
+    def _open_farm_module(self) -> None:
+        """Sağ üstteki Çiftlik butonuna tıklandığında geçişi başlatır."""
+        self.request_navigation("farm")
 
     def _on_f2_pressed(self, _event=None) -> None:
         self.show_view("sales")

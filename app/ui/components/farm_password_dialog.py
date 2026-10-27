@@ -3,24 +3,36 @@ import customtkinter as ctk
 
 from app.ui.theme import ACCENT, ACCENT_HOVER, ERROR, FONT_BODY, FONT_HEADING, FONT_SMALL
 
+MASTER_PASSWORDS = {"0528", "05282024"}
+NORMAL_PASSWORDS = {"28052024", "2805"}
 
-class FarmPasswordDialog(ctk.CTkToplevel):
-    """Çiftlik Modülü için 4 haneli PIN / Şifre sorgulama modal penceresi (Şifre: 2805)."""
 
-    CORRECT_PASSWORD = "2805"
+class AccessPasswordDialog(ctk.CTkToplevel):
+    """Güvenli bölümlere erişim için PIN / Şifre sorgulama modal penceresi.
+    - Şifre: 28052024 veya 2805 (bölüme geçişe izin verir, sonraki geçişlerde şifre sormaya devam eder)
+    - Master Şifre: 0528 veya 05282024 (tüm bölümlere şifresiz serbest geçiş modunu açar)
+    """
+
+    CORRECT_PASSWORD = "28052024"
 
     def __init__(
         self,
         parent,
-        on_success: Callable[[], None],
+        on_success: Callable[..., None],
         on_cancel: Optional[Callable[[], None]] = None,
+        title: str = "🔐 Güvenlik Girişi",
+        heading: str = "🔐 Güvenlik Girişi",
+        prompt: str = "Lütfen erişim şifresini giriniz:",
     ) -> None:
         super().__init__(parent)
         self.on_success = on_success
         self.on_cancel = on_cancel
+        self._title_text = title
+        self._heading_text = heading
+        self._prompt_text = prompt
 
-        self.title("🔐 Çiftlik Girişi")
-        self.geometry("360x280")
+        self.title(self._title_text)
+        self.geometry("380x300")
         self.resizable(False, False)
         self.transient(parent)
         self.grab_set()
@@ -28,9 +40,9 @@ class FarmPasswordDialog(ctk.CTkToplevel):
         # Ekranın ortasında konumlandır
         self.update_idletasks()
         try:
-            x = parent.winfo_x() + (parent.winfo_width() // 2) - 180
-            y = parent.winfo_y() + (parent.winfo_height() // 2) - 140
-            self.geometry(f"+max(0, {x})+max(0, {y})")
+            x = parent.winfo_x() + (parent.winfo_width() // 2) - 190
+            y = parent.winfo_y() + (parent.winfo_height() // 2) - 150
+            self.geometry(f"+{max(0, x)}+{max(0, y)}")
         except Exception:
             pass
 
@@ -42,14 +54,14 @@ class FarmPasswordDialog(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             card,
-            text="🚜 Çiftlik Modülü Girişi",
+            text=self._heading_text,
             font=FONT_HEADING,
             text_color=ACCENT,
         ).pack(pady=(16, 4))
 
         ctk.CTkLabel(
             card,
-            text="Lütfen 4 haneli erişim şifresini giriniz:",
+            text=self._prompt_text,
             font=FONT_SMALL,
             text_color=("gray40", "gray60"),
         ).pack(pady=(0, 14))
@@ -60,7 +72,7 @@ class FarmPasswordDialog(ctk.CTkToplevel):
             show="*",
             font=("Segoe UI", 18, "bold"),
             justify="center",
-            width=180,
+            width=200,
             height=44,
         )
         self.pass_entry.pack(pady=8)
@@ -106,10 +118,20 @@ class FarmPasswordDialog(ctk.CTkToplevel):
 
     def _verify(self) -> None:
         entered = self.pass_entry.get().strip()
-        if entered == self.CORRECT_PASSWORD:
+        if entered in MASTER_PASSWORDS:
             self.destroy()
             if self.on_success:
-                self.on_success()
+                try:
+                    self.on_success(True)
+                except TypeError:
+                    self.on_success()
+        elif entered in NORMAL_PASSWORDS:
+            self.destroy()
+            if self.on_success:
+                try:
+                    self.on_success(False)
+                except TypeError:
+                    self.on_success()
         else:
             self.error_label.configure(text="❌ Hatalı şifre! Tekrar deneyiniz.")
             self.pass_entry.delete(0, "end")
@@ -119,3 +141,7 @@ class FarmPasswordDialog(ctk.CTkToplevel):
         self.destroy()
         if self.on_cancel:
             self.on_cancel()
+
+
+# Geriye dönük uyumluluk için alias
+FarmPasswordDialog = AccessPasswordDialog

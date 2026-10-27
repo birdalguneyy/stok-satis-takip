@@ -220,6 +220,35 @@
     .nav-item.active span.icon {
       transform: translateY(-1px) scale(1.06);
     }
+
+    /* ══════════════════════════════════════════════════════════════════ */
+    /* 🔒 ROL & YETKİLENDİRME (PERSONEL: SADECE POS | YÖNETİCİ: TÜMÜ)    */
+    /* ══════════════════════════════════════════════════════════════════ */
+    body:not(.role-admin) .admin-only,
+    body.role-personnel .admin-only,
+    body:not(.role-admin) #nav-btn-stock,
+    body:not(.role-admin) #nav-btn-reports,
+    body:not(.role-admin) #nav-btn-ai,
+    body:not(.role-admin) #farm-badge,
+    body:not(.role-admin) #ai-header-badge,
+    body.role-personnel #nav-btn-stock,
+    body.role-personnel #nav-btn-reports,
+    body.role-personnel #nav-btn-ai,
+    body.role-personnel #farm-badge,
+    body.role-personnel #ai-header-badge {
+      display: none !important;
+    }
+
+    body.role-admin #nav-btn-stock,
+    body.role-admin #nav-btn-reports,
+    body.role-admin #nav-btn-ai {
+      display: flex !important;
+    }
+
+    body.role-admin #farm-badge,
+    body.role-admin #ai-header-badge {
+      display: inline-flex !important;
+    }
     .nav-item span.icon {
       font-size: 1.25rem;
       transition: transform 0.2s ease;
@@ -602,7 +631,7 @@
       </div>
 
       <h2 style="font-size:1.35rem; font-weight:800; margin:0 0 6px; letter-spacing:-0.3px; color:#ffffff;">Sistem Koruması</h2>
-      <p style="font-size:0.85rem; color:#94a3b8; margin:0 0 20px; line-height:1.4;">Yetkili Erişimi — Lütfen 4 Haneli PIN Kodunu Giriniz</p>
+      <p style="font-size:0.85rem; color:#94a3b8; margin:0 0 20px; line-height:1.4;" id="gate-lock-subtitle">Giriş PIN Kodunu Giriniz (Personel: 2805 | Yönetici: 0528)</p>
 
       <!-- PIN GÖSTERGE NOKTALARI -->
       <div id="gate-pin-dots" style="display:flex; justify-content:center; gap:16px; margin-bottom:24px;">
@@ -1285,13 +1314,13 @@
     </div>
   </div>
 
-  <!-- ═══ MODAL: ÇİFTLİK 2805 ŞİFRE DOĞRULAMA ═══ -->
+  <!-- ═══ MODAL: ÇİFTLİK & SAYFA ERİŞİMİ ŞİFRE DOĞRULAMA ═══ -->
   <div id="farm-pin-modal-overlay" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(15,23,42,0.92); backdrop-filter:blur(14px); z-index:9999; justify-content:center; align-items:center; padding:16px;">
     <div class="modal-card" style="max-width:360px; text-align:center;">
-      <div style="font-size:2.4rem; margin-bottom:8px;">🚜</div>
-      <h2 style="font-size:1.2rem; font-weight:800; margin-bottom:6px; color:var(--text);">Çiftlik Modülü Girişi</h2>
-      <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;">Lütfen 4 haneli erişim şifresini giriniz:</p>
-      <input type="password" id="farm-pin-input" placeholder="••••" maxlength="4" style="text-align:center; font-size:1.8rem; font-weight:800; letter-spacing:8px; padding:10px; width:160px; margin:0 auto 12px; display:block;">
+      <div style="font-size:2.4rem; margin-bottom:8px;" id="farm-pin-icon">🔐</div>
+      <h2 style="font-size:1.2rem; font-weight:800; margin-bottom:6px; color:var(--text);" id="farm-pin-title">Güvenlik Girişi</h2>
+      <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;" id="farm-pin-desc">Lütfen erişim şifresini giriniz:</p>
+      <input type="password" id="farm-pin-input" placeholder="••••" maxlength="16" style="text-align:center; font-size:1.6rem; font-weight:800; letter-spacing:4px; padding:10px; width:190px; margin:0 auto 12px; display:block;">
       <div id="farm-pin-error" style="color:var(--danger); font-size:0.8rem; min-height:20px; margin-bottom:12px;"></div>
       <div style="display:flex; gap:10px; justify-content:center;">
         <button class="btn btn-secondary" onclick="closeFarmPinModal()" style="width:100px;">İptal</button>
@@ -1597,15 +1626,16 @@
       <span>Stok & Satış</span>
     </h1>
     <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
-      <div id="farm-badge" class="status-badge" style="font-weight:700; background:#059669; color:#fff; cursor:pointer;" onclick="openFarmModal()">🚜 Çiftlik</div>
+      <div id="nav-lock-badge" class="status-badge" style="display:none; font-weight:700; cursor:pointer;" onclick="toggleNavLock()"></div>
+      <div id="farm-badge" class="status-badge admin-only" style="font-weight:700; background:#059669; color:#fff; cursor:pointer;" onclick="openFarmModal()">🚜 Çiftlik</div>
       <div id="p2p-status-badge" class="status-badge" style="font-weight:700;" onclick="openP2PModal()">🔴 PC Bağlı Değil</div>
 
       <div id="sync-status-badge" class="status-badge" style="font-weight:700; cursor:pointer;" onclick="openFirebaseSettingsModal()" title="Firebase Bağlantı Durumu ve Ayarları">🔥 ⏳ Firebase...</div>
-      <div id="user-profile-badge" class="status-badge" onclick="openAuthModal()">🏢 <span id="user-profile-name">Giriş / Profil</span></div>
+      <div id="user-profile-badge" class="status-badge" onclick="handleUserProfileClick()">🏢 <span id="user-profile-name">Giriş / Profil</span></div>
 
       <div id="pwa-install-badge" class="status-badge" style="display:none;" onclick="installPWA()">📲 Yükle</div>
       <div class="status-badge" onclick="cycleTheme()" id="theme-toggle-btn" title="Tema Değiştir">☀️ Açık</div>
-      <div class="status-badge" onclick="openAIKeyModal()">🔑 AI</div>
+      <div class="status-badge admin-only" id="ai-header-badge" onclick="openAIKeyModal()">🔑 AI</div>
       <div class="status-badge" onclick="lockAppNow()" id="gate-lock-btn" title="Uygulamayı Kilitle" style="cursor:pointer; background:rgba(239,68,68,0.12); color:#ef4444; border-color:rgba(239,68,68,0.25); font-weight:700;">🔒 Kilitle</div>
     </div>
   </header>
@@ -2179,19 +2209,19 @@
   </main>
 
   <nav class="bottom-nav">
-    <button class="nav-item active" onclick="switchTab('pos', this)">
+    <button class="nav-item active" id="nav-btn-pos" onclick="switchTab('pos', this)">
       <span class="icon">📱</span>
       <span>Hızlı Satış</span>
     </button>
-    <button class="nav-item" onclick="switchTab('stock', this)">
+    <button class="nav-item admin-only" id="nav-btn-stock" onclick="switchTab('stock', this)">
       <span class="icon">📦</span>
       <span>Stok Kataloğu</span>
     </button>
-    <button class="nav-item" onclick="switchTab('reports', this)">
+    <button class="nav-item admin-only" id="nav-btn-reports" onclick="switchTab('reports', this)">
       <span class="icon">📊</span>
       <span>Satış Raporları</span>
     </button>
-    <button class="nav-item" onclick="switchTab('ai', this)">
+    <button class="nav-item admin-only" id="nav-btn-ai" onclick="switchTab('ai', this)">
       <span class="icon">🤖</span>
       <span>AI Ambalaj Kayıt</span>
     </button>
@@ -2289,7 +2319,103 @@
     document.addEventListener('click', initAudio, { once: true });
     document.addEventListener('touchstart', initAudio, { once: true });
 
+    function setWebRole(role) {
+      const isMaster = (role === 'admin');
+      sessionStorage.setItem('user_role', isMaster ? 'admin' : 'personnel');
+
+      const lockBadge = document.getElementById('nav-lock-badge');
+      const profileName = document.getElementById('user-profile-name');
+
+      if (isMaster) {
+        document.body.classList.remove('role-personnel');
+        document.body.classList.add('role-admin');
+        sessionStorage.setItem('farm_unlocked', 'true');
+
+        if (lockBadge) {
+          lockBadge.style.display = 'inline-flex';
+          lockBadge.style.background = '#d97706';
+          lockBadge.innerText = '🔒 Personel Moduna Geç';
+          lockBadge.title = 'Personel moduna geç ve yönetici kısımlarını gizle';
+        }
+
+        if (profileName) {
+          const cached = localStorage.getItem('stok_user_info');
+          try {
+            const u = cached ? JSON.parse(cached) : null;
+            profileName.innerText = '🏢 ' + (u?.company_name || u?.full_name || 'Yönetici');
+          } catch (e) {
+            profileName.innerText = '🏢 Yönetici';
+          }
+        }
+      } else {
+        document.body.classList.remove('role-admin');
+        document.body.classList.add('role-personnel');
+        sessionStorage.removeItem('farm_unlocked');
+
+        if (lockBadge) {
+          lockBadge.style.display = 'inline-flex';
+          lockBadge.style.background = '#2563EB';
+          lockBadge.innerText = '👑 Yönetici Girişi Yap';
+          lockBadge.title = 'Yönetici moduna geçmek için şifre (0528) giriniz';
+        }
+
+        if (profileName) {
+          profileName.innerText = '👤 Personel';
+        }
+
+        executeSwitchTab('pos');
+      }
+    }
+
+    function toggleNavLock() {
+      const curRole = sessionStorage.getItem('user_role') || 'personnel';
+      if (curRole === 'admin') {
+        setWebRole('personnel');
+        showToast("🔒 Personel moduna geçildi. Yalnızca Satış (POS) ekranı aktiftir.");
+      } else {
+        requestAuthAction({
+          type: 'role_upgrade',
+          title: '👑 Yönetici Girişi',
+          desc: 'Tüm bölümleri açmak için Yönetici şifresini (0528) giriniz:'
+        });
+      }
+    }
+
+    function handleUserProfileClick() {
+      const curRole = sessionStorage.getItem('user_role') || 'personnel';
+      if (curRole !== 'admin') {
+        requestAuthAction({
+          type: 'auth_modal',
+          title: '🏢 Mağaza & Hesap Yönetimi',
+          desc: 'İşletme ayarlarına erişmek için Yönetici şifresini (0528) giriniz:'
+        });
+        return;
+      }
+      openAuthModal();
+    }
+
     function switchTab(tabId, btnEl) {
+      if (tabId === 'pos') {
+        executeSwitchTab(tabId, btnEl);
+        return;
+      }
+
+      const curRole = sessionStorage.getItem('user_role') || 'personnel';
+      if (curRole !== 'admin') {
+        requestAuthAction({
+          type: 'tab',
+          tabId: tabId,
+          btnEl: btnEl,
+          title: '👑 Yönetici Girişi',
+          desc: 'Bu sekmeye erişmek için Yönetici şifresini (0528) giriniz:'
+        });
+        return;
+      }
+
+      executeSwitchTab(tabId, btnEl);
+    }
+
+    function executeSwitchTab(tabId, btnEl) {
       try {
         stopMobileBarcodeScanner();
       } catch(e) {}
@@ -6744,9 +6870,14 @@
 
       const badge = document.getElementById('user-profile-badge');
       const nameSpan = document.getElementById('user-profile-name');
+      const curRole = sessionStorage.getItem('user_role') || 'personnel';
       if (badge && nameSpan) {
-        const prefix = isOffline ? '🌐 ' : '🏢 ';
-        nameSpan.innerText = prefix + (user.company_name || user.full_name);
+        if (curRole === 'personnel') {
+          nameSpan.innerText = '👤 Personel';
+        } else {
+          const prefix = isOffline ? '🌐 ' : '🏢 ';
+          nameSpan.innerText = prefix + (user.company_name || user.full_name || 'Yönetici');
+        }
         badge.style.display = 'block';
       }
       if (user) {
@@ -6941,6 +7072,8 @@
 
     let _appInitialized = false;
     function initAppAfterGateUnlock() {
+      const savedRole = sessionStorage.getItem('user_role') || 'personnel';
+      setWebRole(savedRole);
       if (_appInitialized) return;
       _appInitialized = true;
       initIndexedDB();
@@ -6959,6 +7092,8 @@
 
     function checkGateLock() {
       const isUnlocked = sessionStorage.getItem('gate_unlocked') === 'true';
+      const savedRole = sessionStorage.getItem('user_role') || 'personnel';
+      setWebRole(savedRole);
       if (isUnlocked) {
         hideGateLockModal();
         initAppAfterGateUnlock();
@@ -6990,6 +7125,10 @@
 
     function lockAppNow() {
       sessionStorage.removeItem('gate_unlocked');
+      sessionStorage.removeItem('user_role');
+      sessionStorage.removeItem('farm_unlocked');
+      sessionStorage.removeItem('stok_gate_token');
+      setWebRole('personnel');
       showGateLockModal();
       showToast("🔒 Sistem kilitlendi.");
     }
@@ -7077,13 +7216,18 @@
         const json = await res.json();
         if (res.ok && json.ok) {
           sessionStorage.setItem('gate_unlocked', 'true');
-          sessionStorage.setItem('farm_unlocked', 'true');
           if (json.token) {
             sessionStorage.setItem('stok_gate_token', json.token);
           }
+          if (json.is_master) {
+            setWebRole('admin');
+            showToast("👑 Yönetici Girişi Başarılı. Tüm bölümler tam yetkiyle açıldı.");
+          } else {
+            setWebRole('personnel');
+            showToast("👤 Personel Girişi Başarılı. Yalnızca Satış (POS) ekranı aktiftir.");
+          }
           hideGateLockModal();
           initAppAfterGateUnlock();
-          showToast("🔓 Yetkili girişi başarılı. Hoş geldiniz!");
         } else {
           showGateError(json.message || "❌ Hatalı PIN kodu!");
         }
@@ -7186,34 +7330,88 @@
       }
     }
 
+    let pendingAuthAction = null;
+
+    function requestAuthAction(action) {
+      pendingAuthAction = action;
+      const titleEl = document.getElementById('farm-pin-title');
+      const descEl = document.getElementById('farm-pin-desc');
+      const inputEl = document.getElementById('farm-pin-input');
+      const errEl = document.getElementById('farm-pin-error');
+      const iconEl = document.getElementById('farm-pin-icon');
+
+      if (iconEl) iconEl.innerText = action.type === 'farm' ? '🚜' : '🔐';
+      if (titleEl) titleEl.innerText = action.title || 'Güvenlik Girişi';
+      if (descEl) descEl.innerText = action.desc || 'Lütfen erişim şifresini giriniz:';
+      if (errEl) errEl.innerText = '';
+      if (inputEl) inputEl.value = '';
+
+      document.getElementById('farm-pin-modal-overlay').style.display = 'flex';
+      setTimeout(() => {
+        if (inputEl) inputEl.focus();
+      }, 100);
+    }
+
     function openFarmModal() {
-      if (sessionStorage.getItem('farm_unlocked') === 'true') {
-        document.getElementById('farm-modal-overlay').style.display = 'flex';
-        initFarmData();
-      } else {
-        document.getElementById('farm-pin-input').value = '';
-        document.getElementById('farm-pin-error').innerText = '';
-        document.getElementById('farm-pin-modal-overlay').style.display = 'flex';
-        setTimeout(() => document.getElementById('farm-pin-input').focus(), 100);
+      const curRole = sessionStorage.getItem('user_role') || 'personnel';
+      if (curRole !== 'admin') {
+        requestAuthAction({
+          type: 'farm',
+          title: '🚜 Çiftlik Modülü Girişi',
+          desc: 'Çiftlik modülüne erişmek için Yönetici şifresini (0528) giriniz:'
+        });
+        return;
       }
+      document.getElementById('farm-modal-overlay').style.display = 'flex';
+      initFarmData();
     }
 
     function closeFarmPinModal() {
+      pendingAuthAction = null;
       document.getElementById('farm-pin-modal-overlay').style.display = 'none';
     }
 
     function verifyFarmPin() {
       const pin = document.getElementById('farm-pin-input').value.trim();
-      if (pin === '2805') {
-        sessionStorage.setItem('farm_unlocked', 'true');
+      const masterPins = ['0528', '05282024'];
+      const normalPins = ['2805', '28052024'];
+
+      if (masterPins.includes(pin)) {
+        setWebRole('admin');
         closeFarmPinModal();
+        showToast("👑 Yönetici Modu Açıldı. Tüm bölümlere erişim sağlandı.");
+        executePendingAuthAction();
+      } else if (normalPins.includes(pin)) {
+        // 2805 personel şifresidir. Yönetici yetkisi gerektiren yerleri ASLA açmaz!
+        const errEl = document.getElementById('farm-pin-error');
+        if (errEl) errEl.innerText = '⚠️ 2805 Personel şifresidir. Yönetici yetkisi için 0528 giriniz.';
+        const inp = document.getElementById('farm-pin-input');
+        if (inp) {
+          inp.value = '';
+          inp.focus();
+        }
+      } else {
+        const errEl = document.getElementById('farm-pin-error');
+        if (errEl) errEl.innerText = '❌ Hatalı şifre! Tekrar deneyiniz.';
+        const inp = document.getElementById('farm-pin-input');
+        if (inp) {
+          inp.value = '';
+          inp.focus();
+        }
+      }
+    }
+
+    function executePendingAuthAction() {
+      if (!pendingAuthAction) return;
+      const action = pendingAuthAction;
+      pendingAuthAction = null;
+      if (action.type === 'tab') {
+        executeSwitchTab(action.tabId, action.btnEl);
+      } else if (action.type === 'farm') {
         document.getElementById('farm-modal-overlay').style.display = 'flex';
         initFarmData();
-        showToast("🚜 Çiftlik Modülüne giriş yapıldı.");
-      } else {
-        document.getElementById('farm-pin-error').innerText = '❌ Hatalı şifre! Tekrar deneyiniz.';
-        document.getElementById('farm-pin-input').value = '';
-        document.getElementById('farm-pin-input').focus();
+      } else if (action.type === 'auth_modal') {
+        openAuthModal();
       }
     }
 

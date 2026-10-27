@@ -34,6 +34,7 @@ STATIC_DIR.mkdir(parents=True, exist_ok=True)
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), template_folder=str(STATIC_DIR))
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 cloud_db = CloudDatabase()
 ai_service = AIPackageService()
 forecast_service = ForecastService(cloud_db)
@@ -97,6 +98,9 @@ def record_successful_pin_attempt(ip: str):
     blocked_ips.pop(ip, None)
 
 
+VALID_GATE_PINS = {str(GATE_PIN).strip(), "2805", "28052024", "0528", "05282024"}
+
+
 def is_gate_unlocked_request() -> bool:
     token = (
         request.headers.get("X-Gate-Token", "").strip()
@@ -104,7 +108,7 @@ def is_gate_unlocked_request() -> bool:
         or request.args.get("gate_token", "").strip()
     )
     pin_hdr = request.headers.get("X-Gate-PIN", "").strip()
-    return (token == EXPECTED_GATE_TOKEN) or (pin_hdr == str(GATE_PIN).strip())
+    return (token == EXPECTED_GATE_TOKEN) or (pin_hdr in VALID_GATE_PINS)
 
 
 @app.before_request
@@ -125,6 +129,7 @@ def gatekeeper_check():
         or path.startswith("/static/")
         or path in ("/favicon.ico", "/manifest.json", "/sw.js", "/robots.txt", "/health", "/ping")
         or path.startswith("/api/gate/")
+        or path == "/api/farm/auth-check"
     ):
         return None
 
@@ -133,7 +138,7 @@ def gatekeeper_check():
         return jsonify({
             "ok": False,
             "gate_locked": True,
-            "message": "🔒 Yetkisiz erişim. Lütfen önce 2805 PIN kodunu giriniz."
+            "message": "🔒 Yetkisiz erişim. Lütfen güvenlik PIN kodunu giriniz."
         }), 401
 
 
@@ -143,8 +148,15 @@ def add_security_headers(response):
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    if request.path.startswith("/api/"):
-        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+    if (
+        request.path == "/"
+        or request.path.endswith(".html")
+        or request.path in ("/sw.js", "/manifest.json")
+        or request.path.startswith("/api/")
+    ):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0, post-check=0, pre-check=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
     return response
 
 
@@ -168,10 +180,15 @@ def gate_verify():
 
     data = request.json or {}
     pin = str(data.get("pin", "")).strip()
-    if pin == str(GATE_PIN).strip():
+    if pin in VALID_GATE_PINS:
         record_successful_pin_attempt(client_ip)
         token = EXPECTED_GATE_TOKEN
-        resp = jsonify({"ok": True, "token": token, "message": "Giriş başarılı!"})
+        resp = jsonify({
+            "ok": True,
+            "token": token,
+            "is_master": pin in ("0528", "05282024"),
+            "message": "Giriş başarılı!"
+        })
         resp.set_cookie(
             "stok_gate_token",
             token,
@@ -1206,9 +1223,19 @@ def ai_scan_package():
 def farm_auth_check():
     data = request.json or {}
     pin = str(data.get("password") or data.get("pin") or "").strip()
-    if pin == "2805":
-        return jsonify({"ok": True, "message": "Yetkilendirme başarılı!"})
-    return jsonify({"ok": False, "message": "Hatalı şifre!"}), 401
+    if pin in ("0528", "05282024"):
+        return jsonify({
+            "ok": True,
+            "is_master": True,
+            "message": "👑 Yönetici yetkilendirmesi başarılı!"
+        })
+    elif pin in ("2805", "28052024"):
+        return jsonify({
+            "ok": True,
+            "is_master": False,
+            "message": "Personel doğrulaması (Kısıtlı yetki, Çiftlik/Yönetici yetkisi yoktur)."
+        })
+    return jsonify({"ok": False, "is_master": False, "message": "Hatalı şifre!"}), 401
 
 
 @app.route("/api/farm/customers", methods=["GET"])

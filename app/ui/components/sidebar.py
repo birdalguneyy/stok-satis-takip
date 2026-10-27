@@ -24,7 +24,7 @@ class Sidebar(ctk.CTkFrame):
         self.pack_propagate(False)
         self.on_navigate = on_navigate
         self._buttons: dict[str, ctk.CTkButton] = {}
-        self._active = "dashboard"
+        self._active = "sales"
 
         title = ctk.CTkLabel(
             self,
@@ -32,14 +32,23 @@ class Sidebar(ctk.CTkFrame):
             font=FONT_HEADING,
             text_color=ACCENT,
         )
-        title.pack(padx=20, pady=(24, 32), anchor="w")
+        title.pack(padx=20, pady=(20, 4), anchor="w")
 
-        nav_frame = ctk.CTkFrame(self, fg_color="transparent")
-        nav_frame.pack(fill="x", padx=12)
+        self.role_badge = ctk.CTkLabel(
+            self,
+            text="👤 Personel Modu",
+            font=(FONT_SMALL[0], 10, "bold"),
+            text_color="#F59E0B",
+            anchor="w",
+        )
+        self.role_badge.pack(padx=20, pady=(0, 16), anchor="w")
+
+        self.nav_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.nav_frame.pack(fill="x", padx=12)
 
         for key, label in NAV_ITEMS:
             btn = ctk.CTkButton(
-                nav_frame,
+                self.nav_frame,
                 text=label,
                 font=FONT_BODY,
                 anchor="w",
@@ -87,10 +96,9 @@ class Sidebar(ctk.CTkFrame):
         except Exception:
             pass
 
-        self.set_active("dashboard")
+        self.set_active("sales")
 
     def _select(self, key: str) -> None:
-        self.set_active(key)
         self.on_navigate(key)
 
     def set_active(self, key: str) -> None:
@@ -104,3 +112,24 @@ class Sidebar(ctk.CTkFrame):
                     hover_color=("gray85", "gray30"),
                     text_color=("gray20", "gray90"),
                 )
+
+    def set_role(self, role: str) -> None:
+        """Kullanıcı rolüne göre menü öğelerini gösterir veya gizler.
+        'personnel' (2805): Sadece 'sales' (POS) görünür, diğer tüm yerler gizlenir.
+        'admin' (0528): Tüm menü öğeleri görünür.
+        """
+        for btn in self._buttons.values():
+            btn.pack_forget()
+
+        for key, _label in NAV_ITEMS:
+            if role == "personnel":
+                if key == "sales":
+                    self._buttons[key].pack(fill="x", pady=2)
+            else:
+                self._buttons[key].pack(fill="x", pady=2)
+
+        if hasattr(self, "role_badge"):
+            if role == "personnel":
+                self.role_badge.configure(text="👤 Personel Modu (Kısıtlı)", text_color="#F59E0B")
+            else:
+                self.role_badge.configure(text="👑 Yönetici Modu (Tam Yetki)", text_color="#10B981")

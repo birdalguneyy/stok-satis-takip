@@ -4043,3 +4043,399 @@ class CloudDatabase:
 
         return True, "Yem alım kaydı silindi."
 
+    # =========================================================================
+    # GALLUS MAMA WEB SİPARİŞLERİ, BÜLTEN MAİLLERİ VE PUAN ONAY SİSTEMİ
+    # =========================================================================
+    def _ensure_web_ecommerce_tables(self) -> None:
+        try:
+            with self.db.get_connection() as conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS web_orders (
+                        id TEXT PRIMARY KEY,
+                        order_date TEXT,
+                        customer_name TEXT,
+                        customer_phone TEXT,
+                        customer_email TEXT,
+                        customer_city TEXT,
+                        customer_address TEXT,
+                        customer_note TEXT,
+                        payment_method TEXT,
+                        total_str TEXT,
+                        total_numeric REAL DEFAULT 0,
+                        earned_points INTEGER DEFAULT 0,
+                        used_points INTEGER DEFAULT 0,
+                        points_approved INTEGER DEFAULT 0,
+                        status TEXT DEFAULT 'Onay Bekliyor',
+                        items_json TEXT,
+                        raw_json TEXT,
+                        updated_at TEXT
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS newsletter_subscribers (
+                        email TEXT PRIMARY KEY,
+                        name TEXT,
+                        phone TEXT,
+                        source TEXT,
+                        subscribed_at TEXT
+                    )
+                    """
+                )
+        except Exception as e:
+            logger.debug("Web ecommerce tables init warning: %s", e)
+
+    def sync_and_get_web_orders_and_subscribers(self) -> Dict[str, Any]:
+        """Web sitesinden (Firestore + gallusmama.com + yerel database.json) gelen siparişleri ve bülten/üye maillerini senkronize eder."""
+        import json as _json
+        import urllib.request
+        from pathlib import Path
+
+        self._ensure_web_ecommerce_tables()
+
+        orders_map: Dict[str, Dict[str, Any]] = {}
+        emails_map: Dict[str, Dict[str, Any]] = {}
+        members_map: Dict[str, Dict[str, Any]] = {}
+
+        def _register_email(email_str: str, name: str = "", phone: str = "", source: str = "Web Bülten", date_str: str = "") -> None:
+            clean = str(email_str or "").strip().lower()
+            if not clean or "@" not in clean:
+                return
+            prev = emails_map.get(clean, {})
+            emails_map[clean] = {
+                "email": clean,
+                "name": name or prev.get("name", ""),
+                "phone": phone or prev.get("phone", ""),
+                "source": source if not prev.get("source") else prev.get("source"),
+                "date": date_str or prev.get("date", "")
+            }
+
+        def _register_order(ord_obj: Dict[str, Any]) -> None:
+            if not isinstance(ord_obj, dict):
+                return
+            oid = str(ord_obj.get("id") or "").strip()
+            if not oid:
+                return
+            cust = ord_obj.get("customer") if isinstance(ord_obj.get("customer"), dict) else {}
+            c_email = str(cust.get("email") or ord_obj.get("email") or "").strip().lower()
+            c_name = str(cust.get("fullname") or ord_obj.get("customer_name") or "").strip()
+            c_phone = str(cust.get("phone") or ord_obj.get("customer_phone") or "").strip()
+            c_city = str(cust.get("city") or cust.get("district") or ord_obj.get("customer_city") or "").strip()
+            c_addr = str(cust.get("address") or ord_obj.get("customer_address") or "").strip()
+            c_note = str(cust.get("note") or ord_obj.get("customer_note") or "").strip()
+
+            t_num = ord_obj.get("totalNumeric")
+            if t_num is None:
+                raw_t = str(ord_obj.get("total") or "0")
+                import re
+                s = re.sub(r"[^\d.,-]", "", raw_t).strip()
+                if "." in s and "," in s:
+                    s = s.replace(".", "").replace(",", ".")
+                elif "," in s:
+                    s = s.replace(",", ".")
+                try:
+                    t_num = float(s)
+                except Exception:
+                    t_num = 0.0
+            else:
+                try:
+                    t_num = float(t_num)
+                except Exception:
+                    t_num = 0.0
+
+            earned = ord_obj.get("earnedPoints")
+            if earned is None:
+                earned = int(round((t_num * 0.01) * 100))
+            else:
+                earned = int(earned)
+
+            prev = orders_map.get(oid, {})
+            is_approved = bool(
+                ord_obj.get("pointsApproved") is True
+                or ord_obj.get("status") in ["Onaylandı", "Tamamlandı"]
+                or prev.get("pointsApproved") is True
+                or prev.get("status") in ["Onaylandı", "Tamamlandı"]
+            )
+            status_str = "Onaylandı" if is_approved else str(ord_obj.get("status") or prev.get("status") or "Onay Bekliyor")
+
+            normalized = {
+                "id": oid,
+                "date": str(ord_obj.get("date") or prev.get("date") or ""),
+                "customer": {
+                    "fullname": c_name,
+                    "phone": c_phone,
+                    "email": c_email,
+                    "city": c_city,
+                    "address": c_addr,
+                    "note": c_note
+                },
+                "email": c_email,
+                "paymentMethod": str(ord_obj.get("paymentMethod") or prev.get("paymentMethod") or "Havale / EFT"),
+                "items": ord_obj.get("items") if isinstance(ord_obj.get("items"), list) else prev.get("items", []),
+                "total": str(ord_obj.get("total") or f"{t_num:,.2f} ₺"),
+                "totalNumeric": t_num,
+                "earnedPoints": earned,
+                "usedPoints": int(ord_obj.get("usedPoints") or prev.get("usedPoints") or 0),
+                "pointsApproved": is_approved,
+                "status": status_str
+            }
+            orders_map[oid] = normalized
+            if c_email and "@" in c_email:
+                _register_email(c_email, c_name, c_phone, "Sipariş Müşterisi", normalized["date"])
+
+        # 1. Load existing records from local SQLite first
+        try:
+            with self.db.get_connection() as conn:
+                for r in conn.execute("SELECT * FROM web_orders ORDER BY updated_at DESC, id DESC").fetchall():
+                    try:
+                        raw = _json.loads(r["raw_json"]) if r["raw_json"] else {}
+                    except Exception:
+                        raw = {}
+                    raw["id"] = r["id"]
+                    raw["pointsApproved"] = bool(r["points_approved"])
+                    raw["status"] = r["status"]
+                    _register_order(raw)
+                for r in conn.execute("SELECT * FROM newsletter_subscribers").fetchall():
+                    _register_email(r["email"], r["name"] or "", r["phone"] or "", r["source"] or "Web Bülten", r["subscribed_at"] or "")
+        except Exception as e:
+            logger.debug("SQLite web_orders read warning: %s", e)
+
+        # 2. Load from local gallus mama database.json if present on this machine
+        local_gallus_paths = [
+            Path(r"c:\Users\birdo\OneDrive\Masaüstü\gallus mama\data\database.json"),
+            Path(r"c:\Users\birdo\OneDrive\Masaüstü\gallus mama\gallus mama\data\database.json")
+        ]
+        for gp in local_gallus_paths:
+            if gp.exists():
+                try:
+                    gdata = _json.loads(gp.read_text(encoding="utf-8"))
+                    for o in gdata.get("orders", []):
+                        _register_order(o)
+                    for em in gdata.get("subscribers", []):
+                        _register_email(em, source="Web Bülten")
+                    for sd in gdata.get("subscriberDetails", []):
+                        if isinstance(sd, dict):
+                            _register_email(sd.get("email", ""), sd.get("name", ""), sd.get("phone", ""), sd.get("source", "Web Bülten"), sd.get("date", ""))
+                    for m in gdata.get("members", []):
+                        if isinstance(m, dict) and m.get("email"):
+                            em_clean = str(m.get("email")).strip().lower()
+                            members_map[em_clean] = m
+                            _register_email(em_clean, m.get("fullname", ""), m.get("phone", ""), "Site Üyesi", m.get("createdAt", ""))
+                except Exception:
+                    pass
+
+        # 3. Load from Firestore ('orders', 'newsletter_subscribers', 'web_members')
+        if self.firestore_db:
+            try:
+                for doc in self.firestore_db.collection("orders").stream():
+                    d = doc.to_dict() or {}
+                    d["id"] = d.get("id") or doc.id
+                    _register_order(d)
+            except Exception as e:
+                logger.debug("Firestore orders read warning: %s", e)
+            try:
+                for doc in self.firestore_db.collection("newsletter_subscribers").stream():
+                    d = doc.to_dict() or {}
+                    _register_email(d.get("email") or doc.id, d.get("name", ""), d.get("phone", ""), d.get("source", "Web Bülten"), str(d.get("date") or ""))
+            except Exception as e:
+                logger.debug("Firestore newsletter read warning: %s", e)
+            try:
+                for doc in self.firestore_db.collection("web_members").stream():
+                    d = doc.to_dict() or {}
+                    em = str(d.get("email") or doc.id).strip().lower()
+                    if em and "@" in em:
+                        members_map[em] = d
+                        _register_email(em, d.get("fullname", ""), d.get("phone", ""), "Site Üyesi", str(d.get("createdAt") or ""))
+            except Exception as e:
+                logger.debug("Firestore web_members read warning: %s", e)
+
+        # 4. Pull from live HTTP endpoints (localhost:3000 & gallusmama.com)
+        for endpoint in ["http://localhost:3000/api/sync/web-data", "https://gallusmama.com/api/sync/web-data"]:
+            try:
+                req = urllib.request.Request(endpoint, headers={"User-Agent": "StokSatisTakip/1.0"})
+                with urllib.request.urlopen(req, timeout=2.5) as resp:
+                    if resp.status == 200:
+                        payload = _json.loads(resp.read().decode("utf-8"))
+                        for o in payload.get("orders", []):
+                            _register_order(o)
+                        for em in payload.get("subscribers", []):
+                            _register_email(em, source="Web Bülten")
+                        for sd in payload.get("subscriberDetails", []):
+                            if isinstance(sd, dict):
+                                _register_email(sd.get("email", ""), sd.get("name", ""), sd.get("phone", ""), sd.get("source", "Web Bülten"), sd.get("date", ""))
+                        for m in payload.get("members", []):
+                            if isinstance(m, dict) and m.get("email"):
+                                em_clean = str(m.get("email")).strip().lower()
+                                members_map[em_clean] = m
+                                _register_email(em_clean, m.get("fullname", ""), m.get("phone", ""), "Site Üyesi", m.get("createdAt", ""))
+            except Exception:
+                pass
+
+        # 5. Persist merged orders & subscribers back to SQLite
+        try:
+            now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with self.db.get_connection() as conn:
+                for oid, o in orders_map.items():
+                    c = o.get("customer") or {}
+                    conn.execute(
+                        """
+                        INSERT INTO web_orders (
+                            id, order_date, customer_name, customer_phone, customer_email,
+                            customer_city, customer_address, customer_note, payment_method,
+                            total_str, total_numeric, earned_points, used_points,
+                            points_approved, status, items_json, raw_json, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(id) DO UPDATE SET
+                            customer_name = excluded.customer_name,
+                            customer_phone = excluded.customer_phone,
+                            customer_email = excluded.customer_email,
+                            customer_city = excluded.customer_city,
+                            customer_address = excluded.customer_address,
+                            customer_note = excluded.customer_note,
+                            payment_method = excluded.payment_method,
+                            total_str = excluded.total_str,
+                            total_numeric = excluded.total_numeric,
+                            earned_points = excluded.earned_points,
+                            used_points = excluded.used_points,
+                            points_approved = MAX(web_orders.points_approved, excluded.points_approved),
+                            status = CASE WHEN web_orders.points_approved = 1 OR excluded.points_approved = 1 THEN 'Onaylandı' ELSE excluded.status END,
+                            items_json = excluded.items_json,
+                            raw_json = excluded.raw_json,
+                            updated_at = excluded.updated_at
+                        """,
+                        (
+                            oid,
+                            o.get("date", ""),
+                            c.get("fullname", ""),
+                            c.get("phone", ""),
+                            c.get("email", ""),
+                            c.get("city", ""),
+                            c.get("address", ""),
+                            c.get("note", ""),
+                            o.get("paymentMethod", ""),
+                            o.get("total", ""),
+                            float(o.get("totalNumeric") or 0),
+                            int(o.get("earnedPoints") or 0),
+                            int(o.get("usedPoints") or 0),
+                            1 if o.get("pointsApproved") else 0,
+                            o.get("status", "Onay Bekliyor"),
+                            _json.dumps(o.get("items", []), ensure_ascii=False),
+                            _json.dumps(o, ensure_ascii=False),
+                            now_iso
+                        )
+                    )
+                for em, ed in emails_map.items():
+                    conn.execute(
+                        """
+                        INSERT INTO newsletter_subscribers (email, name, phone, source, subscribed_at)
+                        VALUES (?, ?, ?, ?, ?)
+                        ON CONFLICT(email) DO UPDATE SET
+                            name = CASE WHEN excluded.name != '' THEN excluded.name ELSE newsletter_subscribers.name END,
+                            phone = CASE WHEN excluded.phone != '' THEN excluded.phone ELSE newsletter_subscribers.phone END,
+                            source = excluded.source
+                        """,
+                        (em, ed.get("name", ""), ed.get("phone", ""), ed.get("source", "Web Bülten"), ed.get("date", now_iso))
+                    )
+        except Exception as e:
+            logger.debug("SQLite web_orders persist warning: %s", e)
+
+        sorted_orders = sorted(orders_map.values(), key=lambda x: str(x.get("date") or ""), reverse=True)
+        subscriber_details = list(emails_map.values())
+        all_emails = [x["email"] for x in subscriber_details]
+
+        return {
+            "orders": sorted_orders,
+            "subscribers": all_emails,
+            "subscriberDetails": subscriber_details,
+            "members": list(members_map.values())
+        }
+
+    def approve_web_order_points(self, order_id: str) -> tuple[bool, str]:
+        """Web siparişini ve müşterinin kazandığı (%1 * 100) puanı onaylar; müşterinin hesabında puanı aktif hale getirir."""
+        import json as _json
+        import urllib.request
+        from pathlib import Path
+
+        oid = str(order_id or "").strip()
+        if not oid:
+            return False, "Sipariş numarası gerekli."
+
+        self._ensure_web_ecommerce_tables()
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cust_email = ""
+        earned_pts = 0
+
+        # 1. Update SQLite
+        try:
+            with self.db.get_connection() as conn:
+                row = conn.execute("SELECT * FROM web_orders WHERE id = ?", (oid,)).fetchone()
+                if row:
+                    cust_email = str(row["customer_email"] or "").strip().lower()
+                    earned_pts = int(row["earned_points"] or 0)
+                    try:
+                        raw = _json.loads(row["raw_json"]) if row["raw_json"] else {}
+                    except Exception:
+                        raw = {}
+                    raw["pointsApproved"] = True
+                    raw["status"] = "Onaylandı"
+                    raw["approvedAt"] = now_str
+                    conn.execute(
+                        "UPDATE web_orders SET points_approved = 1, status = 'Onaylandı', raw_json = ?, updated_at = ? WHERE id = ?",
+                        (_json.dumps(raw, ensure_ascii=False), now_str, oid)
+                    )
+        except Exception as e:
+            logger.debug("SQLite approve_web_order_points warning: %s", e)
+
+        # 2. Update local gallus mama database.json if present
+        for gp in [
+            Path(r"c:\Users\birdo\OneDrive\Masaüstü\gallus mama\data\database.json"),
+            Path(r"c:\Users\birdo\OneDrive\Masaüstü\gallus mama\gallus mama\data\database.json")
+        ]:
+            if gp.exists():
+                try:
+                    gdata = _json.loads(gp.read_text(encoding="utf-8"))
+                    changed = False
+                    for o in gdata.get("orders", []):
+                        if o.get("id") == oid:
+                            o["pointsApproved"] = True
+                            o["status"] = "Onaylandı"
+                            o["approvedAt"] = now_str
+                            cust_email = cust_email or str((o.get("customer") or {}).get("email") or o.get("email") or "").strip().lower()
+                            earned_pts = earned_pts or int(o.get("earnedPoints") or 0)
+                            changed = True
+                    if changed:
+                        gp.write_text(_json.dumps(gdata, ensure_ascii=False, indent=2), encoding="utf-8")
+                except Exception:
+                    pass
+
+        # 3. Update Firestore ('orders' & 'web_members')
+        if self.firestore_db:
+            try:
+                self.firestore_db.collection("orders").document(oid).set({
+                    "pointsApproved": True,
+                    "status": "Onaylandı",
+                    "approvedAt": now_str
+                }, merge=True)
+            except Exception:
+                pass
+
+        # 4. Notify localhost:3000 and gallusmama.com APIs
+        for endpoint in ["http://localhost:3000/api/orders/approve", "https://gallusmama.com/api/orders/approve"]:
+            try:
+                req_body = _json.dumps({"orderId": oid, "status": "Onaylandı", "email": cust_email}).encode("utf-8")
+                req = urllib.request.Request(
+                    endpoint,
+                    data=req_body,
+                    headers={"Content-Type": "application/json", "User-Agent": "StokSatisTakip/1.0"},
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=3.0) as _:
+                    pass
+            except Exception:
+                pass
+
+        return True, f"Sipariş (#{oid}) onaylandı! Müşterinin +{earned_pts} Puanı hesabında aktifleşti."
+
+

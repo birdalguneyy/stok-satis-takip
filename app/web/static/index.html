@@ -241,6 +241,7 @@
       min-width: 0;
       padding: 5px 2px;
       transition: all 0.2s ease;
+      position: relative;
     }
 
     .nav-item * { pointer-events: none; }
@@ -261,11 +262,13 @@
     body:not(.role-admin) #nav-btn-stock,
     body:not(.role-admin) #nav-btn-reports,
     body:not(.role-admin) #nav-btn-ai,
+    body:not(.role-admin) #nav-btn-web-orders,
     body:not(.role-admin) #farm-badge,
     body:not(.role-admin) #ai-header-badge,
     body.role-personnel #nav-btn-stock,
     body.role-personnel #nav-btn-reports,
     body.role-personnel #nav-btn-ai,
+    body.role-personnel #nav-btn-web-orders,
     body.role-personnel #farm-badge,
     body.role-personnel #ai-header-badge {
       display: none !important;
@@ -273,7 +276,8 @@
 
     body.role-admin #nav-btn-stock,
     body.role-admin #nav-btn-reports,
-    body.role-admin #nav-btn-ai {
+    body.role-admin #nav-btn-ai,
+    body.role-admin #nav-btn-web-orders {
       display: flex !important;
     }
 
@@ -1659,7 +1663,6 @@
     </h1>
     <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
       <div id="nav-lock-badge" class="status-badge" style="display:none; font-weight:700; cursor:pointer;" onclick="toggleNavLock()"></div>
-      <div id="web-orders-badge" class="status-badge" style="font-weight:800; background:linear-gradient(135deg,#f59e0b,#d97706); color:#fff; cursor:pointer;" onclick="openWebOrdersAndMailsModal()">🌐 Web Sipariş & Mailler <span id="web-orders-pending-pill" style="display:none; background:#fff; color:#b45309; padding:1px 6px; border-radius:999px; font-size:0.7rem; margin-left:4px;">0</span></div>
       <div id="farm-badge" class="status-badge admin-only" style="font-weight:700; background:#059669; color:#fff; cursor:pointer;" onclick="openFarmModal()">🚜 Çiftlik</div>
       <div id="p2p-status-badge" class="status-badge" style="font-weight:700;" onclick="openP2PModal()">🔴 PC Bağlı Değil</div>
 
@@ -1704,14 +1707,9 @@
         </div>
 
         <!-- ONLINE SALES QUICK ENTRY BUTTON -->
-        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;">
-          <button type="button" class="btn" onclick="openOnlineSaleModal()" style="flex:1; min-width:210px; background:linear-gradient(135deg, #0284C7, #0369A1); color:#fff; display:flex; align-items:center; justify-content:center; gap:8px; font-weight:700; box-shadow:0 4px 14px rgba(2,132,199,0.35);">
-            🌐 İnternet Satışı Gir (Adet & Platform)
-          </button>
-          <button type="button" class="btn" onclick="openWebOrdersAndMailsModal()" style="flex:1; min-width:210px; background:linear-gradient(135deg, #F59E0B, #D97706); color:#fff; display:flex; align-items:center; justify-content:center; gap:8px; font-weight:800; box-shadow:0 4px 14px rgba(245,158,11,0.35);">
-            📦 Web Siparişleri, Puan Onayı & Bülten Mailleri
-          </button>
-        </div>
+        <button type="button" class="btn" onclick="openOnlineSaleModal()" style="width:100%; margin-bottom:14px; background:linear-gradient(135deg, #0284C7, #0369A1); color:#fff; display:flex; align-items:center; justify-content:center; gap:8px; font-weight:700; box-shadow:0 4px 14px rgba(2,132,199,0.35);">
+          🌐 İnternet Satışı Gir (Adet & Platform)
+        </button>
 
         <div class="form-group" style="position:relative;">
           <label>Manuel Barkod / Ürün Adı Ara (Canlı Öneri)</label>
@@ -2282,6 +2280,60 @@
       </div>
     </div>
 
+    <!-- TAB 5: WEB SİPARİŞLERİ & BÜLTEN MAİLLERİ SEKMESİ -->
+    <div id="tab-web-orders" class="tab-content">
+      <div class="card" style="margin-bottom: 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+          <div>
+            <h2 style="margin: 0; display: flex; align-items: center; gap: 8px;">
+              <span>🌐</span> Web Siparişleri, Puan Onayı & Bülten Mailleri
+            </h2>
+            <p style="font-size: 0.85rem; color: var(--text-muted); margin: 4px 0 0 0;">
+              Gallus Mama web sitesinden gelen siparişleri görüntüleyin, müşterilerin kazandığı sadakat puanlarını onaylayın ve abone maillerini toplu kopyalayın.
+            </p>
+          </div>
+          <button class="btn" onclick="loadWebOrdersAndSubscribers(true)" style="width: auto; padding: 10px 18px; display: inline-flex; align-items: center; gap: 6px; font-weight: 700;">
+            🔄 Yenile
+          </button>
+        </div>
+      </div>
+
+      <!-- SECTION 1: NEWSLETTER & SUBSCRIBER EMAILS -->
+      <div class="card" style="margin-bottom: 16px; border: 2px solid rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.05);">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px;">
+          <div>
+            <h3 style="margin: 0; font-size: 1.05rem; font-weight: 800; color: #b45309; display: flex; align-items: center; gap: 6px;">
+              <span>📧</span> Bültene Abone Olan & Üye E-Postaları (<span id="web-emails-count">0</span> Adet)
+            </h3>
+            <p style="margin: 3px 0 0 0; font-size: 0.8rem; color: var(--text-muted);">
+              Web sitesinden bültene abone olan, hızlı üye olan ve sipariş bırakan tüm müşterilerin e-posta havuzu.
+            </p>
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button class="btn" onclick="copyAllWebSubscriberEmails(', ')" style="width: auto; padding: 10px 16px; background: #d97706; color: #fff; font-weight: 800; border-radius: 12px;">
+              📋 Tüm Mailleri Toplu Kopyala (Virgüllü)
+            </button>
+            <button class="btn btn-secondary" onclick="copyAllWebSubscriberEmails('\n')" style="width: auto; padding: 10px 14px; font-weight: 700; border-radius: 12px;">
+              📄 Alt Alta Kopyala
+            </button>
+          </div>
+        </div>
+        <textarea id="web-emails-bulk-textarea" readonly rows="3" style="width: 100%; border-radius: 10px; border: 1px solid var(--border); padding: 10px; font-family: monospace; font-size: 0.82rem; background: var(--bg); color: var(--text);" placeholder="Henüz kayıtlı e-posta bulunmuyor..."></textarea>
+      </div>
+
+      <!-- SECTION 2: INCOMING WEB ORDERS -->
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+          <h3 style="margin: 0; font-size: 1.1rem; font-weight: 800; display: flex; align-items: center; gap: 8px;">
+            <span>📦</span> Gelen Web Siparişleri & Sadakat Puanı Onayı (<span id="web-orders-count">0</span> Sipariş)
+          </h3>
+        </div>
+        <div id="web-orders-list-container" style="display: flex; flex-direction: column; gap: 12px;">
+          <div style="text-align: center; padding: 24px; color: var(--text-muted);">Yükleniyor...</div>
+        </div>
+      </div>
+    </div>
+
   </main>
 
   <nav class="bottom-nav">
@@ -2300,6 +2352,11 @@
     <button class="nav-item admin-only" id="nav-btn-ai" onclick="switchTab('ai', this)">
       <span class="icon">🤖</span>
       <span>AI Ambalaj Kayıt</span>
+    </button>
+    <button class="nav-item admin-only" id="nav-btn-web-orders" onclick="switchTab('web-orders', this)">
+      <span class="icon">🌐</span>
+      <span>Web Siparişleri</span>
+      <span id="nav-web-orders-pending-pill" style="display:none; background:#ef4444; color:#fff; font-size:0.65rem; padding:1px 5px; border-radius:999px; position:absolute; top:2px; right:6px; font-weight:800;">0</span>
     </button>
   </nav>
 
@@ -2525,6 +2582,9 @@
         if (tabId === 'reports') {
           setDatePreset('today', null, false);
           switchReportsSubTab(currentReportsSubTab || 'sales-list');
+        }
+        if (tabId === 'web-orders') {
+          loadWebOrdersAndSubscribers(false);
         }
       } catch(err) {
         console.error('Error during tab switch:', err);
@@ -5808,6 +5868,8 @@
                     loadProducts();
                   } else if (tabId === 'tab-reports') {
                     loadSalesHistory();
+                  } else if (tabId === 'tab-web-orders') {
+                    loadWebOrdersAndSubscribers(false);
                   }
                 }
                 checkSyncStatus();
@@ -8580,70 +8642,9 @@
     let cachedWebSubscribers = [];
     let cachedWebOrders = [];
 
-    function ensureWebOrdersModalExists() {
-      if (document.getElementById('web-orders-mails-modal')) return;
-      const modalEl = document.createElement('div');
-      modalEl.id = 'web-orders-mails-modal';
-      modalEl.style.cssText = 'display:none; position:fixed; inset:0; z-index:9999; background:rgba(15,23,42,0.75); backdrop-filter:blur(4px); overflow-y:auto; padding:16px;';
-      modalEl.innerHTML = `
-        <div style="max-width:1050px; margin:20px auto; background:var(--card-bg, #ffffff); color:var(--text, #0f172a); border-radius:20px; border:1px solid var(--border, #e2e8f0); box-shadow:0 24px 48px rgba(0,0,0,0.35); overflow:hidden;">
-          <div style="background:linear-gradient(135deg, #065f46, #047857); color:#fff; padding:18px 22px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-            <div>
-              <h2 style="margin:0; font-size:1.25rem; font-weight:800;">🌐 Gallus Mama — Gelen Web Siparişleri, Puan Onayı & Bülten Mailleri</h2>
-              <p style="margin:4px 0 0 0; font-size:0.8rem; opacity:0.9;">Web sitesinden gelen siparişleri görüntüleyin, müşterilerin kazandığı (%1 × 100 katı) puanları onaylayın ve abone maillerini toplu kopyalayın.</p>
-            </div>
-            <div style="display:flex; gap:8px;">
-              <button class="btn" onclick="loadWebOrdersAndSubscribers(true)" style="width:auto; padding:8px 14px; background:rgba(255,255,255,0.2); color:#fff; font-weight:700;">🔄 Yenile</button>
-              <button class="btn btn-danger" onclick="closeWebOrdersAndMailsModal()" style="width:auto; padding:8px 14px;">✕ Kapat</button>
-            </div>
-          </div>
-
-          <div style="padding:20px; display:flex; flex-direction:column; gap:20px;">
-            
-            <!-- SECTION 1: NEWSLETTER & MEMBER EMAILS BULK COPY -->
-            <div style="background:rgba(245,158,11,0.08); border:2px solid rgba(245,158,11,0.35); border-radius:16px; padding:16px;">
-              <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:10px;">
-                <div>
-                  <h3 style="margin:0; font-size:1.05rem; font-weight:800; color:#b45309;">📧 Bültene Abone Olan & Üye E-Postaları (<span id="web-emails-count">0</span> Adet)</h3>
-                  <p style="margin:2px 0 0 0; font-size:0.78rem; color:var(--text-muted);">Web sitesinden bültene kayıt olan, hızlı üye olan ve sipariş bırakan tüm müşteri e-postaları aşağıda toplanır.</p>
-                </div>
-                <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                  <button class="btn" onclick="copyAllWebSubscriberEmails(', ')" style="width:auto; padding:10px 16px; background:#d97706; color:#fff; font-weight:800; border-radius:12px;">
-                    📋 Tüm Mailleri Toplu Kopyala (Virgüllü)
-                  </button>
-                  <button class="btn btn-secondary" onclick="copyAllWebSubscriberEmails('\\n')" style="width:auto; padding:10px 14px; font-weight:700; border-radius:12px;">
-                    📄 Alt Alta Kopyala
-                  </button>
-                </div>
-              </div>
-              <textarea id="web-emails-bulk-textarea" readonly rows="3" style="width:100%; border-radius:10px; border:1px solid var(--border, #cbd5e1); padding:10px; font-family:monospace; font-size:0.82rem; background:var(--bg, #f8fafc); color:var(--text, #0f172a);" placeholder="Henüz kayıtlı e-posta bulunmuyor..."></textarea>
-            </div>
-
-            <!-- SECTION 2: INCOMING WEB ORDERS & POINT APPROVAL -->
-            <div>
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                <h3 style="margin:0; font-size:1.1rem; font-weight:800;">📦 Gelen Web Siparişleri & Sadakat Puanı Onayı (<span id="web-orders-count">0</span> Sipariş)</h3>
-              </div>
-              <div id="web-orders-list-container" style="display:flex; flex-direction:column; gap:12px;">
-                <div style="text-align:center; padding:24px; color:var(--text-muted);">Yükleniyor...</div>
-              </div>
-            </div>
-
-          </div>
-        </div>
-      `;
-      document.body.appendChild(modalEl);
-    }
-
     function openWebOrdersAndMailsModal() {
-      ensureWebOrdersModalExists();
-      document.getElementById('web-orders-mails-modal').style.display = 'block';
-      loadWebOrdersAndSubscribers(false);
-    }
-
-    function closeWebOrdersAndMailsModal() {
-      const m = document.getElementById('web-orders-mails-modal');
-      if (m) m.style.display = 'none';
+      const btn = document.getElementById('nav-btn-web-orders');
+      switchTab('web-orders', btn);
     }
 
     async function copyAllWebSubscriberEmails(sep = ', ') {
@@ -8668,7 +8669,8 @@
 
     async function approveWebOrderPoints(orderId) {
       try {
-        const res = await fetch('/api/web-orders/approve', {
+        const fetchFn = typeof fetchWithAuth === 'function' ? fetchWithAuth : fetch;
+        const res = await fetchFn('/api/web-orders/approve', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ orderId })
@@ -8687,7 +8689,8 @@
 
     async function loadWebOrdersAndSubscribers(showRefreshToast = false) {
       try {
-        const res = await fetch('/api/web-orders');
+        const fetchFn = typeof fetchWithAuth === 'function' ? fetchWithAuth : fetch;
+        const res = await fetchFn('/api/web-orders');
         const data = await res.json();
         if (!res.ok || !data.success) return;
 
@@ -8695,13 +8698,13 @@
         cachedWebOrders = data.orders || [];
 
         const pendingCount = cachedWebOrders.filter(o => !o.pointsApproved && o.status !== 'Onaylandı').length;
-        const pill = document.getElementById('web-orders-pending-pill');
-        if (pill) {
+        const navPill = document.getElementById('nav-web-orders-pending-pill');
+        if (navPill) {
           if (pendingCount > 0) {
-            pill.style.display = 'inline-block';
-            pill.innerText = `${pendingCount} Onay Bekliyor`;
+            navPill.style.display = 'inline-block';
+            navPill.innerText = pendingCount;
           } else {
-            pill.style.display = 'none';
+            navPill.style.display = 'none';
           }
         }
 

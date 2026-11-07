@@ -9,6 +9,7 @@ NAV_ITEMS = [
     ("products", "Stok Yönetimi"),
     ("sales", "Satış (POS)"),
     ("reports", "Raporlar & AI"),
+    ("web_orders", "Web Siparişleri"),
 ]
 
 

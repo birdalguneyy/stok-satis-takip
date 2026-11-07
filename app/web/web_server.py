@@ -1531,11 +1531,10 @@ def _background_sync_loop():
 
 
 @app.route("/api/web-orders", methods=["GET"])
-@login_required
 def api_get_web_orders():
     """Gallus Mama web sitesinden gelen siparişleri, puan durumlarını ve bülten maillerini getirir."""
     try:
-        data = db.sync_and_get_web_orders_and_subscribers()
+        data = cloud_db.sync_and_get_web_orders_and_subscribers()
         return jsonify({
             "success": True,
             "orders": data.get("orders", []),
@@ -1549,13 +1548,12 @@ def api_get_web_orders():
 
 
 @app.route("/api/web-orders/approve", methods=["POST"])
-@login_required
 def api_approve_web_order():
     """Web siparişini onaylar ve müşterinin (%1 * 100) puanını hesabında aktif hale getirir."""
     try:
         body = request.get_json(silent=True) or {}
         order_id = str(body.get("orderId") or body.get("id") or "").strip()
-        ok, msg = db.approve_web_order_points(order_id)
+        ok, msg = cloud_db.approve_web_order_points(order_id)
         if ok:
             return jsonify({"success": True, "message": msg})
         return jsonify({"success": False, "error": msg}), 400
@@ -1565,11 +1563,10 @@ def api_approve_web_order():
 
 
 @app.route("/api/newsletter-subscribers", methods=["GET"])
-@login_required
 def api_get_newsletter_subscribers():
     """Bültene abone olan ve üye olan tüm e-postaları toplu kopyalama için döndürür."""
     try:
-        data = db.sync_and_get_web_orders_and_subscribers()
+        data = cloud_db.sync_and_get_web_orders_and_subscribers()
         return jsonify({
             "success": True,
             "subscribers": data.get("subscribers", []),

@@ -14,6 +14,7 @@ from app.ui.views.history_view import HistoryView
 from app.ui.views.products_view import ProductsView
 from app.ui.views.reports_view import ReportsView
 from app.ui.views.sales_view import SalesView
+from app.ui.views.web_orders_view import WebOrdersView
 
 
 class App(ctk.CTk):
@@ -117,21 +118,7 @@ class App(ctk.CTk):
             corner_radius=12,
             command=self._open_local_web_app,
         )
-        self.web_btn.pack(side="left", padx=(0, 6))
-
-        # 📦 Gallus Mama Gelen Web Siparişleri, Puan Onayı & Bülten Mailleri Butonu
-        self.web_orders_btn = ctk.CTkButton(
-            self.top_actions_frame,
-            text="📦 Web Sipariş & Mailler",
-            font=("Segoe UI", 11, "bold"),
-            fg_color="#D97706",
-            hover_color="#B45309",
-            height=28,
-            width=155,
-            corner_radius=12,
-            command=self._open_web_orders_and_mails_dialog,
-        )
-        self.web_orders_btn.pack(side="left", padx=(0, 8))
+        self.web_btn.pack(side="left", padx=(0, 8))
 
         self._is_syncing_cloud = False
 
@@ -405,6 +392,11 @@ class App(ctk.CTk):
             on_back_to_shop=lambda: self.show_view("sales"),
         )
 
+        self.views["web_orders"] = WebOrdersView(
+            self.content,
+            on_toast=self.show_toast,
+        )
+
         for view in self.views.values():
             view.grid(row=0, column=0, sticky="nsew")
 
@@ -455,173 +447,4 @@ class App(ctk.CTk):
         products = self.views.get("products")
         if products and hasattr(products, "refresh"):
             products.refresh()
-
-    def _open_web_orders_and_mails_dialog(self) -> None:
-        """Gallus Mama web sitesinden gelen siparişleri, puan onaylarını ve bülten maillerini masaüstü penceresinde gösterir."""
-        from app.database.cloud_db import CloudDatabase
-
-        win = ctk.CTkToplevel(self)
-        win.title("Gallus Mama — Gelen Web Siparişleri, Puan Onayı & Bülten Mailleri")
-        win.geometry("980x700")
-        win.transient(self)
-        win.lift()
-        win.focus_force()
-
-        top_bar = ctk.CTkFrame(win, fg_color="#065F46", corner_radius=0, height=58)
-        top_bar.pack(fill="x", side="top")
-        ctk.CTkLabel(
-            top_bar,
-            text="🌐 Gallus Mama — Gelen Web Siparişleri, Sadakat Puanı Onayı (%1 × 100) & Bülten Mailleri",
-            font=("Segoe UI", 15, "bold"),
-            text_color="#FFFFFF",
-        ).pack(side="left", padx=16, pady=12)
-
-        mail_card = ctk.CTkFrame(win, corner_radius=12, border_width=1, border_color="#F59E0B")
-        mail_card.pack(fill="x", padx=16, pady=(12, 6))
-
-        mail_hdr = ctk.CTkFrame(mail_card, fg_color="transparent")
-        mail_hdr.pack(fill="x", padx=12, pady=(10, 4))
-
-        mail_title_lbl = ctk.CTkLabel(
-            mail_hdr,
-            text="📧 Bültene Abone Olan & Üye E-Postaları (Yükleniyor...)",
-            font=("Segoe UI", 13, "bold"),
-            text_color="#D97706",
-        )
-        mail_title_lbl.pack(side="left")
-
-        mail_textbox = ctk.CTkTextbox(mail_card, height=62, font=("Consolas", 12))
-        mail_textbox.pack(fill="x", padx=12, pady=(2, 10))
-
-        state_emails: list[str] = []
-
-        def _copy_all_emails(sep: str = ", ") -> None:
-            if not state_emails:
-                self.show_toast("Henüz kayıtlı e-posta bulunmuyor.", "warning")
-                return
-            joined = sep.join(state_emails)
-            self.clipboard_clear()
-            self.clipboard_append(joined)
-            self.update()
-            self.show_toast(f"📋 Toplam {len(state_emails)} adet e-posta panoya toplu kopyalandı!", "success")
-
-        ctk.CTkButton(
-            mail_hdr,
-            text="📋 Tüm Mailleri Toplu Kopyala",
-            font=("Segoe UI", 12, "bold"),
-            fg_color="#D97706",
-            hover_color="#B45309",
-            height=32,
-            command=lambda: _copy_all_emails(", "),
-        ).pack(side="right", padx=(6, 0))
-
-        ctk.CTkButton(
-            mail_hdr,
-            text="📄 Alt Alta Kopyala",
-            font=("Segoe UI", 11, "bold"),
-            fg_color="#475569",
-            hover_color="#334155",
-            height=32,
-            command=lambda: _copy_all_emails("\n"),
-        ).pack(side="right")
-
-        orders_scroll = ctk.CTkScrollableFrame(
-            win,
-            label_text="📦 Gelen Web Siparişleri & Müşteri Puanı Onayı",
-            label_font=("Segoe UI", 13, "bold"),
-        )
-        orders_scroll.pack(fill="both", expand=True, padx=16, pady=(6, 14))
-
-        def _approve_order(oid: str) -> None:
-            cdb = CloudDatabase()
-            ok, msg = cdb.approve_web_order_points(oid)
-            self.show_toast(msg, "success" if ok else "error")
-            _refresh_data()
-
-        def _refresh_data() -> None:
-            for w in orders_scroll.winfo_children():
-                w.destroy()
-            cdb = CloudDatabase()
-            data = cdb.sync_and_get_web_orders_and_subscribers()
-            emails = data.get("subscribers", [])
-            orders = data.get("orders", [])
-
-            state_emails.clear()
-            state_emails.extend(emails)
-            mail_title_lbl.configure(text=f"📧 Bültene Abone Olan & Üye E-Postaları ({len(emails)} Adet)")
-            mail_textbox.configure(state="normal")
-            mail_textbox.delete("1.0", "end")
-            mail_textbox.insert("1.0", ", ".join(emails) if emails else "Henüz kayıtlı abone e-postası bulunmuyor.")
-            mail_textbox.configure(state="disabled")
-
-            if not orders:
-                ctk.CTkLabel(
-                    orders_scroll,
-                    text="Henüz web sitesinden gelen bir sipariş bulunmuyor.",
-                    font=("Segoe UI", 12),
-                ).pack(pady=24)
-                return
-
-            for o in orders:
-                c = o.get("customer") or {}
-                oid = str(o.get("id") or "")
-                is_app = bool(o.get("pointsApproved") or o.get("status") == "Onaylandı")
-                pts = int(o.get("earnedPoints") or 0)
-                items_str = " | ".join(f"{i.get('qty', 1)}x {i.get('name', '')}" for i in (o.get("items") or []))
-
-                row_frame = ctk.CTkFrame(
-                    orders_scroll,
-                    corner_radius=10,
-                    border_width=2,
-                    border_color="#10B981" if is_app else "#F59E0B",
-                )
-                row_frame.pack(fill="x", padx=6, pady=6)
-
-                top_row = ctk.CTkFrame(row_frame, fg_color="transparent")
-                top_row.pack(fill="x", padx=12, pady=(8, 4))
-
-                ctk.CTkLabel(
-                    top_row,
-                    text=f"#{oid} • {c.get('fullname', '-')} • 📞 {c.get('phone', '-')} • ✉️ {c.get('email') or o.get('email', '-')} • 💳 {o.get('paymentMethod', 'Havale / EFT')}",
-                    font=("Segoe UI", 12, "bold"),
-                ).pack(side="left")
-
-                if is_app:
-                    ctk.CTkLabel(
-                        top_row,
-                        text=f"✅ Onaylandı (+{pts} Puan Aktif) • {o.get('total', '')}",
-                        font=("Segoe UI", 12, "bold"),
-                        text_color="#10B981",
-                    ).pack(side="right")
-                else:
-                    ctk.CTkButton(
-                        top_row,
-                        text=f"✅ Siparişi & +{pts} Puanı Onayla ({o.get('total', '')})",
-                        font=("Segoe UI", 12, "bold"),
-                        fg_color="#10B981",
-                        hover_color="#059669",
-                        height=30,
-                        command=lambda _id=oid: _approve_order(_id),
-                    ).pack(side="right")
-
-                ctk.CTkLabel(
-                    row_frame,
-                    text=f"📍 Adres: {c.get('address', '')} ({c.get('city', '')}) {('• Not: ' + str(c.get('note'))) if c.get('note') else ''}\n🛒 Ürünler: {items_str}",
-                    font=("Segoe UI", 11),
-                    justify="left",
-                    anchor="w",
-                ).pack(fill="x", padx=12, pady=(0, 8))
-
-        ctk.CTkButton(
-            top_bar,
-            text="🔄 Yenile",
-            font=("Segoe UI", 12, "bold"),
-            fg_color="#047857",
-            hover_color="#064E3B",
-            width=90,
-            height=30,
-            command=_refresh_data,
-        ).pack(side="right", padx=16, pady=12)
-
-        _refresh_data()
 

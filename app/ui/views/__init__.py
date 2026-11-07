@@ -3,6 +3,7 @@ from app.ui.views.history_view import HistoryView
 from app.ui.views.products_view import ProductsView
 from app.ui.views.reports_view import ReportsView
 from app.ui.views.sales_view import SalesView
+from app.ui.views.web_orders_view import WebOrdersView
 
-__all__ = ["DashboardView", "ProductsView", "SalesView", "HistoryView", "ReportsView"]
+__all__ = ["DashboardView", "ProductsView", "SalesView", "HistoryView", "ReportsView", "WebOrdersView"]
 

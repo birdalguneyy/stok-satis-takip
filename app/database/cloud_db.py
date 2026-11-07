@@ -613,110 +613,119 @@ class CloudDatabase:
                 try:
                     sales_docs = self.firestore_db.collection("sales").stream()
                     for doc in sales_docs:
-                        d = doc.to_dict()
-                        sid = d.get("id")
-                        if sid is None:
-                            if doc.id.isdigit():
-                                sid = int(doc.id)
-                            elif "_s" in doc.id:
+                        try:
+                            d = doc.to_dict() or {}
+                            sid = d.get("id")
+                            if sid is None:
+                                if doc.id.isdigit():
+                                    sid = int(doc.id)
+                                elif "_s" in doc.id:
+                                    try:
+                                        sid = int(doc.id.split("_s")[-1])
+                                    except Exception:
+                                        pass
+                                if sid is None:
+                                    nums = re.findall(r"\d+", doc.id)
+                                    if nums:
+                                        sid = int(nums[-1])
+                                if sid is None:
+                                    max_s = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM sales").fetchone()[0]
+                                    sid = int(max_s)
+                            else:
                                 try:
-                                    sid = int(doc.id.split("_s")[-1])
+                                    sid = int(sid)
                                 except Exception:
                                     pass
-                            if sid is None:
-                                nums = re.findall(r"\d+", doc.id)
-                                if nums:
-                                    sid = int(nums[-1])
-                            if sid is None:
-                                max_s = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM sales").fetchone()[0]
-                                sid = int(max_s)
-                        else:
+
+                            doc_user_id = d.get("user_id")
+                            if doc_user_id is None and doc.id.startswith("u") and "_" in doc.id:
+                                try:
+                                    doc_user_id = int(doc.id.split("_")[0][1:])
+                                except Exception:
+                                    pass
                             try:
-                                sid = int(sid)
+                                final_uid = int(doc_user_id) if doc_user_id is not None else (int(user_id) if user_id is not None else 1)
                             except Exception:
-                                pass
+                                final_uid = 1
 
-                        doc_user_id = d.get("user_id")
-                        if doc_user_id is None and doc.id.startswith("u") and "_" in doc.id:
-                            try:
-                                doc_user_id = int(doc.id.split("_")[0][1:])
-                            except Exception:
-                                pass
-                        try:
-                            final_uid = int(doc_user_id) if doc_user_id is not None else (int(user_id) if user_id is not None else 1)
-                        except Exception:
-                            final_uid = 1
+                            if sid:
+                                s_at = normalize_datetime_str(d.get("sold_at") or d.get("created_at"))
+                                # ID çakışma önleme: Farklı bir satışın üzerine yazılmasını engelle
+                                existing_sale = conn.execute("SELECT sold_at, total_amount, synced_to_cloud FROM sales WHERE id = ?", (sid,)).fetchone()
+                                if existing_sale:
+                                    ex_sold = existing_sale["sold_at"]
+                                    ex_tot = float(existing_sale["total_amount"] or 0)
+                                    ex_synced = int(existing_sale["synced_to_cloud"] if existing_sale["synced_to_cloud"] is not None else 1)
+                                    cur_tot = float(d.get("total_amount", 0))
+                                    if ex_sold != s_at or abs(ex_tot - cur_tot) > 0.05:
+                                        max_s = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM sales").fetchone()[0]
+                                        new_sid = max(int(max_s), int(sid) + 1)
+                                        if ex_synced == 0:
+                                            conn.execute("UPDATE sales SET id = ? WHERE id = ?", (new_sid, sid))
+                                            conn.execute("UPDATE sale_items SET sale_id = ? WHERE sale_id = ?", (new_sid, sid))
+                                        else:
+                                            sid = new_sid
 
-                        if sid:
-                            s_at = normalize_datetime_str(d.get("sold_at"))
-                            # ID çakışma önleme: Farklı bir satışın üzerine yazılmasını engelle
-                            existing_sale = conn.execute("SELECT sold_at, total_amount, synced_to_cloud FROM sales WHERE id = ?", (sid,)).fetchone()
-                            if existing_sale:
-                                ex_sold = existing_sale["sold_at"]
-                                ex_tot = float(existing_sale["total_amount"] or 0)
-                                ex_synced = int(existing_sale["synced_to_cloud"] if existing_sale["synced_to_cloud"] is not None else 1)
-                                cur_tot = float(d.get("total_amount", 0))
-                                if ex_sold != s_at or abs(ex_tot - cur_tot) > 0.05:
-                                    max_s = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM sales").fetchone()[0]
-                                    new_sid = max(int(max_s), int(sid) + 1)
-                                    if ex_synced == 0:
-                                        # Yerelde çevrimdışı eklenmiş yeni satışı yeni ID'ye taşı ki buluttaki eski satışın üzerine yazmasın
-                                        conn.execute("UPDATE sales SET id = ? WHERE id = ?", (new_sid, sid))
-                                        conn.execute("UPDATE sale_items SET sale_id = ? WHERE sale_id = ?", (new_sid, sid))
-                                    else:
-                                        sid = new_sid
+                                try:
+                                    raw_item_cnt = int(d.get("item_count") or 0)
+                                except Exception:
+                                    raw_item_cnt = 0
+                                items_len = len(d.get("items") or [])
+                                safe_item_count = max(1, raw_item_cnt, items_len)
 
-                            # item_count pozitif tamsayı olmalıdır (SQLite CHECK (item_count > 0))
-                            try:
-                                raw_item_cnt = int(d.get("item_count") or 0)
-                            except Exception:
-                                raw_item_cnt = 0
-                            items_len = len(d.get("items") or [])
-                            safe_item_count = max(1, raw_item_cnt, items_len)
-
-                            conn.execute(
-                                """
-                                INSERT OR REPLACE INTO sales (
-                                    id, user_id, total_amount, item_count, sold_at, note, channel, customer_name, synced_to_cloud
-                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
-                                """,
-                                (
-                                    sid,
-                                    final_uid,
-                                    float(d.get("total_amount", 0)),
-                                    safe_item_count,
-                                    s_at,
-                                    d.get("note", "Satış"),
-                                    d.get("channel", "magaza"),
-                                    d.get("customer_name"),
-                                ),
-                            )
-                            # Sale items
-                            items = d.get("items", [])
-                            conn.execute("DELETE FROM sale_items WHERE sale_id = ?", (sid,))
-                            for it in items:
-                                it_pid = it.get("product_id")
-                                if it_pid is not None:
-                                    p_chk = conn.execute("SELECT id FROM products WHERE id = ?", (it_pid,)).fetchone()
-                                    if not p_chk:
-                                        it_pid = None
                                 conn.execute(
                                     """
-                                    INSERT INTO sale_items (sale_id, product_id, product_name, barcode, unit_price, quantity, subtotal, unit)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                    INSERT OR REPLACE INTO sales (
+                                        id, user_id, total_amount, item_count, sold_at, note, channel, customer_name, synced_to_cloud
+                                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
                                     """,
                                     (
                                         sid,
-                                        it_pid,
-                                        it.get("product_name", ""),
-                                        it.get("barcode", ""),
-                                        float(it.get("unit_price", 0)),
-                                        float(it.get("quantity", 1)),
-                                        float(it.get("subtotal", 0)),
-                                        str(it.get("unit", "adet")),
+                                        final_uid,
+                                        float(d.get("total_amount", 0)),
+                                        safe_item_count,
+                                        s_at,
+                                        d.get("note", "Satış"),
+                                        d.get("channel", "magaza"),
+                                        d.get("customer_name"),
                                     ),
                                 )
-                            pulled_count += 1
+                                # Sale items
+                                items = d.get("items", [])
+                                conn.execute("DELETE FROM sale_items WHERE sale_id = ?", (sid,))
+                                for it in items:
+                                    it_pid = it.get("product_id")
+                                    if it_pid is not None:
+                                        try:
+                                            it_pid = int(it_pid)
+                                        except Exception:
+                                            it_pid = None
+                                    if it_pid is not None:
+                                        p_chk = conn.execute("SELECT id FROM products WHERE id = ?", (it_pid,)).fetchone()
+                                        if not p_chk:
+                                            it_pid = None
+                                    if it_pid is None:
+                                        fb_row = conn.execute("SELECT id FROM products ORDER BY id ASC LIMIT 1").fetchone()
+                                        it_pid = int(fb_row[0]) if fb_row else 1
+                                    conn.execute(
+                                        """
+                                        INSERT INTO sale_items (sale_id, product_id, product_name, barcode, unit_price, quantity, subtotal, unit)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                        """,
+                                        (
+                                            sid,
+                                            it_pid,
+                                            it.get("product_name") or it.get("name") or "",
+                                            it.get("barcode", ""),
+                                            float(it.get("unit_price") or it.get("unitPrice") or 0),
+                                            float(it.get("quantity") or it.get("qty") or 1),
+                                            float(it.get("subtotal") or it.get("totalPrice") or 0),
+                                            str(it.get("unit", "adet")),
+                                        ),
+                                    )
+                                pulled_count += 1
+                        except Exception as s_item_err:
+                            logger.warning(f"Satış satırı çekme uyarısı (doc {doc.id}): {s_item_err}")
                 except Exception as e:
                     logger.warning(f"Satışları buluttan çekme hatası: {e}")
 

@@ -168,6 +168,78 @@ class TestSecurityAndLimits(unittest.TestCase):
         self.assertEqual(data["summary"]["total_tons"], 6.0)
         self.assertEqual(data["summary"]["total_cost"], 54000.0)
 
+    def test_ping_and_health_endpoints_exempt_from_gate(self):
+        for path in ("/ping", "/health"):
+            res = self.client.get(path, headers={"User-Agent": "Mozilla/5.0"})
+            self.assertEqual(res.status_code, 200)
+            data = res.get_json()
+            self.assertTrue(data["ok"])
+            self.assertTrue(data["online"])
+
+    def test_recent_sales_endpoint_and_idempotency(self):
+        headers = {
+            "X-Gate-Token": EXPECTED_GATE_TOKEN,
+            "User-Agent": "Mozilla/5.0",
+        }
+        with self.db.get_connection() as conn:
+            conn.execute("DELETE FROM sale_items")
+            conn.execute("DELETE FROM sales")
+
+        # 7 satış ekle
+        for i in range(1, 8):
+            res_post = self.client.post(
+                "/api/sales",
+                headers=headers,
+                json={
+                    "items": [{
+                        "product_id": 1,
+                        "product_name": f"Ürün {i}",
+                        "barcode": f"BC{i}",
+                        "unit_price": 50.0,
+                        "quantity": 1,
+                        "subtotal": 50.0,
+                        "unit": "adet",
+                    }],
+                    "total_amount": 50.0,
+                    "channel": "magaza",
+                    "sold_at": f"2026-10-15 12:0{i}:00",
+                    "idempotency_key": f"test_key_{i}",
+                },
+            )
+            self.assertEqual(res_post.status_code, 200)
+            post_json = res_post.get_json()
+            self.assertTrue(post_json["ok"])
+            self.assertIn("recent_sales", post_json)
+
+        # Son 5 işlemi çek
+        res_recent = self.client.get("/api/sales/recent?limit=5", headers=headers)
+        self.assertEqual(res_recent.status_code, 200)
+        recent_data = res_recent.get_json()
+        self.assertTrue(recent_data["ok"])
+        self.assertEqual(len(recent_data["sales"]), 5)
+        self.assertEqual(recent_data["sales"][0]["items"][0]["product_name"], "Ürün 7")
+        self.assertEqual(recent_data["sales"][4]["items"][0]["product_name"], "Ürün 3")
+
+        # Aynı sold_at ve tutar ile çevrimdışı kuyruk tekrar gönderimi mükerrer kayıt oluşturmamalı
+        ok_dup, _ = self.cloud_db.add_sale(
+            [{
+                "product_id": 1,
+                "product_name": "Ürün 7",
+                "barcode": "BC7",
+                "unit_price": 50.0,
+                "quantity": 1,
+                "subtotal": 50.0,
+                "unit": "adet",
+            }],
+            channel="magaza",
+            total_amount_override=50.0,
+            sold_at="2026-10-15 12:07:00",
+        )
+        self.assertTrue(ok_dup)
+        with self.db.get_connection() as conn:
+            total_sales = conn.execute("SELECT COUNT(*) FROM sales").fetchone()[0]
+        self.assertEqual(total_sales, 7)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -551,6 +551,13 @@ class CloudDatabase:
                                 final_uid = 1
 
                             if pid and d.get("name"):
+                                existing_p = conn.execute(
+                                    "SELECT synced_to_cloud FROM products WHERE id = ?",
+                                    (pid,),
+                                ).fetchone()
+                                if existing_p and int(existing_p["synced_to_cloud"] or 0) == 0:
+                                    continue
+
                                 cat_id = d.get("category_id") or 1
                                 try:
                                     cat_id = int(cat_id)
@@ -643,14 +650,21 @@ class CloudDatabase:
                         if sid:
                             s_at = normalize_datetime_str(d.get("sold_at"))
                             # ID çakışma önleme: Farklı bir satışın üzerine yazılmasını engelle
-                            existing_sale = conn.execute("SELECT sold_at, total_amount FROM sales WHERE id = ?", (sid,)).fetchone()
+                            existing_sale = conn.execute("SELECT sold_at, total_amount, synced_to_cloud FROM sales WHERE id = ?", (sid,)).fetchone()
                             if existing_sale:
                                 ex_sold = existing_sale["sold_at"]
                                 ex_tot = float(existing_sale["total_amount"] or 0)
+                                ex_synced = int(existing_sale["synced_to_cloud"] if existing_sale["synced_to_cloud"] is not None else 1)
                                 cur_tot = float(d.get("total_amount", 0))
                                 if ex_sold != s_at or abs(ex_tot - cur_tot) > 0.05:
                                     max_s = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM sales").fetchone()[0]
-                                    sid = int(max_s)
+                                    new_sid = max(int(max_s), int(sid) + 1)
+                                    if ex_synced == 0:
+                                        # Yerelde çevrimdışı eklenmiş yeni satışı yeni ID'ye taşı ki buluttaki eski satışın üzerine yazmasın
+                                        conn.execute("UPDATE sales SET id = ? WHERE id = ?", (new_sid, sid))
+                                        conn.execute("UPDATE sale_items SET sale_id = ? WHERE sale_id = ?", (new_sid, sid))
+                                    else:
+                                        sid = new_sid
 
                             # item_count pozitif tamsayı olmalıdır (SQLite CHECK (item_count > 0))
                             try:
@@ -2008,6 +2022,13 @@ class CloudDatabase:
         if not cart_items:
             return False, "Sepet boş!"
 
+        # Render cold-start sonrası yerel SQLite boşsa satış ID çakışmasını önlemek için önce buluttan verileri çek
+        if not self._hydration_completed and self.ensure_firebase():
+            try:
+                self.ensure_initial_hydration()
+            except Exception as e_hyd:
+                logger.warning(f"Satış öncesi initial hydration uyarısı: {e_hyd}")
+
         uid = self._resolve_user_id(user_id)
         ch = (channel or "magaza").strip().lower()
         if ch not in ("magaza", "internet"):
@@ -2028,6 +2049,23 @@ class CloudDatabase:
         now = normalize_datetime_str(sold_at)
 
         with self.db.get_connection() as conn:
+            # Çevrimdışı kuyruk tekrar gönderimlerinde mükerrer satış kaydını engelle (idempotency)
+            if sold_at:
+                dup_row = conn.execute(
+                    """
+                    SELECT id FROM sales
+                    WHERE (user_id = ? OR user_id IS NULL)
+                      AND sold_at = ?
+                      AND ABS(total_amount - ?) < 0.01
+                      AND item_count = ?
+                      AND channel = ?
+                    LIMIT 1
+                    """,
+                    (uid, now, total_amount, item_count, ch),
+                ).fetchone()
+                if dup_row:
+                    return True, f"Satış başarıyla tamamlandı. Toplam: {total_amount:.2f} ₺"
+
             cursor = conn.execute(
                 "INSERT INTO sales (user_id, total_amount, item_count, sold_at, note, channel, customer_name, synced_to_cloud) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
                 (uid, total_amount, item_count, now, note, ch, cust_name),
@@ -2069,12 +2107,12 @@ class CloudDatabase:
                         str(item.get("unit", "adet")),
                     ),
                 )
-                # Deduct stock ONLY for active products of this user
+                # Deduct stock ONLY for active products of this user (mark synced_to_cloud = 0 until cloud sync)
                 if valid_pid is not None:
                     conn.execute(
                         """
                         UPDATE products
-                        SET stock_quantity = MAX(0.0, stock_quantity - ?), updated_at = ?
+                        SET stock_quantity = MAX(0.0, stock_quantity - ?), synced_to_cloud = 0, updated_at = ?
                         WHERE id = ? AND user_id = ? AND is_active = 1
                         """,
                         (float(item["quantity"]), now, valid_pid, uid),
@@ -2156,13 +2194,13 @@ class CloudDatabase:
                                 "unit": str(p_row["unit"]),
                                 "updated_at": now,
                             }, merge=True)
+                            with self.db.get_connection() as c:
+                                c.execute("UPDATE products SET synced_to_cloud = 1 WHERE id = ?", (pid,))
             except Exception as e_stock:
                 logger.warning(f"Firestore ürün stok anlık güncelleme uyarısı: {e_stock}")
 
-        if hasattr(self.firestore_db, "_mock_name"):
-            _async_sync_sale()
-        else:
-            threading.Thread(target=_async_sync_sale, daemon=True).start()
+        # Render üzerinde uyku/kapanma kaynaklı veri kaybını önlemek için Firestore kaydını anında senkron dene
+        _async_sync_sale()
         return True, f"Satış başarıyla tamamlandı. Toplam: {total_amount:.2f} ₺"
 
     def delete_sale(
@@ -2602,6 +2640,63 @@ class CloudDatabase:
                 fb_query = query.replace("(user_id = ? OR user_id IS NULL)", "1=1")
                 fb_params = params[1:]
                 sales = _fetch_with_items(fb_query, fb_params)
+            except Exception:
+                pass
+
+        return sales
+
+    def get_recent_sales(
+        self,
+        user_id: Optional[Union[int, str]] = None,
+        limit: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """Satış ekranının (POS) kenarında son yapılan işlemleri göstermek için en son N satışı döner."""
+        uid = self._resolve_user_id(user_id)
+        safe_limit = max(1, min(int(limit or 5), 50))
+        query = (
+            "SELECT * FROM sales WHERE (user_id = ? OR user_id IS NULL) "
+            "ORDER BY replace(sold_at, 'T', ' ') DESC, id DESC LIMIT ?"
+        )
+        params: list = [uid, safe_limit]
+
+        def _fetch_recent(q: str, p: list) -> List[Dict[str, Any]]:
+            with self.db.get_connection() as conn:
+                rows = conn.execute(q, p).fetchall()
+                s_list = [dict(r) for r in rows] if rows else []
+                s_ids = [s["id"] for s in s_list]
+                if s_ids:
+                    placeholders = ",".join("?" for _ in s_ids)
+                    items_query = f"SELECT * FROM sale_items WHERE sale_id IN ({placeholders})"
+                    items_rows = conn.execute(items_query, s_ids).fetchall()
+                    items_by_sale: Dict[int, List[Dict[str, Any]]] = {}
+                    for i in items_rows:
+                        i_dict = dict(i)
+                        items_by_sale.setdefault(i_dict["sale_id"], []).append(i_dict)
+                    for s in s_list:
+                        s["items"] = items_by_sale.get(s["id"], [])
+                return s_list
+
+        sales = _fetch_recent(query, params)
+
+        if not sales and self.ensure_firebase():
+            with self.db.get_connection() as conn:
+                tot_s = conn.execute("SELECT COUNT(*) FROM sales").fetchone()[0]
+            if tot_s == 0:
+                now_ts = time.time()
+                if now_ts - self._last_pull_timestamp > 10:
+                    try:
+                        self.pull_all_from_firebase(user_id=uid)
+                        self._last_pull_timestamp = now_ts
+                        self._hydration_completed = True
+                        sales = _fetch_recent(query, params)
+                    except Exception as e_pull:
+                        logger.warning(f"get_recent_sales Firestore otomatik çekme uyarısı: {e_pull}")
+
+        if not sales:
+            try:
+                fb_query = query.replace("(user_id = ? OR user_id IS NULL)", "1=1")
+                fb_params = [safe_limit]
+                sales = _fetch_recent(fb_query, fb_params)
             except Exception:
                 pass
 

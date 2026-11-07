@@ -111,8 +111,16 @@ def is_gate_unlocked_request() -> bool:
     return (token == EXPECTED_GATE_TOKEN) or (pin_hdr in VALID_GATE_PINS)
 
 
+_detected_external_url: Optional[str] = os.environ.get("RENDER_EXTERNAL_URL")
+
+
 @app.before_request
 def gatekeeper_check():
+    global _detected_external_url
+    host = (request.headers.get("Host") or "").strip()
+    if not _detected_external_url and host and "onrender.com" in host.lower():
+        _detected_external_url = f"https://{host}"
+
     # 1. Bot ve AI Crawler Kontrolü (Tüm yollar için geçerli!)
     user_agent = (request.headers.get("User-Agent") or "").lower().strip()
     if any(bot in user_agent for bot in DISALLOWED_BOT_KEYWORDS):
@@ -166,6 +174,22 @@ def robots_txt():
     if robots_path.exists():
         return send_from_directory(str(robots_path.parent), "robots.txt", mimetype="text/plain")
     return "User-agent: *\nDisallow: /\n", 200, {"Content-Type": "text/plain"}
+
+
+@app.route("/ping", methods=["GET", "HEAD"])
+@app.route("/health", methods=["GET", "HEAD"])
+def health_ping():
+    """Render.com uyku önleyici (keep-alive) ve sunucu/bulut sağlık kontrolü."""
+    has_fb = bool(cloud_db.ensure_firebase())
+    if has_fb and not cloud_db._hydration_completed:
+        threading.Thread(target=cloud_db.ensure_initial_hydration, daemon=True).start()
+    return jsonify({
+        "ok": True,
+        "online": True,
+        "has_firebase": has_fb,
+        "hydration_completed": bool(cloud_db._hydration_completed),
+        "timestamp": time.time(),
+    })
 
 
 @app.route("/api/gate/verify", methods=["POST"])
@@ -841,12 +865,39 @@ def webrtc_get_signal():
 
 
 
+@app.route("/api/sales/recent", methods=["GET"])
+def get_recent_sales_route():
+    """POS ekranının kenarındaki 'Son Yapılan 5 İşlem' paneli için son satışları döner."""
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"ok": False, "authenticated": False, "sales": []}), 401
+    try:
+        limit = int(request.args.get("limit", 5))
+    except (ValueError, TypeError):
+        limit = 5
+    recent_sales = cloud_db.get_recent_sales(user_id=user_id, limit=limit)
+    return jsonify({
+        "ok": True,
+        "sales": recent_sales,
+        "has_firebase": bool(cloud_db.ensure_firebase()),
+    })
+
+
 @app.route("/api/sales", methods=["POST"])
 def record_sale():
     user_id = get_current_user_id()
     if user_id is None:
         return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
     data = request.json or {}
+
+    # Render cold-start sonrası Firebase kimlik bilgisi silinmişse istemci yedeğinden anında geri yükle
+    fb_backup = data.get("firebase_credentials_backup")
+    if fb_backup and not cloud_db.ensure_firebase():
+        try:
+            cloud_db.configure_firebase(fb_backup if isinstance(fb_backup, str) else json.dumps(fb_backup))
+        except Exception as e_fb:
+            logger.warning(f"Satış sırasında Firebase yedek geri yükleme uyarısı: {e_fb}")
+
     items = data.get("items", [])
     note = data.get("note", "Mobil Satış")
     channel = data.get("channel", "magaza")
@@ -899,9 +950,16 @@ def record_sale():
             customer_name=customer_name,
             sold_at=sold_at,
         )
+        recent_sales = []
         if ok:
             notify_data_change(user_id)
-        resp_data = {"ok": ok, "message": msg}
+            recent_sales = cloud_db.get_recent_sales(user_id=user_id, limit=5)
+        resp_data = {
+            "ok": ok,
+            "message": msg,
+            "recent_sales": recent_sales,
+            "has_firebase": bool(cloud_db.firestore_db),
+        }
         with _sale_idempotency_lock:
             _sale_idempotency_cache[cache_key] = {"timestamp": time.time(), "in_progress": False, "response": resp_data}
         return jsonify(resp_data)
@@ -975,19 +1033,24 @@ def record_online_sale():
         _sale_idempotency_cache[cache_key] = {"timestamp": now_ts, "in_progress": True}
 
     try:
+        sold_at = data.get("sold_at")
         ok, msg = cloud_db.add_sale(
             cart_items,
             note=f"🌐 {platform}",
             user_id=user_id,
             channel="internet",
+            sold_at=sold_at,
         )
+        recent_sales = []
         if ok:
             notify_data_change(user_id)
+            recent_sales = cloud_db.get_recent_sales(user_id=user_id, limit=5)
         resp_data = {
             "ok": ok,
             "message": f"🌐 {qty} adet '{prod['name']}' internet satışı başarıyla kaydedildi." if ok else msg,
             "product_name": prod["name"],
             "remaining_stock": max(0, current_stock - qty),
+            "recent_sales": recent_sales,
         }
         with _sale_idempotency_lock:
             _sale_idempotency_cache[cache_key] = {"timestamp": time.time(), "in_progress": False, "response": resp_data}
@@ -1434,17 +1497,35 @@ def api_farm_analytics():
 
 def _background_sync_loop():
     import time
-    logger.info("Firebase 7/24 Arka Plan Otomatik Senkronizasyon Servisi başlatıldı.")
+    import urllib.request
+    logger.info("Firebase 7/24 Arka Plan Otomatik Senkronizasyon ve Keep-Alive Servisi başlatıldı.")
     # Sunucu ilk açılışında tek seferlik initial hydration (verileri buluttan SQLite'a çekme)
     try:
         cloud_db.ensure_initial_hydration()
     except Exception as exc:
         logger.warning(f"Sunucu açılışı initial hydration uyarısı: {exc}")
 
+    last_self_ping = time.time()
     while True:
         try:
-            time.sleep(60)
+            time.sleep(25)
             cloud_db.push_offline_data_to_firebase()
+
+            # Render ücretsiz sürümde sunucunun uykuya dalmasını önlemek için kendi dış URL'sine periyodik ping at
+            now_ts = time.time()
+            target_url = os.environ.get("RENDER_EXTERNAL_URL") or _detected_external_url
+            if target_url and (now_ts - last_self_ping >= 240):
+                last_self_ping = now_ts
+                try:
+                    ping_url = f"{target_url.rstrip('/')}/ping"
+                    req = urllib.request.Request(
+                        ping_url,
+                        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) KeepAlive/1.0"},
+                    )
+                    with urllib.request.urlopen(req, timeout=10) as _:
+                        pass
+                except Exception as ping_err:
+                    logger.debug(f"Self keep-alive ping uyarısı: {ping_err}")
         except Exception as exc:
             logger.debug(f"Arka plan senkronizasyon uyarısı: {exc}")
 

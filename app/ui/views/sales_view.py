@@ -75,11 +75,32 @@ class SalesView(ctk.CTkFrame):
 
         content = ctk.CTkFrame(self, fg_color="transparent")
         content.pack(fill="both", expand=True, padx=8)
-        content.grid_columnconfigure(0, weight=1)
+        content.grid_columnconfigure(0, weight=3)
+        content.grid_columnconfigure(1, weight=2)
         content.grid_rowconfigure(0, weight=1)
 
         cart_box = ctk.CTkFrame(content, corner_radius=12)
-        cart_box.grid(row=0, column=0, sticky="nsew")
+        cart_box.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+
+        recent_box = ctk.CTkFrame(content, corner_radius=12)
+        recent_box.grid(row=0, column=1, sticky="nsew")
+
+        recent_header = ctk.CTkFrame(recent_box, fg_color="transparent")
+        recent_header.pack(fill="x", padx=14, pady=(16, 8))
+        ctk.CTkLabel(recent_header, text="🕒 Son Yapılan 5 İşlem", font=FONT_HEADING).pack(side="left")
+        ctk.CTkButton(
+            recent_header,
+            text="🔄 Yenile",
+            font=FONT_SMALL,
+            fg_color=("gray75", "gray35"),
+            hover_color=ACCENT,
+            width=75,
+            height=28,
+            command=self._refresh_recent_sales,
+        ).pack(side="right")
+
+        self.recent_sales_scroll = ctk.CTkScrollableFrame(recent_box, fg_color="transparent")
+        self.recent_sales_scroll.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
         cart_header = ctk.CTkFrame(cart_box, fg_color="transparent")
         cart_header.pack(fill="x", padx=16, pady=(16, 8))
@@ -340,6 +361,78 @@ class SalesView(ctk.CTkFrame):
                     text=f"Genel Toplam: {format_currency(self.sale_service.total_amount)}"
                 )
                 self.reset_total_btn.pack_forget()
+
+        self._refresh_recent_sales()
+
+    def _refresh_recent_sales(self) -> None:
+        if not hasattr(self, "recent_sales_scroll"):
+            return
+        for child in self.recent_sales_scroll.winfo_children():
+            child.destroy()
+
+        recent_sales = []
+        try:
+            from app.database.cloud_db import cloud_db
+            recent_sales = cloud_db.get_recent_sales(limit=5)
+        except Exception:
+            recent_sales = []
+
+        if not recent_sales:
+            ctk.CTkLabel(
+                self.recent_sales_scroll,
+                text="Henüz satış işlemi bulunmuyor.",
+                font=FONT_SMALL,
+                text_color=("gray45", "gray65"),
+            ).pack(pady=24)
+            return
+
+        for sale in recent_sales[:5]:
+            card = ctk.CTkFrame(self.recent_sales_scroll, corner_radius=10, fg_color=("gray90", "gray20"))
+            card.pack(fill="x", padx=2, pady=4)
+
+            top_row = ctk.CTkFrame(card, fg_color="transparent")
+            top_row.pack(fill="x", padx=10, pady=(8, 2))
+
+            ch_label = "🌐 İnternet" if sale.get("channel") == "internet" else "🏬 Mağaza"
+            sync_label = "☁️" if int(sale.get("synced_to_cloud") or 0) == 1 else "⏳"
+            ctk.CTkLabel(
+                top_row,
+                text=f"#{sale.get('id')} • {ch_label} {sync_label}",
+                font=(FONT_SMALL[0], 11, "bold"),
+            ).pack(side="left")
+
+            ctk.CTkLabel(
+                top_row,
+                text=format_currency(float(sale.get("total_amount") or 0)),
+                font=(FONT_BODY[0], 13, "bold"),
+                text_color=SUCCESS,
+            ).pack(side="right")
+
+            items = sale.get("items") or []
+            if items:
+                items_str = ", ".join(
+                    f"{it.get('quantity', 1):g}x {it.get('product_name', 'Ürün')}" for it in items
+                )
+            else:
+                items_str = str(sale.get("note") or f"{sale.get('item_count', 1)} ürün")
+
+            ctk.CTkLabel(
+                card,
+                text=items_str[:65] + ("..." if len(items_str) > 65 else ""),
+                font=FONT_SMALL,
+                anchor="w",
+                justify="left",
+            ).pack(fill="x", padx=10, pady=1)
+
+            sold_at_str = str(sale.get("sold_at") or "").replace("T", " ")
+            cust_str = f" • 👤 {sale['customer_name']}" if sale.get("customer_name") else ""
+            ctk.CTkLabel(
+                card,
+                text=f"🕒 {sold_at_str[:19]}{cust_str}",
+                font=(FONT_SMALL[0], 10),
+                text_color=("gray45", "gray65"),
+                anchor="w",
+            ).pack(fill="x", padx=10, pady=(1, 8))
 
     def _bind_row_events(self, row, product_id: int) -> None:
         row.bind("<Button-1>", lambda e, pid=product_id: self.cart_table.set_selected_row(pid))

@@ -175,7 +175,39 @@
       opacity: 0.85;
     }
 
-    main { padding: 16px; flex: 1; max-width: 600px; margin: 0 auto; width: 100%; }
+    main { padding: 16px; flex: 1; max-width: 600px; margin: 0 auto; width: 100%; transition: max-width 0.25s ease; }
+    main:has(#tab-pos.active), main.pos-wide { max-width: 1080px; }
+
+    .pos-layout-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+    @media (min-width: 860px) {
+      .pos-layout-grid {
+        grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.95fr);
+      }
+      .pos-recent-sidebar {
+        position: sticky;
+        top: 76px;
+      }
+    }
+    .pos-recent-item {
+      background: var(--card-subtle);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      transition: border-color 0.2s ease, transform 0.15s ease;
+    }
+    .pos-recent-item:hover {
+      border-color: var(--accent);
+    }
+    .pos-recent-item.queued-sale {
+      border-color: #f59e0b;
+      background: rgba(245, 158, 11, 0.08);
+    }
 
     /* Nav Tabs Fixed at Bottom */
     nav.bottom-nav {
@@ -1643,11 +1675,15 @@
   <div id="toast" onclick="hideToast()" title="Kapatmak için dokunun">✅ Bildirim</div>
 
 
-  <main>
+  <main class="pos-wide" id="main-container">
     <!-- TAB 1: MOBILE POS SALES SCANNER (DEFAULT STARTUP TAB) -->
     <div id="tab-pos" class="tab-content active">
+      <div class="pos-layout-grid">
       <div class="card">
-        <h2>📱 Mobil Satış (POS)</h2>
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+          <h2 style="margin:0;">📱 Mobil Satış (POS)</h2>
+          <span id="pos-conn-status-pill" style="font-size:0.75rem; font-weight:700; padding:4px 10px; border-radius:999px; background:rgba(16,185,129,0.14); color:#10b981; border:1px solid rgba(16,185,129,0.3); cursor:pointer;" onclick="pingServerKeepAlive(true)" title="Sunucu ve Bulut Bağlantısını Kontrol Et">🟢 Sunucu Aktif</span>
+        </div>
 
         <!-- HTML5 Live Camera Video Preview -->
         <div id="pos-video-box" class="video-scanner-box">
@@ -1729,6 +1765,40 @@
             </div>
           </div>
         </div>
+      </div>
+
+      <!-- SON YAPILAN 5 İŞLEM PANELİ (POS KENAR PANELİ) -->
+      <div class="card pos-recent-sidebar" id="pos-recent-sales-card">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:12px;">
+          <div>
+            <h3 style="margin:0; font-size:1.02rem; font-weight:800; color:var(--text); display:flex; align-items:center; gap:6px;">
+              <span>🕒</span>
+              <span>Son Yapılan 5 İşlem</span>
+            </h3>
+            <div style="font-size:0.73rem; color:var(--text-muted); margin-top:2px;">Anlık satış takibi & çevrimdışı koruma</div>
+          </div>
+          <button type="button" class="btn btn-secondary" style="width:auto; padding:6px 10px; font-size:0.78rem; border-radius:8px;" onclick="loadRecentPOSSales()" title="Son 5 işlemi yenile">
+            🔄 Yenile
+          </button>
+        </div>
+
+        <!-- Çevrimdışı Bekleyen Satış Kuyruğu Uyarısı -->
+        <div id="pos-offline-queue-banner" style="display:none; background:rgba(245,158,11,0.14); border:1.5px solid #f59e0b; border-radius:10px; padding:10px 12px; margin-bottom:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+            <div>
+              <div style="font-size:0.82rem; font-weight:800; color:#f59e0b;">⏳ <span id="pos-offline-queue-count">0</span> Satış Kuyrukta Bekliyor</div>
+              <div style="font-size:0.72rem; color:var(--text-muted);">Sunucu uyanır uyanmaz otomatik kaydedilecek.</div>
+            </div>
+            <button type="button" class="btn" style="width:auto; padding:6px 12px; font-size:0.76rem; font-weight:800; background:#f59e0b; color:#000; border-radius:8px;" onclick="flushPendingSalesQueue(true)">
+              ⚡ Şimdi Gönder
+            </button>
+          </div>
+        </div>
+
+        <div id="pos-recent-sales-list">
+          <div style="text-align:center; color:var(--text-muted); font-size:0.82rem; padding:18px 8px;">Son işlemler yükleniyor...</div>
+        </div>
+      </div>
       </div>
     </div>
 
@@ -2425,6 +2495,11 @@
       
       const tabEl = document.getElementById('tab-' + tabId);
       if (tabEl) tabEl.classList.add('active');
+      const mainContainer = document.getElementById('main-container');
+      if (mainContainer) {
+        if (tabId === 'pos') mainContainer.classList.add('pos-wide');
+        else mainContainer.classList.remove('pos-wide');
+      }
 
       if (btnEl) {
         btnEl.classList.add('active');
@@ -2436,7 +2511,10 @@
       window.scrollTo(0, 0);
 
       try {
-        if (tabId === 'pos') loadPOSProductPicker();
+        if (tabId === 'pos') {
+          loadPOSProductPicker();
+          loadRecentPOSSales();
+        }
         if (tabId === 'stock') loadProducts();
         if (tabId === 'reports') {
           setDatePreset('today', null, false);
@@ -4002,6 +4080,398 @@
       document.body.style.pointerEvents = '';
     }
 
+    // ════════════════════════════════════════════════════════════════════
+    // RENDER UYKU ÖNLEYİCİ (KEEP-ALIVE), ÇEVRİMDIŞI SATIŞ KUYRUĞU VE SON 5 İŞLEM
+    // ════════════════════════════════════════════════════════════════════
+    const PENDING_SALES_STORAGE_KEY = 'stok_pending_sales_queue';
+    const RECENT_SALES_CACHE_KEY = 'stok_recent_sales_cache';
+    let _isFlushingPendingSales = false;
+    let _recentPOSSalesCache = [];
+
+    function getLocalSoldAtString() {
+      const d = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+
+    function getPendingSalesQueue() {
+      try {
+        const raw = localStorage.getItem(PENDING_SALES_STORAGE_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function savePendingSalesQueue(queue) {
+      try {
+        localStorage.setItem(PENDING_SALES_STORAGE_KEY, JSON.stringify(queue || []));
+      } catch (e) {}
+      updateOfflineQueueBanner();
+    }
+
+    function updateOfflineQueueBanner() {
+      const banner = document.getElementById('pos-offline-queue-banner');
+      const countEl = document.getElementById('pos-offline-queue-count');
+      const q = getPendingSalesQueue();
+      if (countEl) countEl.textContent = String(q.length);
+      if (banner) banner.style.display = q.length > 0 ? 'block' : 'none';
+    }
+
+    function updatePOSConnectionPill(state, text) {
+      const pill = document.getElementById('pos-conn-status-pill');
+      if (!pill) return;
+      if (state === 'online') {
+        pill.style.background = 'rgba(16,185,129,0.14)';
+        pill.style.color = '#10b981';
+        pill.style.borderColor = 'rgba(16,185,129,0.3)';
+        pill.textContent = text || '🟢 Sunucu Aktif';
+      } else if (state === 'waking') {
+        pill.style.background = 'rgba(245,158,11,0.16)';
+        pill.style.color = '#f59e0b';
+        pill.style.borderColor = 'rgba(245,158,11,0.35)';
+        pill.textContent = text || '🟡 Sunucu Uyandırılıyor...';
+      } else {
+        pill.style.background = 'rgba(239,68,68,0.15)';
+        pill.style.color = '#ef4444';
+        pill.style.borderColor = 'rgba(239,68,68,0.35)';
+        pill.textContent = text || '🔴 Çevrimdışı Kuyruk Modu';
+      }
+    }
+
+    function deductLocalCachedStock(items) {
+      if (!Array.isArray(items)) return;
+      const pools = [allProductsCache, _allProductsCache].filter(Boolean);
+      items.forEach(it => {
+        const pid = Number(it.product_id);
+        const qty = parseFloat(it.quantity) || 0;
+        if (!pid || qty <= 0) return;
+        pools.forEach(pool => {
+          const prod = pool.find(p => Number(p.id) === pid);
+          if (prod && prod.stock_quantity !== undefined) {
+            prod.stock_quantity = Math.max(0, Number(prod.stock_quantity) - qty);
+          }
+        });
+      });
+      try {
+        if (_allProductsCache && _allProductsCache.length > 0) {
+          localStorage.setItem('stok_products_cache', JSON.stringify(_allProductsCache));
+        }
+      } catch (e) {}
+    }
+
+    function enqueueOfflineSale(salePayload) {
+      const queue = getPendingSalesQueue();
+      const key = salePayload.idempotency_key || ('off_' + Date.now());
+      if (!queue.some(item => item.idempotency_key === key)) {
+        queue.push({
+          ...salePayload,
+          idempotency_key: key,
+          sold_at: salePayload.sold_at || getLocalSoldAtString(),
+          queued_at: Date.now()
+        });
+        savePendingSalesQueue(queue);
+      }
+      deductLocalCachedStock(salePayload.items || []);
+      renderRecentPOSSalesList();
+    }
+
+    function removeOfflineQueuedSale(idempotencyKey) {
+      const queue = getPendingSalesQueue().filter(item => item.idempotency_key !== idempotencyKey);
+      savePendingSalesQueue(queue);
+      renderRecentPOSSalesList();
+    }
+
+    async function pingServerKeepAlive(manual = false) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 8000);
+        const res = await fetch('/ping?t=' + Date.now(), { cache: 'no-store', signal: controller.signal });
+        clearTimeout(timer);
+        if (res.ok) {
+          const data = await res.json();
+          updatePOSConnectionPill('online', data.has_firebase ? '🟢 Sunucu & Bulut Aktif' : '🟢 Sunucu Aktif (Yerel)');
+          if (!data.has_firebase) {
+            const backupCred = localStorage.getItem('stok_firebase_cred_backup');
+            if (backupCred && typeof autoRestoreFirebaseCredentials === 'function') {
+              await autoRestoreFirebaseCredentials(backupCred);
+            }
+          }
+          if (getPendingSalesQueue().length > 0) {
+            await flushPendingSalesQueue(manual);
+          } else if (manual) {
+            showToast('🟢 Sunucu bağlantısı aktif ve güncel.');
+            loadRecentPOSSales();
+          }
+          return true;
+        }
+      } catch (e) {
+        updatePOSConnectionPill('offline', '🔴 Çevrimdışı Kuyruk Modu');
+        if (manual) {
+          showToast('🟡 Sunucu uykuda veya internet bağlantısı yok. Satışlarınız güvenli kuyrukta saklanır.');
+        }
+      }
+      return false;
+    }
+
+    async function postSaleWithWakeupAndOfflineFallback(salePayload) {
+      const enrichedPayload = {
+        ...salePayload,
+        sold_at: salePayload.sold_at || getLocalSoldAtString(),
+        idempotency_key: salePayload.idempotency_key || ('sale_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9)),
+      };
+      const fbBackup = localStorage.getItem('stok_firebase_cred_backup');
+      if (fbBackup) {
+        enrichedPayload.firebase_credentials_backup = fbBackup;
+      }
+
+      const attemptPost = async (timeoutMs) => {
+        const controller = new AbortController();
+        const tId = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          const res = await fetchWithAuth('/api/sales', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(enrichedPayload),
+            signal: controller.signal
+          });
+          clearTimeout(tId);
+          return res;
+        } catch (err) {
+          clearTimeout(tId);
+          throw err;
+        }
+      };
+
+      try {
+        let res = await attemptPost(14000);
+        if (res.status === 502 || res.status === 503 || res.status === 504) {
+          throw new Error('Render waking up HTTP ' + res.status);
+        }
+        const json = await res.json();
+        updatePOSConnectionPill('online', json.has_firebase ? '🟢 Sunucu & Bulut Aktif' : '🟢 Sunucu Aktif');
+        return json;
+      } catch (firstErr) {
+        // Render uykudan uyanıyor olabilir: Hızlı uyandırma ping'i atıp 1 kez daha dene
+        updatePOSConnectionPill('waking', '🟡 Sunucu Uyandırılıyor...');
+        lockScreenDuringTransaction('🟡 Sunucu uykudan uyandırılıyor, satışınız güvende...');
+        try {
+          await fetch('/ping?wakeup=' + Date.now(), { cache: 'no-store' });
+          const retryRes = await attemptPost(18000);
+          if (retryRes.ok) {
+            const retryJson = await retryRes.json();
+            updatePOSConnectionPill('online', retryJson.has_firebase ? '🟢 Sunucu & Bulut Aktif' : '🟢 Sunucu Aktif');
+            return retryJson;
+          }
+        } catch (retryErr) {
+          // Hala ulaşılamıyorsa çevrimdışı güvenli kuyruğa kaydet (Satış asla kaybolmaz!)
+        }
+        updatePOSConnectionPill('offline', '🔴 Çevrimdışı Kuyruk Modu');
+        enqueueOfflineSale(enrichedPayload);
+        return {
+          ok: true,
+          queued_offline: true,
+          message: '🛡️ Sunucu çevrimdışı/uykuda olduğu için satış güvenli kuyruğa kaydedildi! Bağlantı gelir gelmez otomatik işlenecek.'
+        };
+      }
+    }
+
+    async function flushPendingSalesQueue(manual = false) {
+      if (_isFlushingPendingSales) return;
+      const queue = getPendingSalesQueue();
+      if (!queue.length) {
+        updateOfflineQueueBanner();
+        return;
+      }
+
+      _isFlushingPendingSales = true;
+      let flushedCount = 0;
+      const fbBackup = localStorage.getItem('stok_firebase_cred_backup');
+
+      try {
+        // Önce sunucuda Firebase yedeği eksikse geri yükle
+        if (fbBackup) {
+          try {
+            const pingRes = await fetch('/ping?t=' + Date.now(), { cache: 'no-store' });
+            if (pingRes.ok) {
+              const pingJson = await pingRes.json();
+              if (!pingJson.has_firebase && typeof autoRestoreFirebaseCredentials === 'function') {
+                await autoRestoreFirebaseCredentials(fbBackup);
+              }
+            }
+          } catch (e) {}
+        }
+
+        const remaining = [];
+        for (const item of queue) {
+          try {
+            const payload = { ...item };
+            if (fbBackup && !payload.firebase_credentials_backup) {
+              payload.firebase_credentials_backup = fbBackup;
+            }
+            const res = await fetchWithAuth('/api/sales', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+            if (res.ok) {
+              const json = await res.json();
+              if (json.ok) {
+                flushedCount++;
+                if (Array.isArray(json.recent_sales)) {
+                  _recentPOSSalesCache = json.recent_sales;
+                }
+                continue;
+              }
+            }
+            remaining.push(item);
+          } catch (e) {
+            remaining.push(item);
+          }
+        }
+
+        savePendingSalesQueue(remaining);
+
+        if (flushedCount > 0) {
+          updatePOSConnectionPill('online', '🟢 Sunucu & Bulut Aktif');
+          showToast(`☁️ Kuyruktaki ${flushedCount} satış başarıyla sisteme ve buluta aktarıldı!`);
+          loadProducts();
+          loadSalesHistory();
+          loadRecentPOSSales();
+        } else if (manual && remaining.length > 0) {
+          showToast('⏳ Sunucu henüz uyanmadı, uyanır uyanmaz otomatik gönderilecek.');
+        }
+      } finally {
+        _isFlushingPendingSales = false;
+      }
+    }
+
+    function renderRecentPOSSalesList() {
+      const listEl = document.getElementById('pos-recent-sales-list');
+      if (!listEl) return;
+
+      updateOfflineQueueBanner();
+      const pendingQueue = getPendingSalesQueue();
+
+      // Kuyruktaki satışları en üstte göster
+      const queuedEntries = pendingQueue.slice().reverse().map((qItem) => ({
+        id: null,
+        is_queued: true,
+        idempotency_key: qItem.idempotency_key,
+        sold_at: qItem.sold_at || getLocalSoldAtString(),
+        channel: qItem.channel || 'magaza',
+        customer_name: qItem.customer_name || null,
+        total_amount: qItem.total_amount || 0,
+        note: qItem.note || 'Kuyrukta Bekleyen Satış',
+        items: qItem.items || [],
+        synced_to_cloud: 0
+      }));
+
+      const combined = [...queuedEntries, ...(_recentPOSSalesCache || [])].slice(0, 5);
+
+      if (combined.length === 0) {
+        listEl.innerHTML = `
+          <div style="text-align:center; padding:22px 10px; color:var(--text-muted); font-size:0.82rem; background:var(--card-subtle); border-radius:10px; border:1px dashed var(--border);">
+            Henüz satış işlemi bulunmuyor.
+          </div>
+        `;
+        return;
+      }
+
+      listEl.innerHTML = combined.map((sale) => {
+        const isQueued = !!sale.is_queued;
+        const isInternet = (sale.channel === 'internet');
+        const rawDt = String(sale.sold_at || '').replace('T', ' ');
+        const datePart = rawDt.length >= 10 ? rawDt.substring(0, 10) : '';
+        const timePart = rawDt.length >= 16 ? rawDt.substring(11, 19) : rawDt;
+
+        const items = Array.isArray(sale.items) ? sale.items : [];
+        const itemsSummary = items.length > 0
+          ? items.map(it => {
+              const isKg = (it.unit === 'kg');
+              const qStr = isKg ? `${Number(it.quantity).toFixed(2)}kg` : `${Number(it.quantity)}x`;
+              return `${qStr} ${it.product_name || 'Ürün'}`;
+            }).join(', ')
+          : (sale.note || `${sale.item_count || 1} ürün`);
+
+        const channelBadge = isInternet
+          ? `<span style="font-size:0.68rem; font-weight:700; padding:2px 6px; border-radius:6px; background:rgba(2,132,199,0.15); color:#38bdf8;">🌐 İnternet</span>`
+          : `<span style="font-size:0.68rem; font-weight:700; padding:2px 6px; border-radius:6px; background:rgba(16,185,129,0.15); color:#10b981;">🏬 Mağaza</span>`;
+
+        const syncBadge = isQueued
+          ? `<span style="font-size:0.68rem; font-weight:800; padding:2px 6px; border-radius:6px; background:rgba(245,158,11,0.2); color:#f59e0b;">⏳ Kuyrukta</span>`
+          : (Number(sale.synced_to_cloud) === 1
+              ? `<span style="font-size:0.68rem; font-weight:700; padding:2px 6px; border-radius:6px; background:rgba(16,185,129,0.14); color:#10b981;" title="Firebase Buluta Kaydedildi">☁️ Bulutta</span>`
+              : `<span style="font-size:0.68rem; font-weight:700; padding:2px 6px; border-radius:6px; background:rgba(59,130,246,0.15); color:#60a5fa;" title="Sunucuya Kaydedildi, Buluta Eşitleniyor">✅ Kaydedildi</span>`);
+
+        const safeSoldAt = rawDt.replace(/'/g, "\\'");
+        const actionBtn = isQueued
+          ? `<button type="button" class="btn btn-secondary" style="width:auto; padding:3px 7px; font-size:0.7rem; color:var(--danger); border-radius:6px;" onclick="removeOfflineQueuedSale('${sale.idempotency_key}')" title="Kuyruktan İptal Et">✖</button>`
+          : `<button type="button" class="btn btn-secondary" style="width:auto; padding:3px 7px; font-size:0.7rem; color:var(--danger); border-radius:6px;" onclick="promptDeleteSale('${sale.id}', '${safeSoldAt}', ${Number(sale.total_amount || 0)})" title="Bu Satışı Sil ve Stoğu Geri Yükle">🗑️</button>`;
+
+        return `
+          <div class="pos-recent-item ${isQueued ? 'queued-sale' : ''}">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; margin-bottom:5px; flex-wrap:wrap;">
+              <div style="display:flex; align-items:center; gap:5px; flex-wrap:wrap;">
+                <span style="font-weight:800; font-size:0.78rem; color:var(--text);">${isQueued ? '⏳ Bekleyen' : '#' + sale.id}</span>
+                ${channelBadge}
+                ${syncBadge}
+              </div>
+              <div style="font-weight:900; font-size:0.95rem; color:var(--accent);">${Number(sale.total_amount || 0).toFixed(2)} ₺</div>
+            </div>
+            <div style="font-size:0.8rem; font-weight:600; color:var(--text); margin-bottom:4px; line-height:1.35; word-break:break-word;">
+              ${itemsSummary}
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; font-size:0.72rem; color:var(--text-muted);">
+              <span>🕒 <b>${timePart || '-'}</b> <span style="opacity:0.8;">(${datePart})</span>${sale.customer_name ? ` • 👤 <b>${sale.customer_name}</b>` : ''}</span>
+              ${actionBtn}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function loadRecentPOSSales(providedSales = null) {
+      if (Array.isArray(providedSales)) {
+        _recentPOSSalesCache = providedSales.slice(0, 5);
+        try {
+          localStorage.setItem(RECENT_SALES_CACHE_KEY, JSON.stringify(_recentPOSSalesCache));
+        } catch (e) {}
+        renderRecentPOSSalesList();
+        return;
+      }
+
+      // Önce yerel önbellekten hızlıca göster
+      if (!_recentPOSSalesCache || _recentPOSSalesCache.length === 0) {
+        try {
+          const cached = localStorage.getItem(RECENT_SALES_CACHE_KEY);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed)) _recentPOSSalesCache = parsed;
+          }
+        } catch (e) {}
+        renderRecentPOSSalesList();
+      }
+
+      try {
+        const res = await fetchWithAuth('/api/sales/recent?limit=5');
+        if (res.ok) {
+          const json = await res.json();
+          if (json.ok && Array.isArray(json.sales)) {
+            _recentPOSSalesCache = json.sales.slice(0, 5);
+            try {
+              localStorage.setItem(RECENT_SALES_CACHE_KEY, JSON.stringify(_recentPOSSalesCache));
+            } catch (e) {}
+            updatePOSConnectionPill('online', json.has_firebase ? '🟢 Sunucu & Bulut Aktif' : '🟢 Sunucu Aktif');
+          }
+        }
+      } catch (e) {
+        // Çevrimdışıysa mevcut önbellek ve kuyruk gösterilmeye devam eder
+      }
+      renderRecentPOSSalesList();
+    }
+
     async function completePOSSale() {
       if (isCompletingPOSSale) {
         return;
@@ -4046,33 +4516,41 @@
         cartContainer.style.pointerEvents = 'none';
       }
 
-      // Benzersiz işlem anahtarı oluştur (mükerrer istek koruması)
+      // Benzersiz işlem anahtarı ve gerçek satış zamanı oluştur
       const idempotencyKey = 'pos_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+      const soldAtNow = getLocalSoldAtString();
+      const cartSnapshot = posCart.map(it => ({ ...it }));
 
       try {
-        const res = await fetchWithAuth('/api/sales', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            items: posCart,
-            note: 'Mobil POS Satış',
-            total_amount: finalTotal,
-            customer_name: customerName || null,
-            idempotency_key: idempotencyKey
-          })
+        const json = await postSaleWithWakeupAndOfflineFallback({
+          items: cartSnapshot,
+          note: 'Mobil POS Satış',
+          channel: 'magaza',
+          total_amount: finalTotal,
+          customer_name: customerName || null,
+          idempotency_key: idempotencyKey,
+          sold_at: soldAtNow
         });
-        const json = await res.json();
         
         if (json.ok) {
           playBeep();
-          showToast(json.message || "✅ Satış başarıyla tamamlandı!");
+          showToast(json.message || "✅ Satış başarıyla tamamlandı!", json.queued_offline ? 4200 : 2800);
           // Sepeti ve toplamı anında sıfırla
           posCart = [];
           posCustomTotal = null;
           if (custNameInput) custNameInput.value = '';
           renderPOSCart();
-          loadProducts();
-          loadSalesHistory();
+          if (Array.isArray(json.recent_sales)) {
+            loadRecentPOSSales(json.recent_sales);
+          } else {
+            loadRecentPOSSales();
+          }
+          if (!json.queued_offline) {
+            loadProducts();
+            loadSalesHistory();
+          } else if (typeof rebuildPOSProductPickerFromCache === 'function') {
+            rebuildPOSProductPickerFromCache(_allProductsCache);
+          }
         } else {
           showToast("❌ " + (json.message || "Satış kaydedilemedi!"));
         }
@@ -4264,25 +4742,23 @@
       }
 
       const idempotencyKey = 'netpos_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+      const soldAtNow = getLocalSoldAtString();
+      const cartSnapshot = posCart.map(it => ({ ...it }));
 
       try {
-        const res = await fetchWithAuth('/api/sales', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            items: posCart,
-            note: note,
-            channel: 'internet',
-            total_amount: finalTotal,
-            customer_name: customerName || null,
-            idempotency_key: idempotencyKey
-          })
+        const json = await postSaleWithWakeupAndOfflineFallback({
+          items: cartSnapshot,
+          note: note,
+          channel: 'internet',
+          total_amount: finalTotal,
+          customer_name: customerName || null,
+          idempotency_key: idempotencyKey,
+          sold_at: soldAtNow
         });
 
-        const json = await res.json();
         if (json.ok) {
           playBeep();
-          showToast(`✅ ${platform} satışı başarıyla tamamlandı!`);
+          showToast(json.queued_offline ? json.message : `✅ ${platform} satışı başarıyla tamamlandı!`, json.queued_offline ? 4200 : 2800);
           closePosInternetModal();
 
           // Sepeti ve toplamı anında sıfırla
@@ -4292,9 +4768,17 @@
           if (posCustInput) posCustInput.value = '';
           renderPOSCart();
 
-          // Verileri güncelle
-          loadProducts();
-          loadSalesHistory();
+          if (Array.isArray(json.recent_sales)) {
+            loadRecentPOSSales(json.recent_sales);
+          } else {
+            loadRecentPOSSales();
+          }
+          if (!json.queued_offline) {
+            loadProducts();
+            loadSalesHistory();
+          } else if (typeof rebuildPOSProductPickerFromCache === 'function') {
+            rebuildPOSProductPickerFromCache(_allProductsCache);
+          }
         } else {
           showToast("❌ " + (json.message || "Satış kaydedilemedi!"));
         }
@@ -4581,6 +5065,9 @@
         if (!search) {
           _allProductsCache = products;
           allProductsCache = _allProductsCache;
+          try {
+            localStorage.setItem('stok_products_cache', JSON.stringify(products));
+          } catch (e) {}
           if (typeof rebuildPOSProductPickerFromCache === 'function') {
             rebuildPOSProductPickerFromCache(_allProductsCache);
           }
@@ -4588,6 +5075,21 @@
         renderProductList(products);
       } catch (e) {
         console.warn('loadProducts uyarısı:', e);
+        if ((!_allProductsCache || _allProductsCache.length === 0)) {
+          try {
+            const cachedRaw = localStorage.getItem('stok_products_cache');
+            if (cachedRaw) {
+              const cachedList = JSON.parse(cachedRaw);
+              if (Array.isArray(cachedList) && cachedList.length > 0) {
+                _allProductsCache = cachedList;
+                allProductsCache = cachedList;
+                if (typeof rebuildPOSProductPickerFromCache === 'function') {
+                  rebuildPOSProductPickerFromCache(_allProductsCache);
+                }
+              }
+            }
+          } catch (ce) {}
+        }
         if (_allProductsCache && _allProductsCache.length > 0) {
           renderProductList(_allProductsCache);
         } else if (container) {
@@ -5260,6 +5762,7 @@
           showToast("✅ " + (json.message || "Satış silindi ve stoklar geri yüklendi."));
           closeDeleteSaleModal();
           loadSalesHistory();
+          loadRecentPOSSales();
           loadProducts();
           loadPOSProductPicker();
           triggerManualSync();
@@ -5294,6 +5797,7 @@
                   const tabId = activeTab.id;
                   if (tabId === 'tab-pos') {
                     loadPOSProductPicker();
+                    loadRecentPOSSales();
                   } else if (tabId === 'tab-stock') {
                     loadProducts();
                   } else if (tabId === 'tab-reports') {
@@ -6388,6 +6892,7 @@
       }
 
       try {
+        const soldAtNow = getLocalSoldAtString();
         const res = await fetchWithAuth('/api/sales/online', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -6396,6 +6901,7 @@
             quantity: qty,
             unit_price: unitPrice,
             platform: platform + (note ? ' - ' + note : ''),
+            sold_at: soldAtNow,
           })
         });
         const json = await res.json();
@@ -6404,13 +6910,45 @@
           playBeep();
           showToast(`✅ ${json.message}`);
           closeOnlineSaleModal();
+          if (Array.isArray(json.recent_sales)) {
+            loadRecentPOSSales(json.recent_sales);
+          } else {
+            loadRecentPOSSales();
+          }
           loadProducts();
           loadSalesHistory();
         } else {
           showToast(`❌ ${json.message || 'Satış kaydedilemedi!'}`);
         }
       } catch (err) {
-        showToast("⚠️ Sunucu bağlantı hatası!");
+        // Sunucu uykudaysa veya çevrimdışıysa internet satışını da güvenli kuyruğa ekle
+        const pool = (allProductsCache && allProductsCache.length > 0) ? allProductsCache : (_allProductsCache || []);
+        const prod = pool.find(p => Number(p.id) === parseInt(productId));
+        if (prod) {
+          const pUnit = prod.unit || 'adet';
+          const sub = Math.round(unitPrice * qty * 100) / 100;
+          enqueueOfflineSale({
+            items: [{
+              product_id: prod.id,
+              product_name: prod.name,
+              barcode: prod.barcode || '',
+              unit_price: unitPrice,
+              quantity: qty,
+              subtotal: sub,
+              unit: pUnit
+            }],
+            note: '🌐 ' + platform + (note ? ' - ' + note : ''),
+            channel: 'internet',
+            total_amount: sub,
+            sold_at: getLocalSoldAtString(),
+            idempotency_key: 'online_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8)
+          });
+          playBeep();
+          closeOnlineSaleModal();
+          showToast('🛡️ Sunucu çevrimdışı olduğu için internet satışı güvenli kuyruğa alındı!', 4000);
+        } else {
+          showToast("⚠️ Sunucu bağlantı hatası!");
+        }
       } finally {
         isSubmittingOnlineSale = false;
         setContainerInteractive(onlineModal, true);
@@ -6889,7 +7427,9 @@
       try { setDatePreset('today', null, false); } catch(e) {}
       try { loadProducts(); } catch(e) {}
       try { loadSalesHistory(); } catch(e) {}
+      try { loadRecentPOSSales(); } catch(e) {}
       try { checkSyncStatus(); } catch(e) {}
+      try { flushPendingSalesQueue(); } catch(e) {}
       try { triggerManualSync(); } catch(e) {}
     }
 
@@ -7061,13 +7601,26 @@
 
 
     window.addEventListener('online', () => {
-      showToast("📶 İnternet bağlantısı sağlandı. Firebase eşitleniyor...");
+      showToast("📶 İnternet bağlantısı sağlandı. Kuyruk ve Firebase eşitleniyor...");
+      flushPendingSalesQueue();
       triggerManualSync();
     });
 
     window.addEventListener('offline', () => {
-      showToast("🌐 Çevrimdışı moda geçildi. Kayıtlar yerel olarak saklanacak.");
+      updatePOSConnectionPill('offline', '🔴 Çevrimdışı Kuyruk Modu');
+      showToast("🌐 Çevrimdışı moda geçildi. Satışlarınız güvenli kuyrukta saklanacak.");
       checkSyncStatus();
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && _appInitialized) {
+        pingServerKeepAlive();
+      }
+    });
+    window.addEventListener('focus', () => {
+      if (_appInitialized) {
+        pingServerKeepAlive();
+      }
     });
 
     let _appInitialized = false;
@@ -7077,11 +7630,15 @@
       if (_appInitialized) return;
       _appInitialized = true;
       initIndexedDB();
+      updateOfflineQueueBanner();
+      loadRecentPOSSales();
       checkAIStatus();
       checkSavedAuthSession();
       checkSyncStatus();
+      pingServerKeepAlive();
       startRealtimeListener();
       setInterval(checkSyncStatus, 45000);
+      setInterval(() => pingServerKeepAlive(false), 180000);
       setTheme(localStorage.getItem('app-theme') || 'light');
     }
 

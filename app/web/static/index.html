@@ -8775,48 +8775,44 @@
     setTimeout(() => { loadWebOrdersAndSubscribers(false); }, 1800);
 
     // ════════════════════════════════════════════════════════════════════
-    // ⏱️ GİRİŞ SONRASI 5 DAKİKA HAREKETSİZLİKTE GALLUSMAMA.COM YÖNLENDİRMESİ
+    // ⏱️ 5 DAKİKA HAREKETSİZLİKTEN SONRAKİ İLK TIKLAMADA GALLUSMAMA.COM YÖNLENDİRMESİ
     // ════════════════════════════════════════════════════════════════════
     const IDLE_REDIRECT_MS = 5 * 60 * 1000;
     const IDLE_REDIRECT_URL = 'https://gallusmama.com';
     let _lastUserClickAt = Date.now();
-    let _idleMonitorInterval = null;
     let _idleListenersAttached = false;
+    let _idleRedirecting = false;
 
-    function _recordUserActivity() {
-      _lastUserClickAt = Date.now();
-    }
-
-    function _checkIdleRedirect() {
-      if (sessionStorage.getItem('gate_unlocked') !== 'true') return;
-      if (Date.now() - _lastUserClickAt >= IDLE_REDIRECT_MS) {
-        stopIdleRedirectMonitor();
-        window.location.href = IDLE_REDIRECT_URL;
+    function _handleUserInteractionForIdle(e) {
+      if (_idleRedirecting) return;
+      if (sessionStorage.getItem('gate_unlocked') !== 'true') {
+        _lastUserClickAt = Date.now();
+        return;
       }
+      if (Date.now() - _lastUserClickAt >= IDLE_REDIRECT_MS) {
+        _idleRedirecting = true;
+        if (e && typeof e.preventDefault === 'function') e.preventDefault();
+        if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+        window.location.href = IDLE_REDIRECT_URL;
+        return;
+      }
+      _lastUserClickAt = Date.now();
     }
 
     function startIdleRedirectMonitor() {
       _lastUserClickAt = Date.now();
+      _idleRedirecting = false;
       if (!_idleListenersAttached) {
         _idleListenersAttached = true;
-        ['click', 'pointerdown', 'touchstart', 'keydown'].forEach((evt) => {
-          document.addEventListener(evt, _recordUserActivity, { passive: true, capture: true });
-        });
-        document.addEventListener('visibilitychange', () => {
-          if (document.visibilityState === 'visible') {
-            _checkIdleRedirect();
-          }
+        ['pointerdown', 'click', 'touchstart', 'keydown'].forEach((evt) => {
+          document.addEventListener(evt, _handleUserInteractionForIdle, { capture: true });
         });
       }
-      if (_idleMonitorInterval) clearInterval(_idleMonitorInterval);
-      _idleMonitorInterval = setInterval(_checkIdleRedirect, 10000);
     }
 
     function stopIdleRedirectMonitor() {
-      if (_idleMonitorInterval) {
-        clearInterval(_idleMonitorInterval);
-        _idleMonitorInterval = null;
-      }
+      _lastUserClickAt = Date.now();
+      _idleRedirecting = false;
     }
 
     // ════════════════════════════════════════════════════════════════════

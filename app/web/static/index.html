@@ -8942,7 +8942,7 @@
         if (json.ok) {
           showToast(`🔔 Test bildirimi ${json.sent} cihaza gönderildi!`);
         } else {
-          showToast('⚠️ Test bildirimi gönderilemedi (kayıtlı cihaz yok veya hata).');
+          showToast('⚠️ Test bildirimi gönderilemedi: ' + (json.last_error || 'kayıtlı cihaz yok veya hata.'));
         }
       } catch (err) {
         showToast('❌ Test bildirimi hatası.');

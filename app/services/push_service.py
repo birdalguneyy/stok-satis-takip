@@ -220,19 +220,25 @@ def send_push_to_all(
     url: str = "/",
     tag: str = "pos-sale",
     user_id: Optional[int] = None,
-) -> Dict[str, int]:
+) -> Dict[str, Any]:
     """Sends a Web Push notification to all subscribed devices."""
     try:
+        from py_vapid import Vapid
         from pywebpush import WebPushException, webpush
     except ImportError:
         logger.warning("pywebpush yüklü değil; telefon bildirimi gönderilemedi.")
-        return {"sent": 0, "failed": 0, "removed": 0}
+        return {"sent": 0, "failed": 0, "removed": 0, "total_subs": 0, "last_error": "pywebpush yüklü değil"}
 
     subs = list_subscriptions(user_id=user_id)
+    if not subs and user_id is not None:
+        subs = list_subscriptions(user_id=None)
     if not subs:
-        return {"sent": 0, "failed": 0, "removed": 0}
+        return {"sent": 0, "failed": 0, "removed": 0, "total_subs": 0, "last_error": "Kayıtlı cihaz bulunamadı"}
 
     vapid = get_vapid_keys()
+    priv_key = vapid["private_key"]
+    vapid_obj = Vapid.from_pem(priv_key.encode("utf-8")) if "BEGIN " in priv_key else Vapid.from_string(priv_key)
+
     payload = json.dumps({
         "title": title,
         "body": body,
@@ -244,6 +250,7 @@ def send_push_to_all(
     sent = 0
     failed = 0
     removed = 0
+    last_error = ""
 
     for sub in subs:
         sub_info = {
@@ -254,7 +261,7 @@ def send_push_to_all(
             webpush(
                 subscription_info=sub_info,
                 data=payload,
-                vapid_private_key=vapid["private_key"],
+                vapid_private_key=vapid_obj,
                 vapid_claims={"sub": _VAPID_CLAIMS_SUB},
                 ttl=3600,
             )
@@ -264,14 +271,17 @@ def send_push_to_all(
             if status in (404, 410):
                 remove_subscription(sub["endpoint"])
                 removed += 1
+                last_error = f"Abonelik süresi dolmuş (HTTP {status}), cihaz yenilenmeli."
             else:
                 logger.warning("WebPush gönderim hatası (status=%s): %s", status, exc)
                 failed += 1
+                last_error = f"Push sunucusu hatası (HTTP {status or '?'})"
         except Exception as exc:
             logger.warning("WebPush beklenmeyen hata: %s", exc)
             failed += 1
+            last_error = str(exc)
 
-    return {"sent": sent, "failed": failed, "removed": removed}
+    return {"sent": sent, "failed": failed, "removed": removed, "total_subs": len(subs), "last_error": last_error}
 
 
 def format_sale_notification(

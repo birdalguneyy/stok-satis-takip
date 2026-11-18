@@ -124,9 +124,19 @@ _detected_external_url: Optional[str] = os.environ.get("RENDER_EXTERNAL_URL")
 @app.before_request
 def gatekeeper_check():
     global _detected_external_url
+    path = request.path
+    if path in ("/health", "/ping"):
+        return None
+
     host = (request.headers.get("Host") or "").strip()
-    if not _detected_external_url and host and "onrender.com" in host.lower():
-        _detected_external_url = f"https://{host}"
+    host_lower = host.lower()
+    if (
+        not _detected_external_url
+        and host
+        and not host_lower.startswith(("localhost", "127.0.0.1", "0.0.0.0", "192.168.", "10."))
+    ):
+        proto = (request.headers.get("X-Forwarded-Proto") or "https").split(",")[0].strip()
+        _detected_external_url = f"{proto}://{host}"
 
     # 1. Bot ve AI Crawler Kontrolü (Tüm yollar için geçerli!)
     user_agent = (request.headers.get("User-Agent") or "").lower().strip()
@@ -137,7 +147,6 @@ def gatekeeper_check():
             "message": "🤖 Güvenlik Politikası: Otomatik botların ve yapay zeka tarayıcılarının erişimi engellenmiştir."
         }), 403
 
-    path = request.path
     # Muaf tutulan yollar: Statik dosyalar, favicon, manifest, sw, robots.txt, gate API'leri ve sağlık kontrolleri
     if (
         path == "/"
@@ -1526,16 +1535,16 @@ def _background_sync_loop():
     except Exception as exc:
         logger.warning(f"Sunucu açılışı initial hydration uyarısı: {exc}")
 
-    last_self_ping = time.time()
+    last_self_ping = time.time() - 150
     while True:
         try:
             time.sleep(25)
             cloud_db.push_offline_data_to_firebase()
 
-            # Render ücretsiz sürümde sunucunun uykuya dalmasını önlemek için kendi dış URL'sine periyodik ping at
+            # Render ücretsiz sürümde sunucunun uykuya dalmasını önlemek için kendi dış URL'sine 3 dakikada bir ping at
             now_ts = time.time()
-            target_url = os.environ.get("RENDER_EXTERNAL_URL") or _detected_external_url
-            if target_url and (now_ts - last_self_ping >= 240):
+            target_url = os.environ.get("KEEP_ALIVE_URL") or os.environ.get("RENDER_EXTERNAL_URL") or _detected_external_url
+            if target_url and (now_ts - last_self_ping >= 180):
                 last_self_ping = now_ts
                 try:
                     ping_url = f"{target_url.rstrip('/')}/ping"

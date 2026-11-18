@@ -1670,6 +1670,7 @@
       <div id="user-profile-badge" class="status-badge" onclick="handleUserProfileClick()">🏢 <span id="user-profile-name">Giriş / Profil</span></div>
 
       <div id="pwa-install-badge" class="status-badge" style="display:none;" onclick="installPWA()">📲 Yükle</div>
+      <div id="push-notif-badge" class="status-badge" style="font-weight:700; cursor:pointer;" onclick="handlePushNotifBadgeClick()" title="POS Satış Bildirimleri">🔔 Bildirim</div>
       <div class="status-badge" onclick="cycleTheme()" id="theme-toggle-btn" title="Tema Değiştir">☀️ Açık</div>
       <div class="status-badge admin-only" id="ai-header-badge" onclick="openAIKeyModal()">🔑 AI</div>
       <div class="status-badge" onclick="lockAppNow()" id="gate-lock-btn" title="Uygulamayı Kilitle" style="cursor:pointer; background:rgba(239,68,68,0.12); color:#ef4444; border-color:rgba(239,68,68,0.25); font-weight:700;">🔒 Kilitle</div>
@@ -7708,6 +7709,8 @@
       setInterval(checkSyncStatus, 45000);
       setInterval(() => pingServerKeepAlive(false), 180000);
       setTheme(localStorage.getItem('app-theme') || 'light');
+      startIdleRedirectMonitor();
+      syncPushNotificationStatus();
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -7749,6 +7752,7 @@
     }
 
     function lockAppNow() {
+      stopIdleRedirectMonitor();
       sessionStorage.removeItem('gate_unlocked');
       sessionStorage.removeItem('user_role');
       sessionStorage.removeItem('farm_unlocked');
@@ -8770,7 +8774,225 @@
 
     setTimeout(() => { loadWebOrdersAndSubscribers(false); }, 1800);
 
+    // ════════════════════════════════════════════════════════════════════
+    // ⏱️ GİRİŞ SONRASI 5 DAKİKA HAREKETSİZLİKTE GALLUSMAMA.COM YÖNLENDİRMESİ
+    // ════════════════════════════════════════════════════════════════════
+    const IDLE_REDIRECT_MS = 5 * 60 * 1000;
+    const IDLE_REDIRECT_URL = 'https://gallusmama.com';
+    let _lastUserClickAt = Date.now();
+    let _idleMonitorInterval = null;
+    let _idleListenersAttached = false;
+
+    function _recordUserActivity() {
+      _lastUserClickAt = Date.now();
+    }
+
+    function _checkIdleRedirect() {
+      if (sessionStorage.getItem('gate_unlocked') !== 'true') return;
+      if (Date.now() - _lastUserClickAt >= IDLE_REDIRECT_MS) {
+        stopIdleRedirectMonitor();
+        window.location.href = IDLE_REDIRECT_URL;
+      }
+    }
+
+    function startIdleRedirectMonitor() {
+      _lastUserClickAt = Date.now();
+      if (!_idleListenersAttached) {
+        _idleListenersAttached = true;
+        ['click', 'pointerdown', 'touchstart', 'keydown'].forEach((evt) => {
+          document.addEventListener(evt, _recordUserActivity, { passive: true, capture: true });
+        });
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') {
+            _checkIdleRedirect();
+          }
+        });
+      }
+      if (_idleMonitorInterval) clearInterval(_idleMonitorInterval);
+      _idleMonitorInterval = setInterval(_checkIdleRedirect, 10000);
+    }
+
+    function stopIdleRedirectMonitor() {
+      if (_idleMonitorInterval) {
+        clearInterval(_idleMonitorInterval);
+        _idleMonitorInterval = null;
+      }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // 🔔 TELEFONA ARKA PLAN POS SATIŞ BİLDİRİMLERİ (WEB PUSH)
+    // ════════════════════════════════════════════════════════════════════
+    function _urlBase64ToUint8Array(base64String) {
+      const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+      const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+      const rawData = window.atob(base64);
+      const outputArray = new Uint8Array(rawData.length);
+      for (let i = 0; i < rawData.length; ++i) {
+        outputArray[i] = rawData.charCodeAt(i);
+      }
+      return outputArray;
+    }
+
+    function _updatePushBadgeUI(isSubscribed) {
+      const badge = document.getElementById('push-notif-badge');
+      if (!badge) return;
+      if (isSubscribed) {
+        badge.innerHTML = '🔔 Bildirim Açık';
+        badge.style.background = 'rgba(16,185,129,0.16)';
+        badge.style.color = '#10b981';
+        badge.style.borderColor = 'rgba(16,185,129,0.35)';
+      } else {
+        badge.innerHTML = '🔕 Bildirim Aç';
+        badge.style.background = '';
+        badge.style.color = '';
+        badge.style.borderColor = '';
+      }
+    }
+
+    async function syncPushNotificationStatus() {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        _updatePushBadgeUI(false);
+        return;
+      }
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        const isActive = Boolean(sub) && Notification.permission === 'granted';
+        _updatePushBadgeUI(isActive);
+        if (isActive && sub) {
+          fetchWithAuth('/api/push/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ subscription: sub.toJSON() })
+          }).catch(() => {});
+        }
+      } catch (e) {
+        _updatePushBadgeUI(false);
+      }
+    }
+
+    async function subscribeToPushNotifications() {
+      if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+        showToast('❌ Bu tarayıcı arka plan bildirimlerini desteklemiyor. iPhone kullanıyorsanız Paylaş → Ana Ekrana Ekle ile açın.');
+        return;
+      }
+      try {
+        const perm = await Notification.requestPermission();
+        if (perm !== 'granted') {
+          showToast('⚠️ Bildirim izni verilmedi. Tarayıcı ayarlarından izin veriniz.');
+          return;
+        }
+        const keyRes = await fetchWithAuth('/api/push/vapid-public-key');
+        const keyJson = await keyRes.json();
+        if (!keyJson.ok || !keyJson.public_key) {
+          showToast('❌ Bildirim anahtarı sunucudan alınamadı.');
+          return;
+        }
+        const reg = await navigator.serviceWorker.ready;
+        let sub = await reg.pushManager.getSubscription();
+        if (!sub) {
+          sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: _urlBase64ToUint8Array(keyJson.public_key)
+          });
+        }
+        const saveRes = await fetchWithAuth('/api/push/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ subscription: sub.toJSON() })
+        });
+        const saveJson = await saveRes.json();
+        if (saveJson.ok) {
+          _updatePushBadgeUI(true);
+          showToast('✅ Satış bildirimleri aktif! Test bildirimi gönderiliyor...');
+          fetchWithAuth('/api/push/test', { method: 'POST' }).catch(() => {});
+        } else {
+          showToast('❌ Bildirim kaydı başarısız: ' + (saveJson.message || ''));
+        }
+      } catch (err) {
+        console.error('Push subscribe error:', err);
+        showToast('❌ Bildirim kurulurken hata oluştu: ' + err.message);
+      }
+    }
+
+    async function unsubscribeFromPushNotifications() {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) {
+          await fetchWithAuth('/api/push/unsubscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint: sub.endpoint })
+          }).catch(() => {});
+          await sub.unsubscribe();
+        }
+        _updatePushBadgeUI(false);
+        closePushNotifModal();
+        showToast('🔕 Bu cihazda satış bildirimleri kapatıldı.');
+      } catch (err) {
+        showToast('❌ Bildirim kapatılamadı.');
+      }
+    }
+
+    async function sendTestPushNotification() {
+      try {
+        const res = await fetchWithAuth('/api/push/test', { method: 'POST' });
+        const json = await res.json();
+        if (json.ok) {
+          showToast(`🔔 Test bildirimi ${json.sent} cihaza gönderildi!`);
+        } else {
+          showToast('⚠️ Test bildirimi gönderilemedi (kayıtlı cihaz yok veya hata).');
+        }
+      } catch (err) {
+        showToast('❌ Test bildirimi hatası.');
+      }
+    }
+
+    async function handlePushNotifBadgeClick() {
+      if ('serviceWorker' in navigator && 'PushManager' in window) {
+        try {
+          const reg = await navigator.serviceWorker.ready;
+          const sub = await reg.pushManager.getSubscription();
+          if (sub && Notification.permission === 'granted') {
+            openPushNotifModal();
+            return;
+          }
+        } catch (_) {}
+      }
+      await subscribeToPushNotifications();
+    }
+
+    function openPushNotifModal() {
+      const m = document.getElementById('push-notif-modal');
+      if (m) m.style.display = 'flex';
+    }
+
+    function closePushNotifModal() {
+      const m = document.getElementById('push-notif-modal');
+      if (m) m.style.display = 'none';
+    }
+
   </script>
+
+  <!-- PUSH NOTIFICATION SETTINGS MODAL -->
+  <div id="push-notif-modal" class="modal-overlay" style="display:none; z-index:99999;" onclick="if(event.target===this) closePushNotifModal()">
+    <div class="modal-card" style="max-width:400px; text-align:center;">
+      <button type="button" style="position:absolute; top:12px; right:14px; background:none; border:none; color:var(--text-muted); font-size:1.5rem; cursor:pointer;" onclick="closePushNotifModal()">&times;</button>
+      <div style="font-size:2.4rem; margin-bottom:8px;">🔔</div>
+      <h3 style="margin:0 0 8px;">Telefon Satış Bildirimleri Aktif</h3>
+      <p style="font-size:0.86rem; color:var(--text-muted); margin:0 0 18px; line-height:1.45;">
+        POS'tan her satış yapıldığında, site kapalı olsa bile bu cihaza anlık bildirim gönderilir.
+      </p>
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        <button type="button" class="btn" onclick="sendTestPushNotification()">🧪 Test Bildirimi Gönder</button>
+        <button type="button" class="btn btn-danger" onclick="unsubscribeFromPushNotifications()">🔕 Bu Cihazda Bildirimleri Kapat</button>
+      </div>
+      <p style="font-size:0.75rem; color:var(--text-muted); margin:14px 0 0; line-height:1.4;">
+        💡 iPhone kullanıcıları: Site kapalıyken bildirim almak için Safari'de <b>Paylaş → Ana Ekrana Ekle</b> ile uygulamayı ana ekrana eklemelidir.
+      </p>
+    </div>
+  </div>
 
 </body>
 </html>

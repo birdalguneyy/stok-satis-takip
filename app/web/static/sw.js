@@ -1,4 +1,4 @@
-const CACHE_NAME = 'stok-satis-pwa-v2';
+const CACHE_NAME = 'stok-satis-pwa-v3';
 const ASSETS = [
   '/',
   '/manifest.json',
@@ -54,5 +54,49 @@ self.addEventListener('fetch', (event) => {
   // Cache-First with fallback to network for static media assets
   event.respondWith(
     caches.match(event.request).then((cached) => cached || fetch(event.request))
+  );
+});
+
+// Background Web Push notification handler (works even when the site is closed)
+self.addEventListener('push', (event) => {
+  let payload = { title: '💰 Yeni POS Satışı', body: 'Mağazada yeni bir satış gerçekleşti.', url: '/', tag: 'pos-sale' };
+  if (event.data) {
+    try {
+      const parsed = event.data.json();
+      payload = { ...payload, ...parsed };
+    } catch (_) {
+      payload.body = event.data.text() || payload.body;
+    }
+  }
+
+  const options = {
+    body: payload.body,
+    icon: '/static/icon-192.png',
+    badge: '/static/icon-192.png',
+    tag: payload.tag || 'pos-sale',
+    renotify: true,
+    vibrate: [200, 100, 200],
+    data: { url: payload.url || '/' }
+  };
+
+  event.waitUntil(
+    self.registration.showNotification(payload.title, options)
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const targetUrl = (event.notification.data && event.notification.data.url) || '/';
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ('focus' in client) {
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) {
+        return clients.openWindow(targetUrl);
+      }
+    })
   );
 });

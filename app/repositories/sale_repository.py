@@ -122,6 +122,28 @@ class SaleRepository:
         except Exception:
             pass
 
+        # Telefonlara arka plan Web Push bildirimi gönder
+        try:
+            from app.services.push_service import send_sale_notification_async
+
+            push_items = [
+                {
+                    "product_id": it.product_id,
+                    "product_name": it.product_name,
+                    "quantity": it.quantity,
+                    "unit_price": it.unit_price,
+                }
+                for it in items
+            ]
+            send_sale_notification_async(
+                items=push_items,
+                total_amount=total_amount,
+                channel=channel,
+                customer_name=customer_name,
+            )
+        except Exception:
+            pass
+
         return Sale.from_row(row)
 
 

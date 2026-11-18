@@ -24,6 +24,13 @@ from app.config import DATA_DIR, GATE_PIN
 from app.database.cloud_db import CloudDatabase
 from app.services.ai_package_service import AIPackageService
 from app.services.forecast_service import ForecastService
+from app.services.push_service import (
+    get_vapid_keys,
+    remove_subscription,
+    save_subscription,
+    send_push_to_all,
+    send_sale_notification_async,
+)
 from app.utils.camera import decode_barcode_from_frame, is_valid_barcode
 
 logger = logging.getLogger(__name__)
@@ -954,6 +961,13 @@ def record_sale():
         if ok:
             notify_data_change(user_id)
             recent_sales = cloud_db.get_recent_sales(user_id=user_id, limit=5)
+            send_sale_notification_async(
+                items=items,
+                total_amount=total_override,
+                channel=channel,
+                customer_name=customer_name,
+                user_id=user_id,
+            )
         resp_data = {
             "ok": ok,
             "message": msg,
@@ -1045,6 +1059,13 @@ def record_online_sale():
         if ok:
             notify_data_change(user_id)
             recent_sales = cloud_db.get_recent_sales(user_id=user_id, limit=5)
+            send_sale_notification_async(
+                items=cart_items,
+                total_amount=None,
+                channel="internet",
+                customer_name=platform,
+                user_id=user_id,
+            )
         resp_data = {
             "ok": ok,
             "message": f"🌐 {qty} adet '{prod['name']}' internet satışı başarıyla kaydedildi." if ok else msg,
@@ -1575,6 +1596,43 @@ def api_get_newsletter_subscribers():
         })
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/push/vapid-public-key", methods=["GET"])
+def api_push_vapid_public_key():
+    keys = get_vapid_keys()
+    return jsonify({"ok": True, "public_key": keys["public_key"]})
+
+
+@app.route("/api/push/subscribe", methods=["POST"])
+def api_push_subscribe():
+    user_id = get_current_user_id() or 1
+    data = request.get_json(silent=True) or {}
+    subscription = data.get("subscription") or data
+    device_label = str(data.get("device_label") or request.headers.get("User-Agent") or "")
+    ok, msg = save_subscription(subscription, user_id=user_id, device_label=device_label)
+    return jsonify({"ok": ok, "message": msg}), (200 if ok else 400)
+
+
+@app.route("/api/push/unsubscribe", methods=["POST"])
+def api_push_unsubscribe():
+    data = request.get_json(silent=True) or {}
+    endpoint = str(data.get("endpoint") or "").strip()
+    removed = remove_subscription(endpoint)
+    return jsonify({"ok": True, "removed": removed})
+
+
+@app.route("/api/push/test", methods=["POST"])
+def api_push_test():
+    user_id = get_current_user_id()
+    result = send_push_to_all(
+        title="🔔 Bildirim Testi Başarılı!",
+        body="Artık POS'tan her satış yapıldığında telefonunuza anında bildirim gelecek.",
+        url="/",
+        tag="pos-test",
+        user_id=user_id,
+    )
+    return jsonify({"ok": result["sent"] > 0, **result})
 
 
 _bg_sync_started = False

@@ -29,12 +29,13 @@ class ForecastService:
         uid = self.cloud_db._resolve_user_id(user_id)
 
         with self.cloud_db.db.get_connection() as conn:
-            # 1. Ham Satış ve Satış Kalemleri Verilerini Çek
+            # 1. Ham Satış ve Satış Kalemleri Verilerini Çek (iptal edilenler hariç)
             sales_rows = conn.execute(
                 """
                 SELECT id, total_amount, item_count, sold_at, COALESCE(channel, 'magaza') as channel
                 FROM sales
                 WHERE (user_id = ? OR user_id IS NULL)
+                  AND COALESCE(status, 'active') != 'cancelled'
                 ORDER BY sold_at ASC
                 """,
                 (uid,),
@@ -47,6 +48,7 @@ class ForecastService:
                 FROM sale_items si
                 JOIN sales s ON si.sale_id = s.id
                 WHERE (s.user_id = ? OR s.user_id IS NULL)
+                  AND COALESCE(s.status, 'active') != 'cancelled'
                 ORDER BY s.sold_at ASC
                 """,
                 (uid,),

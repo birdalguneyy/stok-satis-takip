@@ -3,9 +3,234 @@ from pathlib import Path
 from app.database.connection import Database
 from app.database.seed_data import seed_demo_products
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 5
 
 DEFAULT_CATEGORIES = ("Genel", "Gıda", "İçecek", "Temizlik", "Elektronik")
+
+
+def _ensure_column(conn, table: str, column: str, definition: str) -> None:
+    cols = [r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+    if column not in cols:
+        try:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+        except Exception:
+            pass
+
+
+def _ensure_security_infrastructure(conn) -> None:
+    """Mevcut verileri bozmadan güvenlik, iptal, kasa/tahsilat ve değişmez audit log şemasını garanti eder."""
+    # 1. users.role (mevcut tüm kullanıcılar varsayılan 'patron' olur)
+    _ensure_column(conn, "users", "role", "TEXT NOT NULL DEFAULT 'patron'")
+
+    # 2. Finansal tablolara soft-cancel kolonları
+    cancel_cols = [
+        ("status", "TEXT NOT NULL DEFAULT 'active'"),
+        ("cancelled_at", "TEXT"),
+        ("cancelled_by", "TEXT"),
+        ("cancelled_by_role", "TEXT"),
+        ("cancel_reason", "TEXT"),
+        ("cancel_note", "TEXT"),
+    ]
+    creator_cols = [
+        ("created_by", "TEXT"),
+        ("created_by_role", "TEXT"),
+    ]
+
+    for tbl in ("sales", "expenses"):
+        for col, col_def in cancel_cols + creator_cols:
+            _ensure_column(conn, tbl, col, col_def)
+        try:
+            conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{tbl}_status ON {tbl}(status)")
+        except Exception:
+            pass
+
+    for tbl in ("farm_egg_sales", "farm_feed_purchases"):
+        for col, col_def in cancel_cols:
+            _ensure_column(conn, tbl, col, col_def)
+        try:
+            conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{tbl}_status ON {tbl}(status)")
+        except Exception:
+            pass
+
+    # 3. Günlük Kasa Açılış / Kapanış tablosu (cash_days)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS cash_days (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id         INTEGER REFERENCES users(id),
+            business_date   TEXT NOT NULL,
+            opening_amount  REAL NOT NULL DEFAULT 0 CHECK (opening_amount >= 0),
+            opened_at       TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            opened_by       TEXT NOT NULL,
+            opened_by_role  TEXT NOT NULL DEFAULT 'patron',
+            opening_note    TEXT,
+            status          TEXT NOT NULL DEFAULT 'open',
+            closed_at       TEXT,
+            closed_by       TEXT,
+            closing_amount  REAL,
+            UNIQUE(user_id, business_date)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cash_days_user_date ON cash_days(user_id, business_date)")
+
+    # Mevcut sales ve expenses tablolarına payment_method, cash_days tablosuna mutabakat kolonları ekle
+    _ensure_column(conn, "sales", "payment_method", "TEXT NOT NULL DEFAULT 'nakit'")
+    _ensure_column(conn, "sales", "customer_id", "INTEGER")
+    _ensure_column(conn, "sales", "paid_cash_amount", "REAL NOT NULL DEFAULT 0")
+    _ensure_column(conn, "sales", "paid_pos_amount", "REAL NOT NULL DEFAULT 0")
+    _ensure_column(conn, "sales", "credit_amount", "REAL NOT NULL DEFAULT 0")
+    _ensure_column(conn, "sales", "overpayment_mode", "TEXT")
+    _ensure_column(conn, "expenses", "payment_method", "TEXT NOT NULL DEFAULT 'nakit'")
+    for col, col_def in (
+        ("closed_by_role", "TEXT"),
+        ("expected_cash", "REAL"),
+        ("expected_pos", "REAL"),
+        ("expected_expenses", "REAL"),
+        ("counted_cash", "REAL"),
+        ("entered_pos_total", "REAL"),
+        ("entered_expenses_total", "REAL"),
+        ("cash_diff", "REAL"),
+        ("pos_diff", "REAL"),
+        ("expense_diff", "REAL"),
+        ("closing_note", "TEXT"),
+        ("reopened_at", "TEXT"),
+        ("reopened_by", "TEXT"),
+        ("reopen_reason", "TEXT"),
+    ):
+        _ensure_column(conn, "cash_days", col, col_def)
+
+    # 4. Tahsilat ve Kasa Hareketleri tablosu
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS cash_movements (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id           INTEGER REFERENCES users(id),
+            cash_day_id       INTEGER REFERENCES cash_days(id),
+            movement_type     TEXT NOT NULL CHECK (movement_type IN ('tahsilat', 'kasa_giris', 'kasa_cikis')),
+            category          TEXT NOT NULL DEFAULT 'genel',
+            amount            REAL NOT NULL CHECK (amount >= 0),
+            description       TEXT NOT NULL,
+            customer_name     TEXT,
+            movement_date     TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            note              TEXT,
+            status            TEXT NOT NULL DEFAULT 'active',
+            cancelled_at      TEXT,
+            cancelled_by      TEXT,
+            cancelled_by_role TEXT,
+            cancel_reason     TEXT,
+            cancel_note       TEXT,
+            created_by        TEXT,
+            created_by_role   TEXT,
+            synced_to_cloud   INTEGER NOT NULL DEFAULT 0,
+            created_at        TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        )
+        """
+    )
+    _ensure_column(conn, "cash_movements", "cash_day_id", "INTEGER")
+    _ensure_column(conn, "cash_movements", "category", "TEXT NOT NULL DEFAULT 'genel'")
+
+    # 5. Veresiye / Cari Hesap tabloları (bakiye hareketlerden kuruş olarak türetilir)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS credit_customers (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    INTEGER REFERENCES users(id),
+            name       TEXT NOT NULL,
+            phone      TEXT,
+            note       TEXT,
+            is_active  INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_credit_customers_user_name ON credit_customers(user_id, name)")
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS credit_transactions (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id           INTEGER REFERENCES users(id),
+            customer_id       INTEGER NOT NULL REFERENCES credit_customers(id),
+            sale_id           INTEGER REFERENCES sales(id),
+            tx_type           TEXT NOT NULL CHECK (tx_type IN ('borc', 'odeme', 'tahsilat')),
+            payment_method    TEXT,
+            amount_kurus      INTEGER NOT NULL CHECK (amount_kurus > 0),
+            signed_kurus      INTEGER NOT NULL,
+            description       TEXT NOT NULL,
+            product_summary   TEXT,
+            tx_date           TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            status            TEXT NOT NULL DEFAULT 'active',
+            cancelled_at      TEXT,
+            cancelled_by      TEXT,
+            cancelled_by_role TEXT,
+            cancel_reason     TEXT,
+            cancel_note       TEXT,
+            created_by        TEXT,
+            created_by_role   TEXT,
+            created_at        TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_credit_tx_customer ON credit_transactions(customer_id, tx_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_credit_tx_sale ON credit_transactions(sale_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_credit_tx_status ON credit_transactions(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_credit_tx_type_date ON credit_transactions(tx_type, tx_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cash_movements_user_date ON cash_movements(user_id, movement_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cash_movements_type ON cash_movements(movement_type)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cash_movements_status ON cash_movements(status)")
+
+    # 4. Değişmez Denetim Kaydı (audit_logs) tablosu ve trigger'ları
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS audit_logs (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     INTEGER,
+            actor_name  TEXT NOT NULL,
+            actor_role  TEXT NOT NULL DEFAULT 'patron',
+            action      TEXT NOT NULL,
+            entity_type TEXT NOT NULL,
+            entity_id   TEXT,
+            old_value   TEXT,
+            new_value   TEXT,
+            reason      TEXT,
+            ip_address  TEXT,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action)")
+
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_audit_logs_no_update
+        BEFORE UPDATE ON audit_logs
+        BEGIN
+            SELECT RAISE(ABORT, 'Audit logs are immutable and cannot be updated');
+        END
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_audit_logs_no_delete
+        BEFORE DELETE ON audit_logs
+        BEGIN
+            SELECT RAISE(ABORT, 'Audit logs are immutable and cannot be deleted');
+        END
+        """
+    )
+
+    # 5. Şema sürümünü güncelle
+    try:
+        v_row = conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()
+        if v_row is None:
+            conn.execute("INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
+        elif int(v_row["version"]) < SCHEMA_VERSION:
+            conn.execute("UPDATE schema_version SET version = ?", (SCHEMA_VERSION,))
+    except Exception:
+        pass
 
 
 def _seed_categories(conn) -> None:
@@ -318,6 +543,8 @@ def run_migrations() -> None:
                     piece_count = box_count * 30.0
                 WHERE (unit_type IS NULL OR unit_type = 'koli') AND (piece_count = 0 OR piece_count IS NULL)
             """)
+
+        _ensure_security_infrastructure(conn)
 
         for name in DEFAULT_CATEGORIES:
             conn.execute(

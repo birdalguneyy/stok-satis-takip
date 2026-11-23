@@ -5,6 +5,7 @@ from app.config import get_turkey_now_str
 from app.database.connection import Database
 from app.models.cart_item import CartItem
 from app.models.sale import Sale, SaleItem
+from app.services.security_service import log_audit
 
 
 class SaleRepository:
@@ -65,6 +66,21 @@ class SaleRepository:
                     raise ValueError(f"Stok yetersiz: {item.product_name}")
 
             row = conn.execute("SELECT * FROM sales WHERE id = ?", (sale_id,)).fetchone()
+            log_audit(
+                action="SALE_CREATE",
+                entity_type="sale",
+                entity_id=sale_id,
+                old_value=None,
+                new_value={
+                    "id": sale_id,
+                    "total_amount": total_amount,
+                    "item_count": item_count,
+                    "channel": ch,
+                    "customer_name": cust_name,
+                    "sold_at": now,
+                },
+                conn=conn,
+            )
 
         # Dükkan satışındaki yumurtaları otomatik Çiftlik kaydına aktar
         try:
@@ -147,13 +163,38 @@ class SaleRepository:
                 sales.append(s_dict)
             return sales
 
-    def delete_sale(self, sale_id: Union[int, str], restore_stock: bool = True) -> Tuple[bool, str]:
-        ok, msg, _ = self.delete_sales_bulk([sale_id], restore_stock=restore_stock)
+    def delete_sale(
+        self,
+        sale_id: Union[int, str],
+        restore_stock: bool = True,
+        cancel_reason: str = "Masaüstü iptal",
+        cancel_note: str = "",
+        actor: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[bool, str]:
+        ok, msg, _ = self.delete_sales_bulk(
+            [sale_id],
+            restore_stock=restore_stock,
+            cancel_reason=cancel_reason,
+            cancel_note=cancel_note,
+            actor=actor,
+        )
         return ok, msg
 
-    def delete_sales_bulk(self, sale_ids: List[Union[int, str]], restore_stock: bool = True) -> Tuple[bool, str, int]:
+    def delete_sales_bulk(
+        self,
+        sale_ids: List[Union[int, str]],
+        restore_stock: bool = True,
+        cancel_reason: str = "Masaüstü iptal",
+        cancel_note: str = "",
+        actor: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[bool, str, int]:
         if not sale_ids:
             return False, "Satış seçilmedi", 0
+
+        act = actor or {"name": "Patron", "role": "patron"}
+        actor_name = str(act.get("name") or "Patron")
+        actor_role = str(act.get("role") or "patron")
+        now = get_turkey_now_str()
 
         farm_ids: List[int] = []
         cleaned_ids: List[int] = []
@@ -170,25 +211,51 @@ class SaleRepository:
                 except (ValueError, TypeError):
                     pass
 
-        total_deleted = 0
+        total_cancelled = 0
         with self.db.get_connection() as conn:
             for fid in farm_ids:
-                cur = conn.execute("DELETE FROM farm_egg_sales WHERE id = ?", (fid,))
-                if cur.rowcount > 0:
-                    total_deleted += 1
+                row = conn.execute(
+                    "SELECT * FROM farm_egg_sales WHERE id = ? AND COALESCE(status, 'active') != 'cancelled'",
+                    (fid,),
+                ).fetchone()
+                if row:
+                    old_val = dict(row)
+                    conn.execute(
+                        """
+                        UPDATE farm_egg_sales
+                        SET status = 'cancelled', cancelled_at = ?, cancelled_by = ?,
+                            cancelled_by_role = ?, cancel_reason = ?, cancel_note = ?, synced_to_cloud = 0
+                        WHERE id = ?
+                        """,
+                        (now, actor_name, actor_role, cancel_reason, cancel_note, fid),
+                    )
+                    log_audit(
+                        action="FARM_EGG_SALE_CANCEL",
+                        entity_type="farm_egg_sale",
+                        entity_id=fid,
+                        old_value=old_val,
+                        new_value={"status": "cancelled", "cancel_reason": cancel_reason, "cancel_note": cancel_note},
+                        reason=cancel_reason,
+                        actor=act,
+                        conn=conn,
+                    )
+                    total_cancelled += 1
 
         if not cleaned_ids:
-            if total_deleted > 0:
-                return True, f"{total_deleted} satış silindi", total_deleted
+            if total_cancelled > 0:
+                return True, f"{total_cancelled} satış iptal edildi", total_cancelled
             return False, "Geçersiz satış listesi", 0
 
         with self.db.get_connection() as conn:
             placeholders = ",".join("?" for _ in cleaned_ids)
-            valid_sales = conn.execute(f"SELECT id FROM sales WHERE id IN ({placeholders})", cleaned_ids).fetchall()
+            valid_sales = conn.execute(
+                f"SELECT * FROM sales WHERE id IN ({placeholders}) AND COALESCE(status, 'active') != 'cancelled'",
+                cleaned_ids,
+            ).fetchall()
             valid_ids = [r["id"] for r in valid_sales]
 
-            if not valid_ids and total_deleted == 0:
-                return False, "Seçilen satışlar bulunamadı", 0
+            if not valid_ids and total_cancelled == 0:
+                return False, "Seçilen satışlar bulunamadı veya zaten iptal edilmiş", 0
 
             affected_product_ids = set()
             if restore_stock and valid_ids:
@@ -231,11 +298,37 @@ class SaleRepository:
 
             if valid_ids:
                 v_placeholders = ",".join("?" for _ in valid_ids)
-                conn.execute(f"DELETE FROM sale_items WHERE sale_id IN ({v_placeholders})", valid_ids)
-                conn.execute(f"DELETE FROM sales WHERE id IN ({v_placeholders})", valid_ids)
-                for vid in valid_ids:
-                    conn.execute("DELETE FROM farm_egg_sales WHERE note LIKE ? OR note LIKE ?", (f"%Fiş #{vid}%", f"%Fiş #{vid})%"))
-                total_deleted += len(valid_ids)
+                conn.execute(
+                    f"""
+                    UPDATE sales
+                    SET status = 'cancelled', cancelled_at = ?, cancelled_by = ?,
+                        cancelled_by_role = ?, cancel_reason = ?, cancel_note = ?, synced_to_cloud = 0
+                    WHERE id IN ({v_placeholders})
+                    """,
+                    (now, actor_name, actor_role, cancel_reason, cancel_note, *valid_ids),
+                )
+                for sr in valid_sales:
+                    vid = sr["id"]
+                    conn.execute(
+                        """
+                        UPDATE farm_egg_sales
+                        SET status = 'cancelled', cancelled_at = ?, cancelled_by = ?,
+                            cancelled_by_role = ?, cancel_reason = ?, cancel_note = ?, synced_to_cloud = 0
+                        WHERE (note LIKE ? OR note LIKE ?) AND COALESCE(status, 'active') != 'cancelled'
+                        """,
+                        (now, actor_name, actor_role, cancel_reason, cancel_note, f"%Fiş #{vid}%", f"%Fiş #{vid})%"),
+                    )
+                    log_audit(
+                        action="SALE_CANCEL",
+                        entity_type="sale",
+                        entity_id=vid,
+                        old_value={"total_amount": sr["total_amount"], "status": "active", "sold_at": sr["sold_at"]},
+                        new_value={"status": "cancelled", "cancel_reason": cancel_reason, "cancel_note": cancel_note, "cancelled_at": now},
+                        reason=cancel_reason,
+                        actor=act,
+                        conn=conn,
+                    )
+                total_cancelled += len(valid_ids)
 
         try:
             from app.database.cloud_db import CloudDatabase
@@ -243,14 +336,16 @@ class SaleRepository:
             if cloud_db.firestore_db:
                 for fid in farm_ids:
                     try:
-                        cloud_db.firestore_db.collection("farm_egg_sales").document(f"u1_es{fid}").delete()
-                        cloud_db.firestore_db.collection("farm_egg_sales").document(str(fid)).delete()
+                        cloud_db.firestore_db.collection("farm_egg_sales").document(f"u1_es{fid}").set(
+                            {"status": "cancelled", "cancelled_at": now, "cancel_reason": cancel_reason}, merge=True
+                        )
                     except Exception:
                         pass
                 for sid in valid_ids:
                     try:
-                        cloud_db.firestore_db.collection("sales").document(f"u1_s{sid}").delete()
-                        cloud_db.firestore_db.collection("sales").document(str(sid)).delete()
+                        cloud_db.firestore_db.collection("sales").document(f"u1_s{sid}").set(
+                            {"status": "cancelled", "cancelled_at": now, "cancel_reason": cancel_reason}, merge=True
+                        )
                     except Exception:
                         pass
 
@@ -271,7 +366,7 @@ class SaleRepository:
         except Exception:
             pass
 
-        return True, f"{total_deleted} satış silindi ve stoklar iade edildi", total_deleted
+        return True, f"{total_cancelled} satış iptal edildi ve stoklar iade edildi", total_cancelled
 
     def update_sale_datetime(self, sale_id: Union[int, str], new_sold_at: str) -> Tuple[bool, str]:
         """Satış kaydının tarih/saatini günceller ve buluta yansıtır."""
@@ -348,6 +443,7 @@ class SaleRepository:
                 SELECT COALESCE(SUM(item_count), 0) AS total
                 FROM sales
                 WHERE date(sold_at) = date('now', 'localtime')
+                  AND COALESCE(status, 'active') != 'cancelled'
                 """
             ).fetchone()
         return int(row["total"])
@@ -356,9 +452,11 @@ class SaleRepository:
         with self.db.get_connection() as conn:
             rows = conn.execute(
                 """
-                SELECT product_name, SUM(quantity) AS total_qty
-                FROM sale_items
-                GROUP BY product_id, product_name
+                SELECT si.product_name, SUM(si.quantity) AS total_qty
+                FROM sale_items si
+                JOIN sales s ON si.sale_id = s.id
+                WHERE COALESCE(s.status, 'active') != 'cancelled'
+                GROUP BY si.product_id, si.product_name
                 ORDER BY total_qty DESC
                 LIMIT ?
                 """,

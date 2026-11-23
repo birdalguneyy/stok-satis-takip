@@ -602,7 +602,7 @@
       </div>
 
       <h2 style="font-size:1.35rem; font-weight:800; margin:0 0 6px; letter-spacing:-0.3px; color:#ffffff;">Sistem Koruması</h2>
-      <p style="font-size:0.85rem; color:#94a3b8; margin:0 0 20px; line-height:1.4;">Yetkili Erişimi — Lütfen 4 Haneli PIN Kodunu Giriniz</p>
+      <p style="font-size:0.85rem; color:#94a3b8; margin:0 0 20px; line-height:1.4;">Patron veya Çalışan 4 Haneli PIN Kodunu Giriniz</p>
 
       <!-- PIN GÖSTERGE NOKTALARI -->
       <div id="gate-pin-dots" style="display:flex; justify-content:center; gap:16px; margin-bottom:24px;">
@@ -848,19 +848,225 @@
     </div>
   </div>
 
-  <!-- SALES DELETE CONFIRMATION MODAL -->
+  <!-- UNIVERSAL CANCEL / VOID CONFIRMATION MODAL (SİLME YERİNE İPTAL) -->
   <div id="delete-sale-modal-overlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(15,23,42,0.9); backdrop-filter:blur(10px); z-index:9999; justify-content:center; align-items:center; padding:16px;">
-    <div class="card" style="width:100%; max-width:420px; border:1px solid var(--danger); box-shadow:0 15px 40px rgba(239,68,68,0.25);">
+    <div class="card" style="width:100%; max-width:440px; border:1px solid var(--danger); box-shadow:0 15px 40px rgba(239,68,68,0.25);">
       <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
-        <span style="font-size:1.6rem;">⚠️</span>
-        <h3 style="margin:0; font-size:1.1rem; color:var(--danger);">Satışı Silmek İstiyor Musunuz?</h3>
+        <span style="font-size:1.6rem;">🚫</span>
+        <h3 id="cancel-modal-title" style="margin:0; font-size:1.1rem; color:var(--danger);">Kaydı İptal Et</h3>
       </div>
-      <p id="delete-sale-modal-desc" style="font-size:0.85rem; color:var(--text); line-height:1.5; margin-bottom:16px;">
-        Bu satış kaydını silmek istediğinizden emin misiniz? Satılan ürünlerin stokları otomatik olarak geri yüklenecektir.
+      <p id="delete-sale-modal-desc" style="font-size:0.85rem; color:var(--text); line-height:1.5; margin-bottom:12px;">
+        Bu kayıt fiziksel olarak silinmeyecek, "İptal Edildi" durumuna alınacak ve denetim kaydına işlenecektir.
       </p>
+      <div style="margin-bottom:10px;">
+        <label for="cancel-reason-select" style="display:block; font-size:0.78rem; font-weight:700; color:var(--text); margin-bottom:4px;">İptal / İade Nedeni (Zorunlu) *</label>
+        <select id="cancel-reason-select" style="width:100%; padding:9px 10px; border-radius:8px; border:1px solid var(--border); background:var(--card-subtle); color:var(--text); font-size:0.85rem;">
+          <option value="">— Neden seçiniz —</option>
+          <option value="Müşteri iadesi">Müşteri iadesi</option>
+          <option value="Yanlış ürün / barkod girişi">Yanlış ürün / barkod girişi</option>
+          <option value="Yanlış tutar / miktar girişi">Yanlış tutar / miktar girişi</option>
+          <option value="Mükerrer (çift) kayıt">Mükerrer (çift) kayıt</option>
+          <option value="Ödeme alınamadı / vazgeçildi">Ödeme alınamadı / vazgeçildi</option>
+          <option value="Diğer">Diğer</option>
+        </select>
+      </div>
+      <div style="margin-bottom:14px;">
+        <label for="cancel-note-input" style="display:block; font-size:0.78rem; font-weight:700; color:var(--text-muted); margin-bottom:4px;">Serbest Açıklama / Not ("Diğer" seçildiyse zorunlu)</label>
+        <textarea id="cancel-note-input" rows="2" placeholder="İptal / iade ile ilgili kısa not..." style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--border); background:var(--card-subtle); color:var(--text); font-size:0.84rem; resize:vertical;"></textarea>
+      </div>
       <div style="display:flex; gap:10px;">
         <button type="button" class="btn btn-secondary" style="flex:1;" onclick="closeDeleteSaleModal()">Vazgeç</button>
-        <button type="button" id="confirm-delete-sale-btn" class="btn" style="flex:1; background:var(--danger); border-color:var(--danger);" onclick="executeDeleteSale()">Evet, Satışı Sil</button>
+        <button type="button" id="confirm-delete-sale-btn" class="btn" style="flex:1; background:var(--danger); border-color:var(--danger);" onclick="executeDeleteSale()">Evet, İptal Et</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- GÜN AÇILIŞI (AÇILIŞ KASASI) MODALI -->
+  <div id="open-cash-day-modal-overlay" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.9); backdrop-filter:blur(10px); z-index:9998; justify-content:center; align-items:center; padding:16px;">
+    <div class="card" style="width:100%; max-width:420px; border:1px solid #10B981; box-shadow:0 15px 40px rgba(16,185,129,0.25);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <h3 style="margin:0; font-size:1.1rem; color:#10B981;">🔓 Gün Açılışı — Açılış Kasası</h3>
+        <button type="button" style="background:none; border:none; color:var(--text-muted); font-size:1.4rem; cursor:pointer;" onclick="closeCashDayModal()">&times;</button>
+      </div>
+      <p style="font-size:0.83rem; color:var(--text-muted); margin:0 0 12px; line-height:1.45;">
+        Satışa başlamadan önce kasadaki başlangıç nakit tutarını giriniz (örn. 250 TL). Günü açan kişi ve saat otomatik kaydedilir.
+      </p>
+      <form onsubmit="submitOpenCashDay(event)">
+        <div style="margin-bottom:10px;">
+          <label for="cash-day-opening-amount" style="display:block; font-size:0.8rem; font-weight:700; margin-bottom:4px;">Açılış Kasası Tutarı (₺) *</label>
+          <input type="number" id="cash-day-opening-amount" step="0.01" min="0" value="250" required style="width:100%; padding:10px; font-size:1.05rem; font-weight:700;">
+        </div>
+        <div style="margin-bottom:14px;">
+          <label for="cash-day-opening-note" style="display:block; font-size:0.78rem; color:var(--text-muted); margin-bottom:4px;">Açılış Notu (opsiyonel)</label>
+          <input type="text" id="cash-day-opening-note" placeholder="Örn: Bozuk para kasası sayıldı" style="width:100%; padding:8px 10px; font-size:0.84rem;">
+        </div>
+        <div style="display:flex; gap:10px;">
+          <button type="button" class="btn btn-secondary" style="flex:1;" onclick="closeCashDayModal()">Kapat</button>
+          <button type="submit" id="btn-submit-open-day" class="btn" style="flex:1.4; background:linear-gradient(135deg, #10B981, #059669); color:#fff;">🔓 Günü Aç</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- KASA YÖNETİMİ & GÜNLÜK DÖKÜM MODALI -->
+  <div id="cash-drawer-modal-overlay" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.92); backdrop-filter:blur(10px); z-index:9997; justify-content:center; align-items:center; padding:16px;">
+    <div class="card" style="width:100%; max-width:560px; max-height:90vh; overflow-y:auto; border:1px solid var(--accent); box-shadow:0 18px 48px rgba(0,0,0,0.45);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid var(--border); padding-bottom:8px;">
+        <h3 style="margin:0; font-size:1.1rem;">💰 Günlük Kasa Yönetimi & Döküm</h3>
+        <button type="button" style="background:none; border:none; color:var(--text-muted); font-size:1.5rem; cursor:pointer;" onclick="closeCashDrawerModal()">&times;</button>
+      </div>
+
+      <!-- KASA ÖZETİ -->
+      <div id="cash-drawer-summary-box" style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:12px;">
+        Yükleniyor...
+      </div>
+
+      <!-- GÜN İÇİ KASA HAREKETİ EKLEME FORMU -->
+      <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:12px;">
+        <div style="font-weight:700; font-size:0.86rem; margin-bottom:8px;">➕ Gün İçi Kasa Hareketi Ekle</div>
+        <form id="drawer-cash-form" onsubmit="submitDrawerCashMovement(event)" style="display:flex; flex-direction:column; gap:8px;">
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <select id="drawer-mov-action" style="flex:1.4; min-width:170px; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); font-size:0.84rem; font-weight:700;">
+              <option value="kasa_giris:para_ustu">➕ Kasaya Nakit Ekle (Para Üstü / Ek Nakit)</option>
+              <option value="kasa_cikis:patron_cekis" id="opt-patron-withdraw">💸 Patron Kasadan Nakit Çekti</option>
+              <option value="kasa_cikis:nakit_cikis" id="opt-cash-out">➖ Kasadan Nakit Çıkış</option>
+            </select>
+            <input type="number" id="drawer-mov-amount" step="0.01" min="0.01" placeholder="Tutar (₺) *" required style="flex:0.8; min-width:110px; padding:8px; font-size:0.88rem; font-weight:700;">
+          </div>
+          <input type="text" id="drawer-mov-desc" placeholder="Zorunlu açıklama (örn: Bozuk para bozduruldu / Patron elden nakit aldı) *" required style="width:100%; padding:8px 10px; font-size:0.84rem;">
+          <div id="drawer-short-desc-hint" style="font-size:0.72rem; color:var(--text-muted);">
+            ℹ️ Açıklama zorunludur. Kasadan çıkan nakitlerde en az 5 karakterlik açıklayıcı not yazınız.
+          </div>
+          <button type="submit" class="btn" style="padding:9px; font-size:0.85rem;">💾 Kasa Hareketini Kaydet</button>
+        </form>
+      </div>
+
+      <!-- GÜN İÇİ HAREKET DÖKÜMÜ -->
+      <div>
+        <div style="font-weight:700; font-size:0.86rem; margin-bottom:6px;">📋 Gün İçi Kasa Hareketleri Dökümü</div>
+        <div id="cash-drawer-movements-list" style="max-height:240px; overflow-y:auto;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- GÜN SONU KAPANIŞ & MUTABAKAT MODALI -->
+  <div id="day-close-modal-overlay" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.92); backdrop-filter:blur(10px); z-index:9997; justify-content:center; align-items:center; padding:16px;">
+    <div class="card" style="width:100%; max-width:620px; max-height:92vh; overflow-y:auto; border:1px solid #6366F1; box-shadow:0 18px 48px rgba(0,0,0,0.5);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid var(--border); padding-bottom:8px;">
+        <h3 style="margin:0; font-size:1.1rem;">🔒 Gün Sonu Kapanış & Mutabakat</h3>
+        <button type="button" style="background:none; border:none; color:var(--text-muted); font-size:1.5rem; cursor:pointer;" onclick="closeDayCloseModal()">&times;</button>
+      </div>
+
+      <!-- AÇILIŞ -> KAPANIŞ ÖZET BANNER -->
+      <div id="dc-summary-banner" style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:12px;">
+        Yükleniyor...
+      </div>
+
+      <!-- GÜN SONU GİRİŞLERİ (Sadece gün açıkken düzenlenebilir) -->
+      <div id="dc-inputs-section" style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:12px;">
+        <div style="font-weight:700; font-size:0.86rem; margin-bottom:8px;">1️⃣ Gün Sonu Girişleri</div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px; margin-bottom:12px;">
+          <div>
+            <label for="dc-counted-cash" style="display:block; font-size:0.78rem; font-weight:700; margin-bottom:4px;">💵 Sayılan Nakit (Kasada Fiilen Olan ₺) *</label>
+            <input type="number" id="dc-counted-cash" step="0.01" min="0" placeholder="Örn: 170" oninput="refreshDayClosePreview()" style="width:100%; padding:9px; font-size:1rem; font-weight:800;">
+          </div>
+          <div>
+            <label for="dc-pos-total" style="display:block; font-size:0.78rem; font-weight:700; margin-bottom:4px;">💳 POS Gün Sonu Raporu Toplamı (₺) *</label>
+            <input type="number" id="dc-pos-total" step="0.01" min="0" placeholder="Örn: 450" oninput="refreshDayClosePreview()" style="width:100%; padding:9px; font-size:1rem; font-weight:800;">
+          </div>
+        </div>
+
+        <!-- KALEM KALEM GİDER EKLEME -->
+        <div style="border-top:1px dashed var(--border); padding-top:10px;">
+          <div style="font-weight:700; font-size:0.8rem; margin-bottom:6px;">🧾 Giderler (Kalem Kalem — Nakit / Kart)</div>
+          <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">
+            <input type="text" id="dc-exp-title" placeholder="Gider açıklaması" style="flex:1.5; min-width:130px; padding:7px 9px; font-size:0.82rem;">
+            <input type="number" id="dc-exp-amount" step="0.01" min="0.01" placeholder="Tutar ₺" style="flex:0.7; min-width:85px; padding:7px 9px; font-size:0.82rem;">
+            <select id="dc-exp-pm" style="flex:0.7; min-width:95px; padding:7px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); font-size:0.82rem;">
+              <option value="nakit">💵 Nakit</option>
+              <option value="kart">💳 Kart</option>
+            </select>
+            <button type="button" class="btn btn-secondary" style="width:auto; padding:7px 12px; font-size:0.8rem;" onclick="addPendingDayCloseExpense()">➕ Ekle</button>
+          </div>
+          <div id="dc-expenses-list" style="font-size:0.78rem; color:var(--text-muted);"></div>
+        </div>
+      </div>
+
+      <!-- KARŞILAŞTIRMA TABLOSU: SİSTEM | GİRİLEN | FARK -->
+      <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:12px;">
+        <div style="font-weight:700; font-size:0.86rem; margin-bottom:8px;">2️⃣ Karşılaştırma (Sistem | Girilen | Fark)</div>
+        <div id="dc-comparison-table"></div>
+      </div>
+
+      <!-- ARADA NE OLDUĞUNUN DÖKÜMÜ -->
+      <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:12px;">
+        <div style="font-weight:700; font-size:0.86rem; margin-bottom:6px;">3️⃣ Gün İçi Kasa Dökümü</div>
+        <div id="dc-breakdown-list" style="font-size:0.8rem;"></div>
+      </div>
+
+      <!-- KAPANIŞ AÇIKLAMA NOTU & AKSİYONLAR -->
+      <div id="dc-close-footer">
+        <div style="margin-bottom:10px;">
+          <label for="dc-closing-note" id="dc-closing-note-label" style="display:block; font-size:0.8rem; font-weight:700; margin-bottom:4px;">Kapanış Açıklama Notu (Fark varsa zorunludur)</label>
+          <textarea id="dc-closing-note" rows="2" placeholder="Fark nedeni veya gün sonu notu..." style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--border); background:var(--card-subtle); color:var(--text); font-size:0.84rem;"></textarea>
+        </div>
+        <div style="display:flex; gap:10px;">
+          <button type="button" class="btn btn-secondary" style="flex:1;" onclick="closeDayCloseModal()">Kapat</button>
+          <button type="button" id="btn-confirm-day-close" class="btn" style="flex:1.5; background:linear-gradient(135deg, #4F46E5, #6366F1); color:#fff; font-weight:800;" onclick="submitCloseCashDay()">🔒 Günü Kapat & Kilitle</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- VERESİYE / CARİ HESAP & TAHSİLAT MODALI -->
+  <div id="credit-modal-overlay" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.92); backdrop-filter:blur(10px); z-index:9996; justify-content:center; align-items:center; padding:16px;">
+    <div class="card" style="width:100%; max-width:680px; max-height:92vh; overflow-y:auto; border:1px solid #F59E0B; box-shadow:0 18px 48px rgba(0,0,0,0.5);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:1px solid var(--border); padding-bottom:8px;">
+        <h3 style="margin:0; font-size:1.1rem; color:#D97706;">📒 Veresiye (Cari Hesap) & Tahsilat</h3>
+        <button type="button" style="background:none; border:none; color:var(--text-muted); font-size:1.5rem; cursor:pointer;" onclick="closeCreditModal()">&times;</button>
+      </div>
+
+      <!-- GENEL ÖZET -->
+      <div id="credit-summary-strip" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:8px; margin-bottom:12px;"></div>
+
+      <!-- GÖRÜNÜM 1: TOPLAM BORÇ LİSTESİ & TAHSİLAT -->
+      <div id="credit-list-view">
+        <!-- HIZLI TAHSİLAT AL -->
+        <div style="background:var(--card-subtle); border:1px solid rgba(16,185,129,0.35); border-radius:12px; padding:12px; margin-bottom:12px;">
+          <div style="font-weight:800; font-size:0.86rem; color:#10B981; margin-bottom:8px;">💵 Tahsilat Al (Sadece Borç Ödemesi)</div>
+          <form onsubmit="submitCreditCollection(event)" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:8px;">
+            <select id="col-customer-select" required style="padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); font-size:0.82rem;">
+              <option value="">Müşteri seçiniz *</option>
+            </select>
+            <input type="number" id="col-amount" step="0.01" min="0.01" placeholder="Tutar (₺) *" required style="padding:8px; font-size:0.85rem; font-weight:700;">
+            <select id="col-payment-method" style="padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); font-size:0.82rem; font-weight:700;">
+              <option value="nakit">💵 Nakit</option>
+              <option value="kart">💳 POS (Kart)</option>
+            </select>
+            <input type="text" id="col-note" placeholder="Not (opsiyonel)" style="padding:8px; font-size:0.82rem;">
+            <button type="submit" class="btn" style="padding:8px 12px; font-size:0.82rem; background:#10B981; color:#fff;">✅ Tahsilat Kaydet</button>
+          </form>
+        </div>
+
+        <!-- YENİ CARİ MÜŞTERİ -->
+        <form onsubmit="submitNewCreditCustomer(event)" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;">
+          <input type="text" id="new-credit-name" placeholder="Yeni cari müşteri adı *" required style="flex:1.4; min-width:140px; padding:7px 10px; font-size:0.82rem;">
+          <input type="text" id="new-credit-phone" placeholder="Telefon (opsiyonel)" style="flex:1; min-width:110px; padding:7px 10px; font-size:0.82rem;">
+          <button type="submit" class="btn btn-secondary" style="width:auto; padding:7px 12px; font-size:0.8rem;">➕ Müşteri Ekle</button>
+        </form>
+
+        <!-- TOPLAM BORÇ LİSTESİ (EN ÇOK BORÇLU BAŞTA) -->
+        <div style="font-weight:700; font-size:0.84rem; margin-bottom:6px;">📋 Toplam Borç Listesi (En Çok Borçlu Başta)</div>
+        <div id="credit-customers-list" style="max-height:300px; overflow-y:auto;"></div>
+      </div>
+
+      <!-- GÖRÜNÜM 2: MÜŞTERİ DETAYI & HAREKET DÖKÜMÜ -->
+      <div id="credit-detail-view" style="display:none;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+          <button type="button" class="btn btn-secondary" style="width:auto; padding:5px 10px; font-size:0.78rem;" onclick="showCreditListView()">← Borç Listesine Dön</button>
+          <div id="credit-detail-header" style="font-weight:800; font-size:0.95rem;"></div>
+        </div>
+        <div id="credit-detail-table" style="max-height:380px; overflow-y:auto;"></div>
       </div>
     </div>
   </div>
@@ -1597,6 +1803,9 @@
       <span>Stok & Satış</span>
     </h1>
     <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
+      <div id="role-status-badge" class="status-badge" style="font-weight:800; background:rgba(99,102,241,0.16); color:#818CF8; border-color:rgba(99,102,241,0.35);">👑 Patron</div>
+      <div id="discrepancy-alert-badge" class="status-badge" style="display:none; font-weight:800; background:rgba(239,68,68,0.18); color:#EF4444; border-color:rgba(239,68,68,0.45); cursor:pointer;" onclick="openPatronDiscrepancyPanel()" title="Gün sonu fark uyarılarını gör">🚨 Fark Uyarısı</div>
+      <div id="credit-header-badge" class="status-badge" style="font-weight:700; background:rgba(245,158,11,0.18); color:#D97706; border-color:rgba(245,158,11,0.35); cursor:pointer;" onclick="openCreditModal()">📒 Veresiye</div>
       <div id="farm-badge" class="status-badge" style="font-weight:700; background:#059669; color:#fff; cursor:pointer;" onclick="openFarmModal()">🚜 Çiftlik</div>
       <div id="p2p-status-badge" class="status-badge" style="font-weight:700;" onclick="openP2PModal()">🔴 PC Bağlı Değil</div>
 
@@ -1605,7 +1814,7 @@
 
       <div id="pwa-install-badge" class="status-badge" style="display:none;" onclick="installPWA()">📲 Yükle</div>
       <div class="status-badge" onclick="cycleTheme()" id="theme-toggle-btn" title="Tema Değiştir">☀️ Açık</div>
-      <div class="status-badge" onclick="openAIKeyModal()">🔑 AI</div>
+      <div class="status-badge" id="ai-key-header-btn" onclick="openAIKeyModal()">🔑 AI</div>
       <div class="status-badge" onclick="lockAppNow()" id="gate-lock-btn" title="Uygulamayı Kilitle" style="cursor:pointer; background:rgba(239,68,68,0.12); color:#ef4444; border-color:rgba(239,68,68,0.25); font-weight:700;">🔒 Kilitle</div>
     </div>
   </header>
@@ -1616,6 +1825,12 @@
   <main>
     <!-- TAB 1: MOBILE POS SALES SCANNER (DEFAULT STARTUP TAB) -->
     <div id="tab-pos" class="tab-content active">
+      <!-- CANLI KASA ÖZETİ / GÜN AÇILIŞI ÇUBUĞU -->
+      <div id="pos-cash-status-bar" class="card" style="margin-bottom:12px; padding:12px 14px; border:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+        <div id="pos-cash-status-text" style="font-size:0.85rem; color:var(--text-muted);">⏳ Kasa durumu kontrol ediliyor...</div>
+        <div id="pos-cash-status-actions" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
+      </div>
+
       <div class="card">
         <h2>📱 Mobil Satış (POS)</h2>
 
@@ -1678,6 +1893,49 @@
             </div>
             <div id="pos-total-amount" style="font-size: 1.4rem; font-weight: 800; color: var(--accent);">0.00 ₺</div>
             <div id="pos-calc-total-note" style="display:none; font-size:0.75rem; color:var(--text-muted); text-decoration:line-through;"></div>
+            <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap;">
+              <label style="display:inline-flex; align-items:center; gap:4px; font-size:0.76rem; font-weight:700; cursor:pointer; background:var(--card-subtle); padding:4px 8px; border-radius:8px; border:1px solid var(--border);">
+                <input type="radio" name="pos-payment-method" value="nakit" checked onchange="onPosPaymentModeChange()" style="width:auto; margin:0;"> 💵 Nakit
+              </label>
+              <label style="display:inline-flex; align-items:center; gap:4px; font-size:0.76rem; font-weight:700; cursor:pointer; background:var(--card-subtle); padding:4px 8px; border-radius:8px; border:1px solid var(--border);">
+                <input type="radio" name="pos-payment-method" value="kart" onchange="onPosPaymentModeChange()" style="width:auto; margin:0;"> 💳 POS
+              </label>
+              <label style="display:inline-flex; align-items:center; gap:4px; font-size:0.76rem; font-weight:700; cursor:pointer; background:var(--card-subtle); padding:4px 8px; border-radius:8px; border:1px solid var(--border);">
+                <input type="radio" name="pos-payment-method" value="veresiye" onchange="onPosPaymentModeChange()" style="width:auto; margin:0;"> 📒 Veresiye
+              </label>
+              <label style="display:inline-flex; align-items:center; gap:4px; font-size:0.76rem; font-weight:700; cursor:pointer; background:var(--card-subtle); padding:4px 8px; border-radius:8px; border:1px solid var(--border);">
+                <input type="radio" name="pos-payment-method" value="karma" onchange="onPosPaymentModeChange()" style="width:auto; margin:0;"> 🔀 Karma
+              </label>
+            </div>
+            <!-- VERESİYE / KARMA / FAZLA ÖDEME SEÇENEKLERİ -->
+            <div id="pos-credit-options-box" style="display:none; margin-top:8px; padding:10px; border-radius:10px; background:var(--card-subtle); border:1px solid var(--border); font-size:0.8rem;">
+              <div style="margin-bottom:6px;">
+                <label style="display:block; font-size:0.74rem; font-weight:700; margin-bottom:3px;">📒 Cari Müşteri (Seç veya yukarıya yeni ad yaz)</label>
+                <select id="pos-credit-customer-select" style="width:100%; padding:6px 8px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); font-size:0.8rem;">
+                  <option value="">— Kayıtlı cari müşteri seçiniz —</option>
+                </select>
+              </div>
+              <div id="pos-karma-inputs" style="display:none; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:6px;">
+                <div>
+                  <label style="display:block; font-size:0.72rem; color:var(--text-muted);">💵 Alınan Nakit (₺)</label>
+                  <input type="number" id="pos-paid-cash" step="0.01" min="0" value="0" oninput="updatePosOverpayUI()" style="width:100%; padding:6px 8px; font-size:0.84rem; font-weight:700;">
+                </div>
+                <div>
+                  <label style="display:block; font-size:0.72rem; color:var(--text-muted);">💳 Alınan POS (₺)</label>
+                  <input type="number" id="pos-paid-pos" step="0.01" min="0" value="0" oninput="updatePosOverpayUI()" style="width:100%; padding:6px 8px; font-size:0.84rem; font-weight:700;">
+                </div>
+              </div>
+              <div id="pos-credit-preview-line" style="font-size:0.74rem; color:var(--text-muted);"></div>
+              <div id="pos-overpay-box" style="display:none; margin-top:6px; padding:8px; border-radius:8px; background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.35);">
+                <div id="pos-overpay-title" style="font-weight:800; color:#10B981; font-size:0.78rem; margin-bottom:4px;">Fazla Ödeme Seçimi:</div>
+                <label style="display:block; font-size:0.76rem; cursor:pointer; margin-bottom:3px;">
+                  <input type="radio" name="pos-overpay-mode" value="credit" checked style="width:auto; margin-right:4px;"> 📒 Fazla tutarı müşterinin cari hesabına <b>alacak</b> yaz
+                </label>
+                <label style="display:block; font-size:0.76rem; cursor:pointer;">
+                  <input type="radio" name="pos-overpay-mode" value="change" style="width:auto; margin-right:4px;"> 💵 Fazla tutarı <b>para üstü</b> olarak kasadan çıkış yap
+                </label>
+              </div>
+            </div>
           </div>
           <div style="position: relative; display: inline-flex; align-items: stretch; border-radius: 12px; box-shadow: 0 4px 14px rgba(180,83,9,0.25);">
             <button id="pos-complete-sale-btn" class="btn" style="width: auto; min-width: 135px; padding: 12px 18px; font-weight: 700; border-top-right-radius: 0; border-bottom-right-radius: 0; border-right: 1px solid rgba(255,255,255,0.3);" onclick="completePOSSale()">
@@ -1699,6 +1957,15 @@
             </div>
           </div>
         </div>
+      </div>
+
+      <!-- ÇALIŞAN İÇİN BUGÜNÜN TEMEL SATIŞ LİSTESİ (SALT OKUNUR) -->
+      <div id="staff-today-sales-card" class="card" style="display:none; margin-top:14px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <h3 style="margin:0; font-size:0.95rem;">🧾 Bugünün Satışları (Salt Okunur)</h3>
+          <button type="button" class="btn btn-secondary" style="width:auto; padding:5px 10px; font-size:0.76rem;" onclick="loadStaffTodaySales()">🔄 Yenile</button>
+        </div>
+        <div id="staff-today-sales-list" style="font-size:0.82rem; color:var(--text-muted);">Yükleniyor...</div>
       </div>
     </div>
 
@@ -1738,6 +2005,10 @@
           <button class="reports-subnav-btn" id="btn-subtab-ai-insights" onclick="switchReportsSubTab('ai-insights', this)">
             <span>🤖</span>
             <span>AI Danışmanı</span>
+          </button>
+          <button class="reports-subnav-btn" id="btn-subtab-security-audit" onclick="switchReportsSubTab('security-audit', this)">
+            <span>🛡️</span>
+            <span>İptaller & Kasa & Log</span>
           </button>
         </div>
 
@@ -2094,6 +2365,84 @@
           </div>
         </div>
 
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <!-- SUB-TAB 5: PATRON GÜVENLİK, İPTAL EDİLENLER RAPORU, KASA & LOG -->
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <div id="subtab-security-audit" class="reports-subtab-content" style="display:none;">
+
+          <!-- 0. PATRON İÇİN GÜN SONU FARK GEÇMİŞİ, ÇALIŞAN RAPORU & 3 GÜN TEKRAR UYARISI -->
+          <div id="patron-discrepancy-section" style="background:var(--card-subtle); border:1px solid rgba(239,68,68,0.4); border-radius:12px; padding:12px; margin-bottom:14px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+              <h3 style="margin:0; font-size:0.95rem; color:var(--danger);">🚨 Gün Sonu Fark Takibi & Çalışan Raporu</h3>
+              <div style="display:flex; gap:8px; align-items:center;">
+                <span id="discrepancy-summary-badge" style="font-size:0.75rem; font-weight:700; color:var(--danger); background:rgba(239,68,68,0.12); padding:3px 10px; border-radius:10px;">0 Fark</span>
+                <button type="button" class="btn btn-secondary" style="width:auto; padding:4px 10px; font-size:0.74rem;" onclick="loadDiscrepancyReport()">🔄 Yenile</button>
+              </div>
+            </div>
+            <!-- ÜST ÜSTE 3 GÜN TEKRAR UYARILARI -->
+            <div id="discrepancy-repeat-alerts" style="margin-bottom:10px;"></div>
+            <!-- ÇALIŞAN BAZINDA TOPLAM & AYLIK FARK RAPORU -->
+            <div id="discrepancy-employee-summary" style="margin-bottom:10px;"></div>
+            <div id="discrepancy-monthly-summary" style="margin-bottom:10px;"></div>
+            <!-- FARK GEÇMİŞİ DETAY LİSTESİ -->
+            <div style="font-weight:700; font-size:0.8rem; margin-bottom:4px;">📋 Fark Geçmişi (Tarih, Çalışan, Tutar, Açıklama)</div>
+            <div id="discrepancy-history-list" style="max-height:240px; overflow-y:auto;"></div>
+          </div>
+
+          <!-- 1. TAHSİLAT & KASA HAREKETLERİ -->
+          <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:14px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+              <h3 style="margin:0; font-size:0.95rem;">💰 Tahsilat & Kasa Hareketleri</h3>
+              <div id="cash-summary-pills" style="display:flex; gap:6px; flex-wrap:wrap; font-size:0.74rem;"></div>
+            </div>
+            <form id="cash-movement-form" onsubmit="handleAddCashMovementSubmit(event)" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:8px; margin-bottom:12px;">
+              <select id="cash-movement-type" style="padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); font-size:0.82rem;">
+                <option value="tahsilat">💵 Tahsilat</option>
+                <option value="kasa_giris">➕ Kasa Giriş</option>
+                <option value="kasa_cikis">➖ Kasa Çıkış</option>
+              </select>
+              <input type="text" id="cash-movement-desc" placeholder="Açıklama *" required style="padding:8px; font-size:0.82rem;">
+              <input type="number" step="0.01" min="0.01" id="cash-movement-amount" placeholder="Tutar (₺) *" required style="padding:8px; font-size:0.82rem;">
+              <input type="text" id="cash-movement-customer" placeholder="Müşteri (opsiyonel)" style="padding:8px; font-size:0.82rem;">
+              <button type="submit" class="btn" style="padding:8px 12px; font-size:0.82rem;">➕ Hareket Ekle</button>
+            </form>
+            <div id="cash-movements-list" style="max-height:240px; overflow-y:auto;"></div>
+          </div>
+
+          <!-- 2. PATRON İÇİN İPTAL EDİLENLER RAPORU -->
+          <div style="background:var(--card-subtle); border:1px solid rgba(239,68,68,0.35); border-radius:12px; padding:12px; margin-bottom:14px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+              <h3 style="margin:0; font-size:0.95rem; color:var(--danger);">🚫 İptal Edilenler Raporu</h3>
+              <div style="display:flex; gap:8px; align-items:center;">
+                <span id="cancelled-report-badge" style="font-size:0.75rem; font-weight:700; color:var(--danger); background:rgba(239,68,68,0.12); padding:3px 10px; border-radius:10px;">0 Kayıt</span>
+                <button type="button" class="btn btn-secondary" style="width:auto; padding:4px 10px; font-size:0.74rem;" onclick="loadCancelledReport()">🔄 Yenile</button>
+              </div>
+            </div>
+            <div id="cancelled-report-list" style="max-height:280px; overflow-y:auto;"></div>
+          </div>
+
+          <!-- 3. DEĞİŞMEZ DENETİM KAYITLARI (AUDIT LOG) -->
+          <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+              <h3 style="margin:0; font-size:0.95rem;">🛡️ Denetim Kayıtları (Değiştirilemez / Silinemez)</h3>
+              <div style="display:flex; gap:6px; align-items:center;">
+                <select id="audit-filter-action" onchange="loadAuditLogs()" style="padding:5px 8px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); font-size:0.76rem;">
+                  <option value="">Tüm İşlemler</option>
+                  <option value="UNAUTHORIZED_ATTEMPT">🚨 Yetkisiz Denemeler</option>
+                  <option value="SALE_CREATE">Satış Oluşturma</option>
+                  <option value="SALE_CANCEL">Satış İptali</option>
+                  <option value="EXPENSE_CREATE">Gider Ekleme</option>
+                  <option value="EXPENSE_CANCEL">Gider İptali</option>
+                  <option value="COLLECTION_CREATE">Tahsilat</option>
+                  <option value="CASH_MOVEMENT_CREATE">Kasa Hareketi</option>
+                </select>
+                <button type="button" class="btn btn-secondary" style="width:auto; padding:4px 10px; font-size:0.74rem;" onclick="loadAuditLogs()">🔄 Yenile</button>
+              </div>
+            </div>
+            <div id="audit-logs-list" style="max-height:320px; overflow-y:auto;"></div>
+          </div>
+        </div>
+
       </div>
     </div>
 
@@ -2179,19 +2528,19 @@
   </main>
 
   <nav class="bottom-nav">
-    <button class="nav-item active" onclick="switchTab('pos', this)">
+    <button id="nav-pos" class="nav-item active" onclick="switchTab('pos', this)">
       <span class="icon">📱</span>
       <span>Hızlı Satış</span>
     </button>
-    <button class="nav-item" onclick="switchTab('stock', this)">
+    <button id="nav-stock" class="nav-item" onclick="switchTab('stock', this)">
       <span class="icon">📦</span>
       <span>Stok Kataloğu</span>
     </button>
-    <button class="nav-item" onclick="switchTab('reports', this)">
+    <button id="nav-reports" class="nav-item" onclick="switchTab('reports', this)">
       <span class="icon">📊</span>
       <span>Satış Raporları</span>
     </button>
-    <button class="nav-item" onclick="switchTab('ai', this)">
+    <button id="nav-ai" class="nav-item" onclick="switchTab('ai', this)">
       <span class="icon">🤖</span>
       <span>AI Ambalaj Kayıt</span>
     </button>
@@ -2290,6 +2639,11 @@
     document.addEventListener('touchstart', initAudio, { once: true });
 
     function switchTab(tabId, btnEl) {
+      if (window.currentUserRole === 'calisan' && (tabId === 'reports' || tabId === 'ai')) {
+        showToast("🚫 Bu ekran sadece Patron yetkisine açıktır.");
+        tabId = 'pos';
+        btnEl = document.getElementById('nav-pos');
+      }
       try {
         stopMobileBarcodeScanner();
       } catch(e) {}
@@ -2310,7 +2664,10 @@
       window.scrollTo(0, 0);
 
       try {
-        if (tabId === 'pos') loadPOSProductPicker();
+        if (tabId === 'pos') {
+          loadPOSProductPicker();
+          if (window.currentUserRole === 'calisan') loadStaffTodaySales();
+        }
         if (tabId === 'stock') loadProducts();
         if (tabId === 'reports') {
           switchReportsSubTab(currentReportsSubTab || 'sales-list');
@@ -3850,22 +4207,75 @@
         cartContainer.style.pointerEvents = 'none';
       }
 
+      if (Number(finalTotal) < 0) {
+        showToast("❌ Satış tutarı negatif olamaz!");
+        isCompletingPOSSale = false;
+        if (btn) { btn.disabled = false; btn.classList.remove('btn-loading'); }
+        if (dropBtn) dropBtn.disabled = false;
+        if (cartContainer) { cartContainer.style.opacity = '1'; cartContainer.style.pointerEvents = 'auto'; }
+        return;
+      }
+
       // Benzersiz işlem anahtarı oluştur (mükerrer istek koruması)
       const idempotencyKey = 'pos_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+      const pmRadio = document.querySelector('input[name="pos-payment-method"]:checked');
+      const paymentMethod = pmRadio ? pmRadio.value : 'nakit';
+      const creditCustSel = document.getElementById('pos-credit-customer-select');
+      const selectedCreditCustId = (creditCustSel && creditCustSel.value) ? parseInt(creditCustSel.value) : null;
+      let paidCashAmt = null;
+      let paidPosAmt = null;
+      let overpayMode = null;
+
+      if (paymentMethod === 'karma') {
+        paidCashAmt = parseFloat(document.getElementById('pos-paid-cash')?.value || '0') || 0;
+        paidPosAmt = parseFloat(document.getElementById('pos-paid-pos')?.value || '0') || 0;
+        if ((paidCashAmt + paidPosAmt) > finalTotal) {
+          const ovRadio = document.querySelector('input[name="pos-overpay-mode"]:checked');
+          overpayMode = ovRadio ? ovRadio.value : 'credit';
+        }
+      }
 
       try {
-        const res = await fetchWithAuth('/api/sales', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            items: posCart,
-            note: 'Mobil POS Satış',
-            total_amount: finalTotal,
-            customer_name: customerName || null,
-            idempotency_key: idempotencyKey
-          })
-        });
-        const json = await res.json();
+        const sendSaleReq = async (confirmHigh = false) => {
+          const r = await fetchWithAuth('/api/sales', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              items: posCart,
+              note: 'Mobil POS Satış',
+              total_amount: finalTotal,
+              payment_method: paymentMethod,
+              customer_id: selectedCreditCustId,
+              customer_name: customerName || null,
+              paid_cash_amount: paidCashAmt,
+              paid_pos_amount: paidPosAmt,
+              overpayment_mode: overpayMode,
+              idempotency_key: confirmHigh ? (idempotencyKey + '_confirmed') : idempotencyKey,
+              confirm_high_amount: confirmHigh
+            })
+          });
+          return { res: r, json: await r.json() };
+        };
+
+        let { res, json } = await sendSaleReq(false);
+        if (res.status === 409 && json.day_closed) {
+          showToast(json.message || "🔒 Gün kapatılmış! Satış girilemez.");
+          loadTodayCashSummary();
+          return;
+        }
+        if (res.status === 409 && json.day_not_open) {
+          showToast(json.message || "⚠️ Önce gün açılışını yapınız!");
+          openCashDayModal();
+          return;
+        }
+        if (res.status === 409 && json.requires_confirmation) {
+          if (confirm(json.message || `⚠️ Yüksek tutar (${Number(finalTotal).toFixed(2)} ₺). Satışı onaylıyor musunuz?`)) {
+            ({ res, json } = await sendSaleReq(true));
+          } else {
+            showToast("Satış iptal edildi.");
+            return;
+          }
+        }
         
         if (json.ok) {
           playBeep();
@@ -3877,9 +4287,14 @@
           renderPOSCart();
           loadProducts();
           loadPOSProductPicker();
-          loadSalesHistory();
-          loadSalesAnalytics();
-          loadForecastData();
+          loadTodayCashSummary();
+          if (window.currentUserRole === 'calisan') {
+            loadStaffTodaySales();
+          } else {
+            loadSalesHistory();
+            loadSalesAnalytics();
+            loadForecastData();
+          }
           triggerManualSync();
         } else {
           showToast("❌ " + (json.message || "Satış kaydedilemedi!"));
@@ -4067,20 +4482,31 @@
       const idempotencyKey = 'netpos_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
 
       try {
-        const res = await fetchWithAuth('/api/sales', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            items: posCart,
-            note: note,
-            channel: 'internet',
-            total_amount: finalTotal,
-            customer_name: customerName || null,
-            idempotency_key: idempotencyKey
-          })
-        });
+        const sendNetSale = async (confirmHigh = false) => {
+          const r = await fetchWithAuth('/api/sales', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              items: posCart,
+              note: note,
+              channel: 'internet',
+              total_amount: finalTotal,
+              customer_name: customerName || null,
+              idempotency_key: confirmHigh ? (idempotencyKey + '_confirmed') : idempotencyKey,
+              confirm_high_amount: confirmHigh
+            })
+          });
+          return { res: r, json: await r.json() };
+        };
 
-        const json = await res.json();
+        let { res, json } = await sendNetSale(false);
+        if (res.status === 409 && json.requires_confirmation) {
+          if (confirm(json.message || `⚠️ Yüksek tutar (${Number(finalTotal).toFixed(2)} ₺). Onaylıyor musunuz?`)) {
+            ({ res, json } = await sendNetSale(true));
+          } else {
+            return;
+          }
+        }
         if (json.ok) {
           playBeep();
           showToast(`✅ ${platform} satışı başarıyla tamamlandı!`);
@@ -4719,6 +5145,11 @@
           loadExpenses();
         } else if (subTabName === 'forecasts') {
           loadForecastData();
+        } else if (subTabName === 'security-audit') {
+          loadDiscrepancyReport();
+          loadCashMovements();
+          loadCancelledReport();
+          loadAuditLogs();
         }
       } catch(err) {
         console.error('Subtab loader error:', err);
@@ -4851,13 +5282,29 @@
       const category = document.getElementById('exp-category').value;
       const expense_date = document.getElementById('exp-date').value || (new Date().toISOString().split('T')[0]);
 
+      if (isNaN(amount) || amount <= 0) {
+        showToast("❌ Gider tutarı 0'dan büyük olmalıdır!");
+        return;
+      }
+
       try {
-        const res = await fetchWithAuth('/api/expenses', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title, amount, category, expense_date })
-        });
-        const json = await res.json();
+        const sendExp = async (confirmHigh = false) => {
+          const r = await fetchWithAuth('/api/expenses', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title, amount, category, expense_date, confirm_high_amount: confirmHigh })
+          });
+          return { res: r, json: await r.json() };
+        };
+
+        let { res, json } = await sendExp(false);
+        if (res.status === 409 && json.requires_confirmation) {
+          if (confirm(json.message || `⚠️ Yüksek gider tutarı (${amount.toFixed(2)} ₺). Onaylıyor musunuz?`)) {
+            ({ res, json } = await sendExp(true));
+          } else {
+            return;
+          }
+        }
         showToast(json.message || "Gider kaydedildi.");
         if (json.ok) {
           document.getElementById('exp-title').value = '';
@@ -4888,15 +5335,31 @@
           return;
         }
 
-        container.innerHTML = expenses.map(e => `
-          <div style="font-size:0.8rem; display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px dashed var(--border);">
-            <div>
-              <span style="font-weight:700; color:var(--text);">${e.title}</span>
-              <span style="font-size:0.7rem; color:var(--text-muted); margin-left:6px;">(${e.category} | ${e.expense_date})</span>
+        container.innerHTML = expenses.map(e => {
+          const isCancelled = (e.status === 'cancelled');
+          const rowStyle = isCancelled
+            ? 'opacity:0.55; text-decoration:line-through; color:var(--text-muted);'
+            : '';
+          const cancelBadge = isCancelled
+            ? `<span style="font-size:0.68rem; background:rgba(239,68,68,0.14); color:#ef4444; padding:1px 6px; border-radius:6px; margin-left:6px; text-decoration:none; display:inline-block;">İPTAL: ${e.cancel_reason || ''}</span>`
+            : '';
+          const cancelBtn = (!isCancelled && window.currentUserRole !== 'calisan')
+            ? `<button type="button" onclick="promptCancelRecord('expense', ${e.id}, '${(e.title || '').replace(/'/g, "\\'")}', ${Number(e.amount || 0)})" style="margin-left:8px; padding:2px 7px; font-size:0.7rem; background:rgba(239,68,68,0.12); color:#ef4444; border:1px solid rgba(239,68,68,0.3); border-radius:6px; cursor:pointer;">🚫 İptal</button>`
+            : '';
+          return `
+            <div style="font-size:0.8rem; display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px dashed var(--border); ${rowStyle}">
+              <div>
+                <span style="font-weight:700;">${e.title}</span>
+                <span style="font-size:0.7rem; color:var(--text-muted); margin-left:6px;">(${e.category} | ${e.expense_date})</span>
+                ${cancelBadge}
+              </div>
+              <div style="display:flex; align-items:center;">
+                <span style="font-weight:700; color:${isCancelled ? 'var(--text-muted)' : 'var(--danger)'};">${Number(e.amount || 0).toFixed(2)} ₺</span>
+                ${cancelBtn}
+              </div>
             </div>
-            <div style="font-weight:700; color:var(--danger);">${e.amount.toFixed(2)} ₺</div>
-          </div>
-        `).join('');
+          `;
+        }).join('');
       } catch (err) {
         container.innerHTML = '<div style="font-size:0.75rem; color:var(--danger);">Giderler yüklenemedi.</div>';
       }
@@ -5010,47 +5473,137 @@
     }
 
     let pendingDeleteSaleId = null;
+    let pendingCancelMode = 'sale'; // 'sale' | 'bulk_sale' | 'expense' | 'cash_movement' | 'farm_egg' | 'farm_feed'
+    let pendingCancelRecordId = null;
 
-    function promptDeleteSale(saleId, soldAt, totalAmount) {
-      pendingDeleteSaleId = saleId;
+    function promptCancelRecord(mode, recordId, label, amount) {
+      pendingCancelMode = mode;
+      pendingCancelRecordId = recordId;
+      pendingDeleteSaleId = (mode === 'sale') ? recordId : null;
+
+      const titleEl = document.getElementById('cancel-modal-title');
       const desc = document.getElementById('delete-sale-modal-desc');
+      const reasonSel = document.getElementById('cancel-reason-select');
+      const noteIn = document.getElementById('cancel-note-input');
+      if (reasonSel) reasonSel.value = '';
+      if (noteIn) noteIn.value = '';
+
+      const modeTitles = {
+        sale: 'Satışı İptal Et',
+        bulk_sale: 'Seçilen Satışları Toplu İptal Et',
+        expense: 'Gideri İptal Et',
+        cash_movement: 'Tahsilat / Kasa Hareketini İptal Et',
+        farm_egg: 'Yumurta Satışını İptal Et',
+        farm_feed: 'Yem Alımını İptal Et'
+      };
+      if (titleEl) titleEl.innerText = modeTitles[mode] || 'Kaydı İptal Et';
+
       if (desc) {
-        desc.innerHTML = `<b>${soldAt}</b> tarihindeki <b>${parseFloat(totalAmount).toFixed(2)} ₺</b> tutarındaki satış kaydını silmek istediğinizden emin misiniz?<br><br><span style="color:var(--accent);">ℹ️ Not: Bu satıştaki ürünlerin adetleri stoklarınıza otomatik olarak geri eklenecektir.</span>`;
+        if (mode === 'sale') {
+          desc.innerHTML = `<b>${label}</b> tarihindeki <b>${parseFloat(amount || 0).toFixed(2)} ₺</b> tutarındaki satış fiziksel olarak silinmeyecek, <b>İptal Edildi</b> durumuna alınacaktır.<br><span style="color:var(--accent);">ℹ️ Ürün stokları otomatik olarak geri eklenecektir.</span>`;
+        } else if (mode === 'bulk_sale') {
+          desc.innerHTML = `Seçilen <b>${label}</b> (Toplam: <b>${parseFloat(amount || 0).toFixed(2)} ₺</b>) iptal edilecektir. Tüm stoklar depoya iade edilecek ve denetim kaydına işlenecektir.`;
+        } else {
+          desc.innerHTML = `<b>${label}</b> (<b>${parseFloat(amount || 0).toFixed(2)} ₺</b>) kaydı iptal edilecek ve hiçbir toplam/bakiye hesabına dahil edilmeyecektir.`;
+        }
       }
       const modal = document.getElementById('delete-sale-modal-overlay');
       if (modal) modal.style.display = 'flex';
     }
 
+    function promptDeleteSale(saleId, soldAt, totalAmount) {
+      promptCancelRecord('sale', saleId, soldAt, totalAmount);
+    }
+
     function closeDeleteSaleModal() {
       pendingDeleteSaleId = null;
+      pendingCancelRecordId = null;
       const modal = document.getElementById('delete-sale-modal-overlay');
       if (modal) modal.style.display = 'none';
     }
 
     async function executeDeleteSale() {
-      if (!pendingDeleteSaleId) return;
+      const reasonSel = document.getElementById('cancel-reason-select');
+      const noteIn = document.getElementById('cancel-note-input');
+      const cancel_reason = (reasonSel ? reasonSel.value : '').trim();
+      const cancel_note = (noteIn ? noteIn.value : '').trim();
+
+      if (!cancel_reason) {
+        showToast("⚠️ Lütfen bir iptal / iade nedeni seçiniz!");
+        return;
+      }
+      if (cancel_reason === 'Diğer' && cancel_note.length < 3) {
+        showToast("⚠️ 'Diğer' seçildiğinde kısa bir açıklama notu yazmanız zorunludur!");
+        return;
+      }
+
       const btn = document.getElementById('confirm-delete-sale-btn');
-      if (btn) btn.innerText = "Siliniyor...";
+      if (btn) btn.innerText = "İptal ediliyor...";
 
       try {
-        const res = await fetchWithAuth('/api/sales/' + encodeURIComponent(pendingDeleteSaleId) + '?restore_stock=true', {
-          method: 'DELETE'
-        });
+        let res;
+        if (pendingCancelMode === 'sale' && pendingDeleteSaleId) {
+          res = await fetchWithAuth('/api/sales/' + encodeURIComponent(pendingDeleteSaleId) + '/cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ restore_stock: true, cancel_reason, cancel_note })
+          });
+        } else if (pendingCancelMode === 'bulk_sale') {
+          res = await fetchWithAuth('/api/sales/bulk-cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sale_ids: Array.from(_selectedSaleIds), restore_stock: true, cancel_reason, cancel_note })
+          });
+        } else if (pendingCancelMode === 'expense' && pendingCancelRecordId) {
+          res = await fetchWithAuth('/api/expenses/' + encodeURIComponent(pendingCancelRecordId) + '/cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cancel_reason, cancel_note })
+          });
+        } else if (pendingCancelMode === 'cash_movement' && pendingCancelRecordId) {
+          res = await fetchWithAuth('/api/cash-movements/' + encodeURIComponent(pendingCancelRecordId) + '/cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cancel_reason, cancel_note })
+          });
+        } else if (pendingCancelMode === 'credit_collection' && pendingCancelRecordId) {
+          res = await fetchWithAuth('/api/credit/collections/' + encodeURIComponent(pendingCancelRecordId) + '/cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cancel_reason, cancel_note })
+          });
+        } else {
+          closeDeleteSaleModal();
+          return;
+        }
+
         const json = await res.json();
         if (json.ok) {
-          showToast("✅ " + (json.message || "Satış silindi ve stoklar geri yüklendi."));
+          showToast("✅ " + (json.message || "Kayıt iptal edildi."));
+          _selectedSaleIds.clear();
+          updateBulkDeleteButton();
           closeDeleteSaleModal();
           loadSalesHistory();
+          loadSalesAnalytics();
+          loadExpenses();
           loadProducts();
           loadPOSProductPicker();
+          if (typeof loadCashMovements === 'function') loadCashMovements();
+          if (typeof loadTodayCashSummary === 'function') loadTodayCashSummary();
+          if (typeof loadCreditCustomers === 'function') loadCreditCustomers();
+          if (window._activeCreditCustomerId && typeof openCreditCustomerDetail === 'function') {
+            openCreditCustomerDetail(window._activeCreditCustomerId);
+          }
+          if (typeof loadCancelledReport === 'function') loadCancelledReport();
+          if (typeof loadAuditLogs === 'function') loadAuditLogs();
           triggerManualSync();
         } else {
-          showToast("❌ " + (json.message || "Satış silinemedi!"));
+          showToast("❌ " + (json.message || "İptal işlemi başarısız!"));
         }
       } catch (err) {
         showToast("⚠️ Bağlantı hatası!");
       } finally {
-        if (btn) btn.innerText = "Evet, Satışı Sil";
+        if (btn) btn.innerText = "Evet, İptal Et";
       }
     }
 
@@ -5193,7 +5746,7 @@
       if (badge) badge.innerText = `${count} seçildi`;
 
       if (btn) {
-        btn.innerText = `🗑️ Seçilenleri Sil (${count})`;
+        btn.innerText = `🚫 Seçilenleri İptal Et (${count})`;
         if (count > 0) {
           btn.disabled = false;
           btn.style.opacity = '1';
@@ -5215,36 +5768,13 @@
 
     async function bulkDeleteSelectedSales() {
       if (_selectedSaleIds.size === 0) return;
-      const selectedList = _allSalesData.filter(s => _selectedSaleIds.has(String(s.id)));
-      const totalAmount = selectedList.reduce((sum, s) => sum + Number(s.total_amount || 0), 0);
-      const count = _selectedSaleIds.size;
-
-      const conf = confirm(`Seçilen ${count} adet satışı (Toplam: ${totalAmount.toFixed(2)} ₺) kalıcı olarak silmek istediğinizden emin misiniz?\n\nℹ️ Bu satışlardaki ürünlerin adetleri stoklarınıza otomatik olarak geri yüklenecektir.`);
-      if (!conf) return;
-
-      const btn = document.getElementById('bulk-delete-sales-btn');
-      if (btn) btn.innerText = "Siliniyor...";
-
-      try {
-        const res = await fetchWithAuth('/api/sales/bulk-delete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sale_ids: Array.from(_selectedSaleIds),
-            restore_stock: true
-          })
-        });
-        const json = await res.json();
-        showToast(json.message || "Seçilen satışlar silindi.");
-        _selectedSaleIds.clear();
-        updateBulkDeleteButton();
-        loadSalesHistory();
-        loadProducts();
-        loadPOSProductPicker();
-        triggerManualSync();
-      } catch (err) {
-        showToast("❌ Toplu silme esnasında hata oluştu!");
+      const selectedList = _allSalesData.filter(s => _selectedSaleIds.has(String(s.id)) && s.status !== 'cancelled');
+      if (!selectedList.length) {
+        showToast("Seçili aktif satış bulunamadı.");
+        return;
       }
+      const totalAmount = selectedList.reduce((sum, s) => sum + Number(s.total_amount || 0), 0);
+      promptCancelRecord('bulk_sale', null, `${selectedList.length} adet satış`, totalAmount);
     }
 
     function getFilteredSales() {
@@ -5297,12 +5827,22 @@
       }).join('');
 
       const safeCustName = (s.customer_name || '').replace(/'/g, "\\'");
+      const isCancelled = (String(s.status || 'active').toLowerCase() === 'cancelled');
+      const cardOpacityStyle = isCancelled ? 'opacity:0.58; filter:grayscale(0.75); border:1px dashed var(--danger);' : `border:${isSelected ? '2px solid var(--accent)' : '1px solid var(--border)'};`;
+      const strikeStyle = isCancelled ? 'text-decoration:line-through; color:var(--text-muted);' : 'color:#10B981;';
+      const cancelBanner = isCancelled ? `
+        <div style="margin-top:6px; padding:6px 10px; border-radius:8px; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); font-size:0.75rem; color:#ef4444;">
+          <b>🚫 İPTAL EDİLDİ</b> — Neden: <b>${s.cancel_reason || 'Belirtilmedi'}</b>
+          ${s.cancel_note ? ` | Not: <i>${s.cancel_note}</i>` : ''}
+          <div style="font-size:0.7rem; color:var(--text-muted); margin-top:2px;">İptal Eden: ${s.cancelled_by || 'Patron'} (${s.cancelled_at || ''})</div>
+        </div>
+      ` : '';
 
       return `
-        <div id="sale-card-${s.id}" class="sale-card-item" style="content-visibility:auto; contain-intrinsic-size:0 100px; background:var(--card); border:${isSelected ? '2px solid var(--accent)' : '1px solid var(--border)'}; border-radius:14px; padding:12px 14px; margin-bottom:12px; box-shadow:var(--card-shadow); transition:all 0.2s;">
+        <div id="sale-card-${s.id}" class="sale-card-item" style="content-visibility:auto; contain-intrinsic-size:0 100px; background:var(--card); ${cardOpacityStyle} border-radius:14px; padding:12px 14px; margin-bottom:12px; box-shadow:var(--card-shadow); transition:all 0.2s;">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
             <div style="display:flex; align-items:flex-start; gap:10px; flex:1;">
-              <input type="checkbox" class="sale-select-cb" ${isSelected ? 'checked' : ''} onchange="toggleSaleSelection('${s.id}', this.checked)" style="width:18px; height:18px; cursor:pointer; margin-top:4px;">
+              ${isCancelled ? '' : `<input type="checkbox" class="sale-select-cb" ${isSelected ? 'checked' : ''} onchange="toggleSaleSelection('${s.id}', this.checked)" style="width:18px; height:18px; cursor:pointer; margin-top:4px;">`}
               <div style="flex:1;">
                 <div style="display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin-bottom:4px;">
                   <span style="display:inline-flex; align-items:center; gap:6px; background:var(--card-subtle); padding:3px 8px; border-radius:8px; border:1px solid var(--border); font-size:0.82rem;">
@@ -5313,18 +5853,21 @@
                   </span>
                   ${chBadge}
                   ${custBadge}
+                  ${isCancelled ? `<span style="font-size:0.72rem; background:rgba(239,68,68,0.18); color:#ef4444; border:1px solid rgba(239,68,68,0.4); padding:2px 8px; border-radius:8px; font-weight:800;">🚫 İPTAL EDİLDİ</span>` : ''}
                 </div>
-                <div style="font-size:0.75rem; color:var(--text-muted);">${s.item_count || items.length} adet ürün | ${s.note || 'Satış'}</div>
+                <div style="font-size:0.75rem; color:var(--text-muted); ${isCancelled ? 'text-decoration:line-through;' : ''}">${s.item_count || items.length} adet ürün | ${s.note || 'Satış'}</div>
               </div>
             </div>
             <div style="text-align:right; min-width:95px;">
               <div style="font-size:0.65rem; color:var(--text-muted); font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">Toplam Tutar</div>
-              <div style="font-size:1.25rem; font-weight:900; color:#10B981; line-height:1.2;">${Number(s.total_amount).toFixed(2)} ₺</div>
+              <div style="font-size:1.25rem; font-weight:900; ${strikeStyle} line-height:1.2;">${Number(s.total_amount).toFixed(2)} ₺</div>
             </div>
           </div>
 
+          ${cancelBanner}
+
           ${items.length > 0 ? `
-            <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:10px; padding:6px 12px; margin-top:8px;">
+            <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:10px; padding:6px 12px; margin-top:8px; ${isCancelled ? 'text-decoration:line-through;' : ''}">
               ${itemDetails}
             </div>
           ` : ''}
@@ -5332,16 +5875,19 @@
           <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; padding-top:6px; border-top:1px solid var(--border); flex-wrap:wrap; gap:6px;">
             <div style="font-size:0.72rem; color:var(--text-muted); display:flex; align-items:center; gap:6px;">
               <span style="background:var(--card-subtle); padding:2px 6px; border-radius:4px; border:1px solid var(--border); font-weight:700; color:var(--text);">#${s.id}</span>
+              ${s.created_by ? `<span>• 👤 ${s.created_by}</span>` : ''}
               ${s.note ? `<span>• <i>${s.note}</i></span>` : ''}
             </div>
+            ${(!isCancelled && window.currentUserRole !== 'calisan') ? `
             <div style="display:flex; gap:6px;">
               <button type="button" class="btn" style="padding:4px 10px; font-size:0.75rem; font-weight:700; background:rgba(14,165,233,0.12); color:#0284C7; border:1px solid rgba(14,165,233,0.3); border-radius:6px; cursor:pointer;" onclick="openEditSaleDatetimeModal('${s.id}', '${s.sold_at}', ${s.total_amount}, '${safeCustName}')">
                 ✏️ Tarih/Saat Düzenle
               </button>
               <button type="button" class="btn" style="padding:4px 10px; font-size:0.75rem; font-weight:700; background:var(--danger-soft); color:var(--danger); border:1px solid rgba(239,68,68,0.25); border-radius:6px; cursor:pointer;" onclick="promptDeleteSale('${s.id}', '${s.sold_at}', ${s.total_amount})">
-                🗑️ Satışı Sil
+                🚫 Satışı İptal Et
               </button>
             </div>
+            ` : ''}
           </div>
         </div>
       `;
@@ -5398,10 +5944,10 @@
       const pad = (n) => String(n).padStart(2, '0');
       const todayYMD = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 
-      const filtered = filteredList || [];
+      const filtered = (filteredList || []).filter(s => String(s.status || 'active').toLowerCase() !== 'cancelled');
 
-      // 1. Bugünün satışlarını filtrele
-      const todaySales = (_allSalesData || []).filter(s => (s.sold_at || '').startsWith(todayYMD));
+      // 1. Bugünün satışlarını filtrele (iptal edilenler hariç)
+      const todaySales = (_allSalesData || []).filter(s => (s.sold_at || '').startsWith(todayYMD) && String(s.status || 'active').toLowerCase() !== 'cancelled');
       let todayTotalRevenue = 0;
       let todayReceiptCount = todaySales.length;
       let todayStoreRev = 0;
@@ -6846,8 +7392,1204 @@
     });
 
     let _appInitialized = false;
+    window.currentUserRole = sessionStorage.getItem('user_role') || 'patron';
+
+    function applyRoleUI() {
+      const isStaff = (window.currentUserRole === 'calisan');
+      const roleBadge = document.getElementById('role-status-badge');
+      if (roleBadge) {
+        roleBadge.innerText = isStaff ? '👤 Çalışan' : '👑 Patron';
+        roleBadge.style.background = isStaff ? 'rgba(245,158,11,0.18)' : 'rgba(99,102,241,0.16)';
+        roleBadge.style.color = isStaff ? '#D97706' : '#818CF8';
+      }
+
+      const hideForStaffIds = ['nav-reports', 'nav-ai', 'farm-badge', 'sync-status-badge', 'ai-key-header-btn', 'discrepancy-alert-badge'];
+      hideForStaffIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = isStaff ? 'none' : '';
+      });
+      if (!isStaff && typeof loadDiscrepancyReport === 'function') {
+        loadDiscrepancyReport();
+      }
+
+      const staffCard = document.getElementById('staff-today-sales-card');
+      if (staffCard) staffCard.style.display = isStaff ? 'block' : 'none';
+
+      if (isStaff) {
+        const activeTab = document.querySelector('.tab-content.active');
+        if (activeTab && (activeTab.id === 'tab-reports' || activeTab.id === 'tab-ai')) {
+          switchTab('pos', document.getElementById('nav-pos'));
+        }
+        loadStaffTodaySales();
+      }
+
+      // Kasa hareket modalındaki Patron'a özel seçenekleri rol bazlı güncelle
+      const optPatronW = document.getElementById('opt-patron-withdraw');
+      const optCashOut = document.getElementById('opt-cash-out');
+      if (optPatronW) optPatronW.style.display = isStaff ? 'none' : '';
+      if (optCashOut) optCashOut.style.display = isStaff ? 'none' : '';
+      loadTodayCashSummary();
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // 💰 KASA YÖNETİMİ (GÜN AÇILIŞI, BEKLENEN NAKİT, HAREKET DÖKÜMÜ)
+    // ════════════════════════════════════════════════════════════════════
+    window._todayCashSummary = null;
+
+    function openCashDayModal() {
+      const m = document.getElementById('open-cash-day-modal-overlay');
+      if (m) m.style.display = 'flex';
+      setTimeout(() => {
+        const inp = document.getElementById('cash-day-opening-amount');
+        if (inp) { inp.focus(); inp.select(); }
+      }, 100);
+    }
+
+    function closeCashDayModal() {
+      const m = document.getElementById('open-cash-day-modal-overlay');
+      if (m) m.style.display = 'none';
+    }
+
+    async function submitOpenCashDay(e) {
+      e.preventDefault();
+      const amount = parseFloat(document.getElementById('cash-day-opening-amount')?.value || '0');
+      const opening_note = (document.getElementById('cash-day-opening-note')?.value || '').trim();
+      if (isNaN(amount) || amount < 0) {
+        showToast("❌ Açılış kasası negatif olamaz!");
+        return;
+      }
+
+      const sendOpen = async (confirmHigh = false) => {
+        const r = await fetchWithAuth('/api/cash-day/open', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ opening_amount: amount, opening_note, confirm_high_amount: confirmHigh })
+        });
+        return { res: r, json: await r.json() };
+      };
+
+      try {
+        let { res, json } = await sendOpen(false);
+        if (res.status === 409 && json.requires_confirmation) {
+          if (confirm(json.message)) {
+            ({ res, json } = await sendOpen(true));
+          } else {
+            return;
+          }
+        }
+        showToast(json.message || "Gün açıldı.");
+        if (json.ok) {
+          closeCashDayModal();
+          loadTodayCashSummary();
+          if (typeof loadAuditLogs === 'function') loadAuditLogs();
+        }
+      } catch (err) {
+        showToast("⚠️ Gün açılışı kaydedilemedi.");
+      }
+    }
+
+    function openCashDrawerModal() {
+      const m = document.getElementById('cash-drawer-modal-overlay');
+      if (m) m.style.display = 'flex';
+      loadTodayCashSummary();
+    }
+
+    function closeCashDrawerModal() {
+      const m = document.getElementById('cash-drawer-modal-overlay');
+      if (m) m.style.display = 'none';
+    }
+
+    async function loadTodayCashSummary() {
+      const bar = document.getElementById('pos-cash-status-bar');
+      const txt = document.getElementById('pos-cash-status-text');
+      const acts = document.getElementById('pos-cash-status-actions');
+      const modalSummary = document.getElementById('cash-drawer-summary-box');
+      const modalList = document.getElementById('cash-drawer-movements-list');
+      if (!bar || !txt || !acts) return;
+
+      try {
+        const res = await fetchWithAuth('/api/cash-day/summary');
+        if (!res.ok) return;
+        const json = await res.json();
+        if (!json.ok || !json.summary) return;
+        const s = json.summary;
+        window._todayCashSummary = s;
+
+        if (s.is_closed) {
+          const hasDiff = !!s.has_difference;
+          bar.style.borderColor = hasDiff ? '#EF4444' : '#6366F1';
+          bar.style.background = hasDiff ? 'rgba(239, 68, 68, 0.12)' : 'rgba(99, 102, 241, 0.1)';
+          const closedAmt = s.day?.counted_cash != null ? Number(s.day.counted_cash).toFixed(2) : Number(s.expected_cash).toFixed(2);
+          const closedBy = s.day?.closed_by || 'Patron';
+          const reopenBtn = (window.currentUserRole !== 'calisan')
+            ? `<button type="button" class="btn" style="width:auto; padding:6px 12px; font-size:0.78rem; background:#F59E0B; color:#fff; font-weight:700;" onclick="promptReopenCashDay('${s.business_date}')">🔓 Günü Yeniden Aç</button>`
+            : '';
+          const diffWarnHtml = hasDiff ? `
+            <div style="margin-top:4px; padding:4px 8px; border-radius:6px; background:rgba(239,68,68,0.18); color:#EF4444; font-size:0.76rem; font-weight:800;">
+              ⚠️ GÜN SONU FARK UYARISI:
+              Nakit: ${s.comparison?.cash?.label || '-'} · POS: ${s.comparison?.pos?.label || '-'} · Gider: ${s.comparison?.expenses?.label || '-'}
+            </div>
+          ` : '';
+          txt.innerHTML = `
+            <div style="font-size:0.9rem; font-weight:800; color:${hasDiff ? '#EF4444' : '#6366F1'};">
+              🔒 Gün Kapatıldı (${s.business_date}) — Açılış: ${Number(s.opening_amount).toFixed(2)} ₺ → Kapanış: ${closedAmt} ₺
+            </div>
+            <div style="font-size:0.73rem; color:var(--text-muted); margin-top:2px;">Kapatan: <b>${closedBy}</b> · Kapanan günde düzenleme yapılamaz.</div>
+            ${diffWarnHtml}
+          `;
+          acts.innerHTML = `
+            <button type="button" class="btn btn-secondary" style="width:auto; padding:6px 12px; font-size:0.78rem; font-weight:700;" onclick="openDayCloseModal()">📊 Mutabakat Özeti</button>
+            ${reopenBtn}
+          `;
+        } else if (!s.is_open) {
+          bar.style.borderColor = '#F59E0B';
+          bar.style.background = 'rgba(245, 158, 11, 0.1)';
+          txt.innerHTML = `<b style="color:#D97706;">🔒 Gün Açılışı Yapılmadı (${s.business_date})</b><div style="font-size:0.76rem; color:var(--text-muted); margin-top:2px;">Satış girişi yapabilmek için önce açılış kasasını girerek günü açınız.</div>`;
+          acts.innerHTML = `<button type="button" class="btn" style="width:auto; padding:7px 14px; font-size:0.8rem; background:linear-gradient(135deg, #10B981, #059669); color:#fff;" onclick="openCashDayModal()">🔓 Günü Aç (Açılış Kasası)</button>`;
+        } else {
+          bar.style.borderColor = 'rgba(16, 185, 129, 0.45)';
+          bar.style.background = 'var(--card)';
+          const openTime = (s.day?.opened_at || '').split(' ')[1]?.slice(0, 5) || '';
+          const openBy = s.day?.opened_by || 'Patron';
+          txt.innerHTML = `
+            <div style="font-size:0.9rem; font-weight:800; color:var(--text);">
+              💰 Açılış: <span style="color:var(--accent);">${Number(s.opening_amount).toFixed(2)} ₺</span>
+              <span style="margin:0 6px; color:var(--text-muted);">→</span>
+              Şu anki beklenen nakit: <span style="color:#10B981;">${Number(s.expected_cash).toFixed(2)} ₺</span>
+            </div>
+            <div style="font-size:0.73rem; color:var(--text-muted); margin-top:3px; display:flex; gap:10px; flex-wrap:wrap;">
+              <span>+ Nakit Satış: <b>${Number(s.cash_sales).toFixed(2)} ₺</b> (${s.cash_sales_count})</span>
+              <span>− Nakit Gider: <b style="color:var(--danger);">${Number(s.cash_expenses || 0).toFixed(2)} ₺</b></span>
+              <span>+ Giriş: <b>${Number(s.cash_in).toFixed(2)} ₺</b></span>
+              <span>− Çıkış: <b style="color:var(--danger);">${Number(s.cash_out).toFixed(2)} ₺</b></span>
+              <span>• Açan: ${openBy} (${openTime})</span>
+            </div>
+          `;
+          acts.innerHTML = `
+            <button type="button" class="btn btn-secondary" style="width:auto; padding:6px 12px; font-size:0.78rem; font-weight:700;" onclick="openCashDrawerModal()">💰 Kasa & Hareketler</button>
+            <button type="button" class="btn" style="width:auto; padding:6px 12px; font-size:0.78rem; font-weight:700; background:#4F46E5; color:#fff;" onclick="openDayCloseModal()">🔒 Gün Sonu Kapanış</button>
+          `;
+        }
+
+        if (modalSummary) {
+          const openBy = s.day?.opened_by || '-';
+          const openAt = s.day?.opened_at || '-';
+          modalSummary.innerHTML = `
+            <div style="font-size:0.95rem; font-weight:800; margin-bottom:8px;">
+              Açılış: <span style="color:var(--accent);">${Number(s.opening_amount).toFixed(2)} ₺</span>
+              → Şu anki beklenen nakit: <span style="color:#10B981;">${Number(s.expected_cash).toFixed(2)} ₺</span>
+            </div>
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:6px; font-size:0.76rem;">
+              <div style="background:var(--card); padding:6px 8px; border-radius:8px; border:1px solid var(--border);">
+                <div style="color:var(--text-muted);">Açılış Kasası</div>
+                <div style="font-weight:800;">${Number(s.opening_amount).toFixed(2)} ₺</div>
+              </div>
+              <div style="background:var(--card); padding:6px 8px; border-radius:8px; border:1px solid var(--border);">
+                <div style="color:var(--text-muted);">+ Nakit Satışlar (${s.cash_sales_count})</div>
+                <div style="font-weight:800; color:#10B981;">+${Number(s.cash_sales).toFixed(2)} ₺</div>
+              </div>
+              <div style="background:var(--card); padding:6px 8px; border-radius:8px; border:1px solid var(--border);">
+                <div style="color:var(--text-muted);">+ Nakit Girişler</div>
+                <div style="font-weight:800; color:#3B82F6;">+${Number(s.cash_in).toFixed(2)} ₺</div>
+              </div>
+              <div style="background:var(--card); padding:6px 8px; border-radius:8px; border:1px solid var(--border);">
+                <div style="color:var(--text-muted);">− Nakit Çıkışlar</div>
+                <div style="font-weight:800; color:var(--danger);">−${Number(s.cash_out).toFixed(2)} ₺</div>
+              </div>
+            </div>
+            <div style="font-size:0.72rem; color:var(--text-muted); margin-top:6px;">
+              Açılış: <b>${openBy}</b> (${openAt}) ${s.card_sales > 0 ? `| Kart/İnternet Satış (kasaya dahil değil): <b>${Number(s.card_sales).toFixed(2)} ₺</b>` : ''}
+            </div>
+          `;
+        }
+
+        if (modalList) {
+          const movs = s.movements || [];
+          if (!movs.length) {
+            modalList.innerHTML = '<div style="font-size:0.78rem; color:var(--text-muted); text-align:center; padding:10px;">Bugün henüz gün içi kasa hareketi yok.</div>';
+          } else {
+            const catLabels = {
+              patron_cekis: '💸 Patron Nakit Çekti',
+              para_ustu: '➕ Kasaya Nakit Eklendi',
+              ek_nakit: '➕ Ek Nakit',
+              nakit_cikis: '➖ Kasa Nakit Çıkış',
+              genel: ''
+            };
+            modalList.innerHTML = movs.map(m => {
+              const isCanc = (m.status === 'cancelled');
+              const isOut = (m.movement_type === 'kasa_cikis');
+              const label = catLabels[m.category] || (isOut ? '➖ Kasa Çıkış' : (m.movement_type === 'tahsilat' ? '💵 Tahsilat' : '➕ Kasa Giriş'));
+              const rowSt = isCanc ? 'opacity:0.55; text-decoration:line-through; color:var(--text-muted);' : '';
+              const cancelBtn = (!isCanc && window.currentUserRole !== 'calisan')
+                ? `<button type="button" onclick="promptCancelRecord('cash_movement', ${m.id}, '${(m.description || '').replace(/'/g, "\\'")}', ${Number(m.amount || 0)})" style="margin-left:8px; padding:2px 7px; font-size:0.7rem; background:rgba(239,68,68,0.12); color:#ef4444; border:1px solid rgba(239,68,68,0.3); border-radius:6px; cursor:pointer;">🚫 İptal</button>`
+                : (isCanc ? `<span style="font-size:0.68rem; color:#ef4444; margin-left:6px; text-decoration:none; display:inline-block;">[İPTAL: ${m.cancel_reason || ''}]</span>` : '');
+              return `
+                <div style="display:flex; justify-content:space-between; align-items:center; padding:7px 0; border-bottom:1px dashed var(--border); font-size:0.8rem; ${rowSt}">
+                  <div>
+                    <b>${label}</b> · ${m.description}
+                    <div style="font-size:0.7rem; color:var(--text-muted);">👤 ${m.created_by || 'Patron'} · ${m.movement_date || ''}</div>
+                  </div>
+                  <div style="display:flex; align-items:center;">
+                    <span style="font-weight:800; color:${isCanc ? 'var(--text-muted)' : (isOut ? 'var(--danger)' : '#10B981')};">${isOut ? '−' : '+'}${Number(m.amount || 0).toFixed(2)} ₺</span>
+                    ${cancelBtn}
+                  </div>
+                </div>
+              `;
+            }).join('');
+          }
+        }
+      } catch (e) {}
+    }
+
+    async function submitDrawerCashMovement(e) {
+      e.preventDefault();
+      const actionVal = (document.getElementById('drawer-mov-action')?.value || 'kasa_giris:para_ustu').split(':');
+      const movement_type = actionVal[0];
+      const category = actionVal[1] || 'genel';
+      const amount = parseFloat(document.getElementById('drawer-mov-amount')?.value || '0');
+      const description = (document.getElementById('drawer-mov-desc')?.value || '').trim();
+
+      if (!description) {
+        showToast("❌ Açıklama boş bırakılamaz!");
+        return;
+      }
+      if (isNaN(amount) || amount <= 0) {
+        showToast("❌ Tutar 0'dan büyük olmalıdır!");
+        return;
+      }
+
+      const sendReq = async (opts = {}) => {
+        const r = await fetchWithAuth('/api/cash-movements', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            movement_type,
+            category,
+            amount,
+            description,
+            confirm_short_description: !!opts.confirmShort,
+            confirm_high_amount: !!opts.confirmHigh
+          })
+        });
+        return { res: r, json: await r.json() };
+      };
+
+      try {
+        let opts = { confirmShort: false, confirmHigh: false };
+        let { res, json } = await sendReq(opts);
+
+        while (res.status === 409 && json.requires_confirmation) {
+          if (!confirm(json.message)) return;
+          if (json.warning_type === 'short_description') {
+            opts.confirmShort = true;
+          } else {
+            opts.confirmHigh = true;
+          }
+          ({ res, json } = await sendReq(opts));
+        }
+
+        showToast(json.message || "Kasa hareketi kaydedildi.");
+        if (json.ok) {
+          document.getElementById('drawer-mov-amount').value = '';
+          document.getElementById('drawer-mov-desc').value = '';
+          loadTodayCashSummary();
+          if (typeof loadCashMovements === 'function') loadCashMovements();
+          if (typeof loadAuditLogs === 'function') loadAuditLogs();
+        }
+      } catch (err) {
+        showToast("⚠️ Kasa hareketi kaydedilemedi.");
+      }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // 🔒 GÜN SONU KAPANIŞ & MUTABAKAT İŞ MANTIĞI
+    // ════════════════════════════════════════════════════════════════════
+    let _dcPendingExpenses = [];
+    let _dcLastReconciliation = null;
+
+    function openDayCloseModal() {
+      _dcPendingExpenses = [];
+      const m = document.getElementById('day-close-modal-overlay');
+      if (m) m.style.display = 'flex';
+      const noteEl = document.getElementById('dc-closing-note');
+      if (noteEl) noteEl.value = '';
+      const cashEl = document.getElementById('dc-counted-cash');
+      const posEl = document.getElementById('dc-pos-total');
+      if (cashEl) cashEl.value = '';
+      if (posEl) posEl.value = '';
+      refreshDayClosePreview();
+    }
+
+    function closeDayCloseModal() {
+      const m = document.getElementById('day-close-modal-overlay');
+      if (m) m.style.display = 'none';
+    }
+
+    function addPendingDayCloseExpense() {
+      const titleEl = document.getElementById('dc-exp-title');
+      const amtEl = document.getElementById('dc-exp-amount');
+      const pmEl = document.getElementById('dc-exp-pm');
+      const title = (titleEl?.value || '').trim();
+      const amount = parseFloat(amtEl?.value || '0');
+      const payment_method = pmEl ? pmEl.value : 'nakit';
+
+      if (!title) {
+        showToast("⚠️ Gider açıklaması boş olamaz!");
+        return;
+      }
+      if (isNaN(amount) || amount <= 0) {
+        showToast("⚠️ Gider tutarı 0'dan büyük olmalıdır!");
+        return;
+      }
+      _dcPendingExpenses.push({ title, amount: Number(amount.toFixed(2)), payment_method });
+      if (titleEl) titleEl.value = '';
+      if (amtEl) amtEl.value = '';
+      refreshDayClosePreview();
+    }
+
+    function removePendingDayCloseExpense(idx) {
+      _dcPendingExpenses.splice(idx, 1);
+      refreshDayClosePreview();
+    }
+
+    async function refreshDayClosePreview() {
+      const cashRaw = document.getElementById('dc-counted-cash')?.value;
+      const posRaw = document.getElementById('dc-pos-total')?.value;
+      const payload = {
+        counted_cash: (cashRaw !== undefined && cashRaw !== '') ? parseFloat(cashRaw) : null,
+        entered_pos_total: (posRaw !== undefined && posRaw !== '') ? parseFloat(posRaw) : null,
+        new_expenses: _dcPendingExpenses
+      };
+
+      try {
+        const res = await fetchWithAuth('/api/cash-day/reconciliation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const json = await res.json();
+        if (!json.ok || !json.reconciliation) return;
+        const r = json.reconciliation;
+        _dcLastReconciliation = r;
+        renderDayCloseModalState(r);
+      } catch (e) {}
+    }
+
+    function renderDayCloseModalState(r) {
+      const banner = document.getElementById('dc-summary-banner');
+      const inputsSec = document.getElementById('dc-inputs-section');
+      const footerSec = document.getElementById('dc-close-footer');
+      const compBox = document.getElementById('dc-comparison-table');
+      const breakBox = document.getElementById('dc-breakdown-list');
+      const expBox = document.getElementById('dc-expenses-list');
+      const noteLabel = document.getElementById('dc-closing-note-label');
+
+      const closingDisplay = r.comparison?.cash?.entered != null
+        ? Number(r.comparison.cash.entered).toFixed(2)
+        : Number(r.expected_cash).toFixed(2);
+
+      if (banner) {
+        const diffBanner = r.has_difference ? `
+          <div style="margin-top:6px; padding:6px 10px; border-radius:8px; background:rgba(239,68,68,0.16); border:1px solid rgba(239,68,68,0.4); color:#EF4444; font-size:0.78rem; font-weight:800;">
+            🚨 DİKKAT: Gün sonu mutabakatında fark tespit edildi! (Nakit: ${r.comparison?.cash?.label || '-'} | POS: ${r.comparison?.pos?.label || '-'} | Gider: ${r.comparison?.expenses?.label || '-'})
+          </div>
+        ` : '';
+        banner.innerHTML = `
+          <div style="font-size:1rem; font-weight:900; color:var(--text);">
+            Açılış: <span style="color:var(--accent);">${Number(r.opening_amount).toFixed(2)} ₺</span>
+            <span style="margin:0 6px;">→</span>
+            Kapanış: <span style="color:${r.is_closed ? '#6366F1' : '#10B981'};">${closingDisplay} ₺</span>
+          </div>
+          <div style="font-size:0.74rem; color:var(--text-muted); margin-top:3px;">
+            Tarih: <b>${r.business_date}</b> · Durum: <b>${r.is_closed ? '🔒 Kapatıldı' : (r.is_open ? '🟢 Açık' : '⚠️ Açılmadı')}</b>
+            ${r.day?.closing_note ? ` · Not: <i>${r.day.closing_note}</i>` : ''}
+          </div>
+          ${diffBanner}
+        `;
+      }
+
+      if (inputsSec) inputsSec.style.display = r.is_closed ? 'none' : 'block';
+      if (footerSec) {
+        if (r.is_closed) {
+          const reopenHtml = (window.currentUserRole !== 'calisan')
+            ? `<button type="button" class="btn" style="flex:1.4; background:#F59E0B; color:#fff; font-weight:800;" onclick="promptReopenCashDay('${r.business_date}')">🔓 Günü Yeniden Aç (Patron)</button>`
+            : '';
+          footerSec.innerHTML = `
+            <div style="display:flex; gap:10px;">
+              <button type="button" class="btn btn-secondary" style="flex:1;" onclick="closeDayCloseModal()">Kapat</button>
+              ${reopenHtml}
+            </div>
+          `;
+        }
+      }
+
+      if (noteLabel && !r.is_closed) {
+        noteLabel.innerHTML = r.has_difference
+          ? `<span style="color:var(--danger);">⚠️ Fark bulundu — Kapanış Açıklama Notu ZORUNLU *</span>`
+          : `Kapanış Açıklama Notu (Fark yoksa opsiyonel)`;
+      }
+
+      if (expBox) {
+        const savedActive = (r.expenses || []).filter(e => e.status !== 'cancelled');
+        const rows = [];
+        savedActive.forEach(e => {
+          rows.push(`<div style="display:flex; justify-content:space-between; padding:3px 0; border-bottom:1px dashed var(--border);"><span>${e.title} (${e.payment_method === 'kart' ? '💳 Kart' : '💵 Nakit'})</span><b>${Number(e.amount).toFixed(2)} ₺</b></div>`);
+        });
+        _dcPendingExpenses.forEach((pe, idx) => {
+          rows.push(`<div style="display:flex; justify-content:space-between; align-items:center; padding:3px 0; border-bottom:1px dashed var(--border); color:var(--accent);"><span>[Yeni] ${pe.title} (${pe.payment_method === 'kart' ? '💳 Kart' : '💵 Nakit'})</span><span><b>${Number(pe.amount).toFixed(2)} ₺</b> <button type="button" onclick="removePendingDayCloseExpense(${idx})" style="background:none; border:none; color:var(--danger); cursor:pointer; font-weight:800;">&times;</button></span></div>`);
+        });
+        expBox.innerHTML = rows.length ? rows.join('') : '<div style="font-size:0.74rem; color:var(--text-muted);">Bugün için gider kalemi girilmedi.</div>';
+      }
+
+      if (compBox) {
+        const makeRow = (title, c) => {
+          const sysTxt = `${Number(c.system || 0).toFixed(2)} ₺`;
+          const entTxt = (c.entered != null) ? `${Number(c.entered).toFixed(2)} ₺` : '—';
+          let badge = `<span style="color:var(--text-muted); font-size:0.75rem;">Bekleniyor</span>`;
+          if (c.status === 'match') {
+            badge = `<span style="background:rgba(16,185,129,0.16); color:#10B981; padding:2px 8px; border-radius:8px; font-weight:800; font-size:0.75rem;">✅ Tutuyor</span>`;
+          } else if (c.status === 'surplus' || c.status === 'shortage') {
+            badge = `<span style="background:rgba(239,68,68,0.16); color:#EF4444; padding:2px 8px; border-radius:8px; font-weight:800; font-size:0.75rem;">🔴 ${c.label}</span>`;
+          }
+          return `
+            <tr style="border-bottom:1px dashed var(--border);">
+              <td style="padding:7px 4px; font-weight:700;">${title}</td>
+              <td style="padding:7px 4px; text-align:right; font-weight:700;">${sysTxt}</td>
+              <td style="padding:7px 4px; text-align:right; font-weight:700;">${entTxt}</td>
+              <td style="padding:7px 4px; text-align:right;">${badge}</td>
+            </tr>
+          `;
+        };
+        const cmp = r.comparison || {};
+        compBox.innerHTML = `
+          <table style="width:100%; border-collapse:collapse; font-size:0.82rem;">
+            <thead>
+              <tr style="border-bottom:1px solid var(--border); color:var(--text-muted); font-size:0.74rem;">
+                <th style="text-align:left; padding:4px;">Kalem</th>
+                <th style="text-align:right; padding:4px;">Sistem</th>
+                <th style="text-align:right; padding:4px;">Girilen</th>
+                <th style="text-align:right; padding:4px;">Fark</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${makeRow('💵 Nakit', cmp.cash || {})}
+              ${makeRow('💳 POS', cmp.pos || {})}
+              ${makeRow('🧾 Gider', cmp.expenses || {})}
+            </tbody>
+          </table>
+        `;
+      }
+
+      if (breakBox) {
+        const items = r.cash_formula_items || [];
+        breakBox.innerHTML = items.map(it => `
+          <div style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px dashed var(--border);">
+            <span>${it.sign === '+' ? '➕' : '➖'} ${it.label}</span>
+            <b style="color:${it.sign === '+' ? '#10B981' : 'var(--danger)'};">${it.sign}${Number(it.amount || 0).toFixed(2)} ₺</b>
+          </div>
+        `).join('') + `
+          <div style="display:flex; justify-content:space-between; padding:6px 0 0; font-weight:900; font-size:0.88rem;">
+            <span>= Beklenen Nakit</span>
+            <span style="color:var(--accent);">${Number(r.expected_cash || 0).toFixed(2)} ₺</span>
+          </div>
+        `;
+      }
+    }
+
+    async function submitCloseCashDay() {
+      const cashRaw = document.getElementById('dc-counted-cash')?.value;
+      const posRaw = document.getElementById('dc-pos-total')?.value;
+      const closing_note = (document.getElementById('dc-closing-note')?.value || '').trim();
+
+      if (cashRaw === '' || cashRaw === undefined) {
+        showToast("⚠️ Lütfen kasada sayılan nakit tutarını giriniz!");
+        return;
+      }
+      if (posRaw === '' || posRaw === undefined) {
+        showToast("⚠️ Lütfen POS gün sonu toplamını giriniz!");
+        return;
+      }
+
+      const sendClose = async (confirmHigh = false) => {
+        const r = await fetchWithAuth('/api/cash-day/close', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            counted_cash: parseFloat(cashRaw),
+            entered_pos_total: parseFloat(posRaw),
+            closing_note,
+            new_expenses: _dcPendingExpenses,
+            confirm_high_amount: confirmHigh
+          })
+        });
+        return { res: r, json: await r.json() };
+      };
+
+      try {
+        let { res, json } = await sendClose(false);
+        if (res.status === 409 && json.requires_confirmation) {
+          if (!confirm(json.message)) return;
+          ({ res, json } = await sendClose(true));
+        }
+        showToast(json.message || "Gün kapatıldı.");
+        if (json.ok) {
+          _dcPendingExpenses = [];
+          closeDayCloseModal();
+          loadTodayCashSummary();
+          loadExpenses();
+          if (typeof loadDiscrepancyReport === 'function' && window.currentUserRole !== 'calisan') {
+            loadDiscrepancyReport();
+          }
+          if (json.reconciliation?.repeat_alert?.message) {
+            showToast(json.reconciliation.repeat_alert.message, 6000);
+          }
+          if (typeof loadAuditLogs === 'function') loadAuditLogs();
+        }
+      } catch (err) {
+        showToast("⚠️ Gün sonu kapanışı kaydedilemedi.");
+      }
+    }
+
+    async function promptReopenCashDay(businessDate) {
+      const reason = prompt(`${businessDate} gününü yeniden açmak için neden giriniz (denetim kaydına işlenecektir):`);
+      if (!reason || !reason.trim()) return;
+      try {
+        const res = await fetchWithAuth('/api/day/reopen', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ date: businessDate, reason: reason.trim() })
+        });
+        const json = await res.json();
+        showToast(json.message || "Gün yeniden açıldı.");
+        if (json.ok) {
+          closeDayCloseModal();
+          loadTodayCashSummary();
+          if (typeof loadAuditLogs === 'function') loadAuditLogs();
+        }
+      } catch (err) {
+        showToast("⚠️ Gün yeniden açılamadı.");
+      }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // 📒 VERESİYE / CARİ HESAP & TAHSİLAT İŞ MANTIĞI
+    // ════════════════════════════════════════════════════════════════════
+    window._activeCreditCustomerId = null;
+
+    function onPosPaymentModeChange() {
+      const pm = document.querySelector('input[name="pos-payment-method"]:checked')?.value || 'nakit';
+      const box = document.getElementById('pos-credit-options-box');
+      const karmaBox = document.getElementById('pos-karma-inputs');
+      const showBox = (pm === 'veresiye' || pm === 'karma');
+      if (box) box.style.display = showBox ? 'block' : 'none';
+      if (karmaBox) karmaBox.style.display = (pm === 'karma') ? 'grid' : 'none';
+      if (showBox) {
+        populatePosCreditCustomers();
+        updatePosOverpayUI();
+      }
+    }
+
+    function updatePosOverpayUI() {
+      const pm = document.querySelector('input[name="pos-payment-method"]:checked')?.value || 'nakit';
+      const overpayBox = document.getElementById('pos-overpay-box');
+      const overpayTitle = document.getElementById('pos-overpay-title');
+      const previewLine = document.getElementById('pos-credit-preview-line');
+      const totalEl = document.getElementById('pos-total-amount');
+      const total = parseFloat((totalEl?.innerText || '0').replace(/[^0-9.,-]/g, '').replace(',', '.')) || 0;
+
+      if (pm === 'veresiye') {
+        if (overpayBox) overpayBox.style.display = 'none';
+        if (previewLine) previewLine.innerHTML = `📒 Tamamı (<b>${total.toFixed(2)} ₺</b>) müşteri cari hesabına borç yazılacak.`;
+        return;
+      }
+
+      const paidCash = parseFloat(document.getElementById('pos-paid-cash')?.value || '0') || 0;
+      const paidPos = parseFloat(document.getElementById('pos-paid-pos')?.value || '0') || 0;
+      const paidTotal = paidCash + paidPos;
+      const diff = Number((total - paidTotal).toFixed(2));
+
+      if (diff > 0) {
+        if (overpayBox) overpayBox.style.display = 'none';
+        if (previewLine) previewLine.innerHTML = `Ödenen: <b>${paidTotal.toFixed(2)} ₺</b> · Kalan <b style="color:var(--danger);">${diff.toFixed(2)} ₺</b> cari hesaba borç yazılacak.`;
+      } else if (diff < 0) {
+        const extra = Math.abs(diff);
+        if (previewLine) previewLine.innerHTML = `Ödenen: <b>${paidTotal.toFixed(2)} ₺</b> · Fazla ödeme: <b style="color:#10B981;">${extra.toFixed(2)} ₺</b>`;
+        if (overpayBox) overpayBox.style.display = 'block';
+        if (overpayTitle) overpayTitle.innerText = `Fazla Ödeme (${extra.toFixed(2)} ₺) Nasıl İşlensin?`;
+      } else {
+        if (overpayBox) overpayBox.style.display = 'none';
+        if (previewLine) previewLine.innerHTML = `✅ Ödeme tutarı satış toplamına eşit (${paidTotal.toFixed(2)} ₺).`;
+      }
+    }
+
+    async function populatePosCreditCustomers() {
+      const sel = document.getElementById('pos-credit-customer-select');
+      if (!sel) return;
+      try {
+        const res = await fetchWithAuth('/api/credit/customers');
+        const json = await res.json();
+        if (!json.ok) return;
+        const cur = sel.value;
+        sel.innerHTML = '<option value="">— Kayıtlı cari müşteri seçiniz —</option>' +
+          (json.customers || []).map(c => `<option value="${c.id}">${c.name} (${c.balance > 0 ? 'Borç: ' + c.balance.toFixed(2) + ' ₺' : (c.balance < 0 ? 'Alacak: ' + Math.abs(c.balance).toFixed(2) + ' ₺' : '0 ₺')})</option>`).join('');
+        if (cur) sel.value = cur;
+      } catch (e) {}
+    }
+
+    function openCreditModal() {
+      const m = document.getElementById('credit-modal-overlay');
+      if (m) m.style.display = 'flex';
+      showCreditListView();
+      loadCreditCustomers();
+    }
+
+    function closeCreditModal() {
+      const m = document.getElementById('credit-modal-overlay');
+      if (m) m.style.display = 'none';
+      window._activeCreditCustomerId = null;
+    }
+
+    function showCreditListView() {
+      window._activeCreditCustomerId = null;
+      const lv = document.getElementById('credit-list-view');
+      const dv = document.getElementById('credit-detail-view');
+      if (lv) lv.style.display = 'block';
+      if (dv) dv.style.display = 'none';
+    }
+
+    async function loadCreditCustomers() {
+      const listBox = document.getElementById('credit-customers-list');
+      const strip = document.getElementById('credit-summary-strip');
+      const colSel = document.getElementById('col-customer-select');
+      if (!listBox) return;
+      try {
+        const res = await fetchWithAuth('/api/credit/customers');
+        const json = await res.json();
+        if (!json.ok) return;
+        const sm = json.summary || {};
+        const customers = json.customers || [];
+
+        if (strip) {
+          strip.innerHTML = `
+            <div style="background:var(--card-subtle); padding:8px 10px; border-radius:10px; border:1px solid var(--border);">
+              <div style="font-size:0.72rem; color:var(--text-muted);">Toplam Veresiye Alacağımız</div>
+              <div style="font-size:1.05rem; font-weight:900; color:var(--danger);">${Number(sm.total_receivable || 0).toFixed(2)} ₺</div>
+            </div>
+            <div style="background:var(--card-subtle); padding:8px 10px; border-radius:10px; border:1px solid var(--border);">
+              <div style="font-size:0.72rem; color:var(--text-muted);">Borçlu Müşteri</div>
+              <div style="font-size:1.05rem; font-weight:900;">${sm.debtor_count || 0} / ${sm.customer_count || 0}</div>
+            </div>
+            <div style="background:var(--card-subtle); padding:8px 10px; border-radius:10px; border:1px solid var(--border);">
+              <div style="font-size:0.72rem; color:var(--text-muted);">Müşteri Alacakları (Fazla Ödeme)</div>
+              <div style="font-size:1.05rem; font-weight:900; color:#10B981;">${Number(sm.total_customer_credit || 0).toFixed(2)} ₺</div>
+            </div>
+          `;
+        }
+
+        if (colSel) {
+          const prev = colSel.value;
+          colSel.innerHTML = '<option value="">Müşteri seçiniz *</option>' +
+            customers.map(c => `<option value="${c.id}">${c.name} (${c.balance > 0 ? 'Borç: ' + c.balance.toFixed(2) + ' ₺' : (c.balance < 0 ? 'Alacak: ' + Math.abs(c.balance).toFixed(2) + ' ₺' : '0 ₺')})</option>`).join('');
+          if (prev) colSel.value = prev;
+        }
+
+        if (!customers.length) {
+          listBox.innerHTML = '<div style="font-size:0.8rem; color:var(--text-muted); text-align:center; padding:12px;">Henüz cari müşteri kaydı yok.</div>';
+          return;
+        }
+
+        listBox.innerHTML = customers.map(c => {
+          const bal = Number(c.balance || 0);
+          const balBadge = bal > 0
+            ? `<span style="font-weight:900; color:var(--danger);">${bal.toFixed(2)} ₺ Borç</span>`
+            : (bal < 0
+              ? `<span style="font-weight:900; color:#10B981;">${Math.abs(bal).toFixed(2)} ₺ Alacak</span>`
+              : `<span style="font-weight:700; color:var(--text-muted);">0.00 ₺</span>`);
+          return `
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px dashed var(--border); font-size:0.84rem;">
+              <div>
+                <b>${c.name}</b> ${c.phone ? `<span style="font-size:0.74rem; color:var(--text-muted);">(${c.phone})</span>` : ''}
+                <div style="font-size:0.72rem; color:var(--text-muted);">Toplam Borç: ${Number(c.total_debt || 0).toFixed(2)} ₺ · Ödenen: ${Number(c.total_paid || 0).toFixed(2)} ₺</div>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                ${balBadge}
+                <button type="button" class="btn btn-secondary" style="width:auto; padding:4px 9px; font-size:0.74rem;" onclick="openCreditCustomerDetail(${c.id})">📋 Detay</button>
+              </div>
+            </div>
+          `;
+        }).join('');
+      } catch (e) {}
+    }
+
+    async function submitNewCreditCustomer(e) {
+      e.preventDefault();
+      const name = (document.getElementById('new-credit-name')?.value || '').trim();
+      const phone = (document.getElementById('new-credit-phone')?.value || '').trim();
+      if (!name) return;
+      try {
+        const res = await fetchWithAuth('/api/credit/customers', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, phone })
+        });
+        const json = await res.json();
+        showToast(json.message || "Cari müşteri eklendi.");
+        if (json.ok) {
+          document.getElementById('new-credit-name').value = '';
+          document.getElementById('new-credit-phone').value = '';
+          loadCreditCustomers();
+          populatePosCreditCustomers();
+        }
+      } catch (err) {}
+    }
+
+    async function submitCreditCollection(e) {
+      e.preventDefault();
+      const customer_id = parseInt(document.getElementById('col-customer-select')?.value || '0');
+      const amount = parseFloat(document.getElementById('col-amount')?.value || '0');
+      const payment_method = document.getElementById('col-payment-method')?.value || 'nakit';
+      const note = (document.getElementById('col-note')?.value || '').trim();
+      if (!customer_id || isNaN(amount) || amount <= 0) {
+        showToast("⚠️ Müşteri ve geçerli tahsilat tutarı giriniz!");
+        return;
+      }
+
+      const sendCol = async (confirmHigh = false) => {
+        const r = await fetchWithAuth('/api/credit/collections', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ customer_id, amount, payment_method, note, confirm_high_amount: confirmHigh })
+        });
+        return { res: r, json: await r.json() };
+      };
+
+      try {
+        let { res, json } = await sendCol(false);
+        if (res.status === 409 && json.day_not_open) {
+          showToast(json.message);
+          openCashDayModal();
+          return;
+        }
+        if (res.status === 409 && json.requires_confirmation) {
+          if (!confirm(json.message)) return;
+          ({ res, json } = await sendCol(true));
+        }
+        showToast(json.message || "Tahsilat alındı.");
+        if (json.ok) {
+          document.getElementById('col-amount').value = '';
+          document.getElementById('col-note').value = '';
+          loadCreditCustomers();
+          loadTodayCashSummary();
+          if (typeof loadAuditLogs === 'function') loadAuditLogs();
+        }
+      } catch (err) {
+        showToast("⚠️ Tahsilat kaydedilemedi.");
+      }
+    }
+
+    async function openCreditCustomerDetail(customerId) {
+      window._activeCreditCustomerId = customerId;
+      const lv = document.getElementById('credit-list-view');
+      const dv = document.getElementById('credit-detail-view');
+      const hdr = document.getElementById('credit-detail-header');
+      const tbl = document.getElementById('credit-detail-table');
+      if (lv) lv.style.display = 'none';
+      if (dv) dv.style.display = 'block';
+      if (tbl) tbl.innerHTML = 'Yükleniyor...';
+
+      try {
+        const res = await fetchWithAuth(`/api/credit/customers/${customerId}`);
+        const json = await res.json();
+        if (!json.ok) return;
+        const c = json.customer;
+        const txs = json.transactions || [];
+        const bal = Number(c.balance || 0);
+        if (hdr) {
+          hdr.innerHTML = `${c.name} — Güncel Bakiye: <span style="color:${bal > 0 ? 'var(--danger)' : '#10B981'};">${bal > 0 ? bal.toFixed(2) + ' ₺ Borç' : (bal < 0 ? Math.abs(bal).toFixed(2) + ' ₺ Alacak' : '0.00 ₺')}</span>`;
+        }
+        if (!txs.length) {
+          tbl.innerHTML = '<div style="font-size:0.8rem; color:var(--text-muted); text-align:center; padding:12px;">Henüz hareket yok.</div>';
+          return;
+        }
+        tbl.innerHTML = `
+          <table style="width:100%; border-collapse:collapse; font-size:0.78rem;">
+            <thead>
+              <tr style="border-bottom:1px solid var(--border); color:var(--text-muted); font-size:0.72rem;">
+                <th style="text-align:left; padding:5px 4px;">Tarih</th>
+                <th style="text-align:left; padding:5px 4px;">Ürün / İşlem</th>
+                <th style="text-align:right; padding:5px 4px;">Tutar</th>
+                <th style="text-align:right; padding:5px 4px;">Ödeme</th>
+                <th style="text-align:right; padding:5px 4px;">Güncel Bakiye</th>
+                <th style="text-align:right; padding:5px 4px;"></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${txs.map(t => {
+                const isCanc = (t.status === 'cancelled');
+                const rowSt = isCanc ? 'opacity:0.5; text-decoration:line-through; color:var(--text-muted);' : '';
+                const isDebt = (t.signed_kurus > 0);
+                const pmTxt = t.payment_method === 'kart' ? '💳 POS' : (t.payment_method === 'nakit' ? '💵 Nakit' : (t.payment_method || '-'));
+                const cancelBtn = (!isCanc && t.tx_type === 'tahsilat' && window.currentUserRole !== 'calisan')
+                  ? `<button type="button" onclick="promptCancelRecord('credit_collection', ${t.id}, '${(t.description || '').replace(/'/g, "\\'")}', ${Number(t.amount || 0)})" style="padding:2px 6px; font-size:0.68rem; background:rgba(239,68,68,0.12); color:#ef4444; border:1px solid rgba(239,68,68,0.3); border-radius:6px; cursor:pointer;">🚫</button>`
+                  : (isCanc ? '<span style="color:#ef4444; font-size:0.68rem;">İPTAL</span>' : '');
+                const rb = Number(t.running_balance || 0);
+                return `
+                  <tr style="border-bottom:1px dashed var(--border); ${rowSt}">
+                    <td style="padding:6px 4px; white-space:nowrap;">${(t.tx_date || '').slice(0, 16)}</td>
+                    <td style="padding:6px 4px;"><b>${t.description}</b>${t.product_summary && t.tx_type === 'borc' ? `<div style="font-size:0.7rem; color:var(--text-muted);">${t.product_summary}</div>` : ''}</td>
+                    <td style="padding:6px 4px; text-align:right; font-weight:700; color:${isDebt ? 'var(--danger)' : 'var(--text-muted)'};">${isDebt ? Number(t.amount).toFixed(2) + ' ₺' : '—'}</td>
+                    <td style="padding:6px 4px; text-align:right; font-weight:700; color:${!isDebt ? '#10B981' : 'var(--text-muted)'};">${!isDebt ? Number(t.amount).toFixed(2) + ' ₺ (' + pmTxt + ')' : '—'}</td>
+                    <td style="padding:6px 4px; text-align:right; font-weight:800; color:${rb > 0 ? 'var(--danger)' : '#10B981'};">${rb > 0 ? rb.toFixed(2) + ' ₺ Borç' : (rb < 0 ? Math.abs(rb).toFixed(2) + ' ₺ Alacak' : '0.00 ₺')}</td>
+                    <td style="padding:6px 4px; text-align:right;">${cancelBtn}</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        `;
+      } catch (e) {}
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // 🚨 PATRON GÜN SONU FARK GEÇMİŞİ, ÇALIŞAN RAPORU & 3 GÜN TEKRAR UYARISI
+    // ════════════════════════════════════════════════════════════════════
+    function openPatronDiscrepancyPanel() {
+      if (window.currentUserRole === 'calisan') {
+        showToast("🚫 Fark geçmişi sadece Patron yetkisine açıktır.");
+        return;
+      }
+      switchTab('reports', document.getElementById('nav-reports'));
+      switchReportsSubTab('security-audit', document.getElementById('btn-subtab-security-audit'));
+    }
+
+    async function loadDiscrepancyReport() {
+      if (window.currentUserRole === 'calisan') return;
+      const hdrBadge = document.getElementById('discrepancy-alert-badge');
+      const sumBadge = document.getElementById('discrepancy-summary-badge');
+      const repeatBox = document.getElementById('discrepancy-repeat-alerts');
+      const empBox = document.getElementById('discrepancy-employee-summary');
+      const monBox = document.getElementById('discrepancy-monthly-summary');
+      const histBox = document.getElementById('discrepancy-history-list');
+
+      try {
+        const res = await fetchWithAuth('/api/reports/discrepancies');
+        if (!res.ok) return;
+        const json = await res.json();
+        if (!json.ok || !json.report) return;
+        const rep = json.report;
+        const repeats = rep.repeat_alerts || [];
+        const recs = rep.records || [];
+
+        if (hdrBadge) {
+          if (repeats.length > 0) {
+            hdrBadge.style.display = 'inline-flex';
+            hdrBadge.innerText = `🚨 TEKRAR (${repeats[0].consecutive_days} Gün)`;
+          } else if (recs.length > 0) {
+            hdrBadge.style.display = 'inline-flex';
+            hdrBadge.innerText = `⚠️ ${recs.length} Fark`;
+          } else {
+            hdrBadge.style.display = 'none';
+          }
+        }
+
+        if (sumBadge) {
+          sumBadge.innerText = `${rep.total_discrepancy_days || 0} Gün · Toplam Mutlak Fark: ${Number(rep.total_abs_diff || 0).toFixed(2)} ₺`;
+        }
+
+        if (repeatBox) {
+          repeatBox.innerHTML = repeats.length ? repeats.map(a => `
+            <div style="background:rgba(239,68,68,0.18); border:1.5px solid #EF4444; border-radius:10px; padding:10px 12px; margin-bottom:6px; color:#EF4444; font-size:0.82rem; font-weight:800;">
+              ${a.message}
+              <div style="font-size:0.73rem; font-weight:600; color:var(--text); margin-top:3px;">
+                Son Fark Tarihi: ${a.last_date} · Toplam Mutlak Fark: ${Number(a.total_abs_diff || 0).toFixed(2)} ₺
+              </div>
+            </div>
+          `).join('') : '';
+        }
+
+        if (empBox) {
+          const emps = rep.by_employee || [];
+          empBox.innerHTML = emps.length ? `
+            <div style="font-weight:700; font-size:0.78rem; margin-bottom:4px;">👤 Çalışan Bazında Toplam Fark Raporu</div>
+            <table style="width:100%; border-collapse:collapse; font-size:0.76rem;">
+              <thead>
+                <tr style="border-bottom:1px solid var(--border); color:var(--text-muted);">
+                  <th style="text-align:left; padding:4px;">Çalışan</th>
+                  <th style="text-align:right; padding:4px;">Fark Günü</th>
+                  <th style="text-align:right; padding:4px;">Seri</th>
+                  <th style="text-align:right; padding:4px;">Nakit</th>
+                  <th style="text-align:right; padding:4px;">POS</th>
+                  <th style="text-align:right; padding:4px;">Mutlak Toplam</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${emps.map(e => `
+                  <tr style="border-bottom:1px dashed var(--border);">
+                    <td style="padding:5px 4px; font-weight:700;">${e.cashier_name} ${e.has_repeat_alert ? '<span style="color:#EF4444;">🚨</span>' : ''}</td>
+                    <td style="padding:5px 4px; text-align:right;">${e.discrepancy_days}</td>
+                    <td style="padding:5px 4px; text-align:right; font-weight:800; color:${e.current_streak >= 3 ? '#EF4444' : 'var(--text)'};">${e.current_streak} gün</td>
+                    <td style="padding:5px 4px; text-align:right;">${Number(e.total_cash_diff).toFixed(2)} ₺</td>
+                    <td style="padding:5px 4px; text-align:right;">${Number(e.total_pos_diff).toFixed(2)} ₺</td>
+                    <td style="padding:5px 4px; text-align:right; font-weight:800; color:#EF4444;">${Number(e.abs_total_diff).toFixed(2)} ₺</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          ` : '';
+        }
+
+        if (monBox) {
+          const mons = rep.monthly_by_employee || [];
+          monBox.innerHTML = mons.length ? `
+            <div style="font-weight:700; font-size:0.78rem; margin-bottom:4px;">🗓️ Aylık Çalışan Fark Raporu</div>
+            <div style="display:flex; flex-direction:column; gap:3px; font-size:0.75rem;">
+              ${mons.map(m => `
+                <div style="display:flex; justify-content:space-between; padding:4px 6px; background:var(--card); border-radius:6px; border:1px solid var(--border);">
+                  <span><b>${m.month_key}</b> · ${m.cashier_name} (${m.discrepancy_days} gün)</span>
+                  <span style="font-weight:800; color:#EF4444;">Net: ${Number(m.net_total_diff).toFixed(2)} ₺ · Mutlak: ${Number(m.abs_total_diff).toFixed(2)} ₺</span>
+                </div>
+              `).join('')}
+            </div>
+          ` : '';
+        }
+
+        if (histBox) {
+          if (!recs.length) {
+            histBox.innerHTML = '<div style="font-size:0.78rem; color:#10B981; text-align:center; padding:8px;">✅ Henüz gün sonu farkı kaydedilmemiş.</div>';
+            return;
+          }
+          histBox.innerHTML = recs.map(r => `
+            <div style="padding:7px 0; border-bottom:1px dashed var(--border); font-size:0.78rem;">
+              <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+                <div>
+                  <b>📅 ${r.business_date}</b> · 👤 <b>${r.cashier_name}</b>
+                  ${r.streak_at_day >= 3 ? `<span style="background:rgba(239,68,68,0.18); color:#EF4444; padding:1px 6px; border-radius:6px; font-size:0.68rem; font-weight:800; margin-left:4px;">🚨 ${r.streak_at_day}. Gün Üst Üste</span>` : ''}
+                </div>
+                <span style="font-weight:800; color:#EF4444;">
+                  Nakit: ${Number(r.cash_diff).toFixed(2)} ₺ | POS: ${Number(r.pos_diff).toFixed(2)} ₺ | Gider: ${Number(r.expense_diff).toFixed(2)} ₺
+                </span>
+              </div>
+              <div style="font-size:0.72rem; color:var(--text-muted); margin-top:2px;">📝 ${r.closing_note || 'Açıklama yok'}</div>
+            </div>
+          `).join('');
+        }
+      } catch (e) {}
+    }
+
+    async function syncCurrentRole() {
+      try {
+        const res = await fetchWithAuth('/api/auth/role');
+        if (res.ok) {
+          const json = await res.json();
+          if (json.ok && json.role) {
+            window.currentUserRole = json.role;
+            sessionStorage.setItem('user_role', json.role);
+            applyRoleUI();
+          }
+        }
+      } catch (e) {}
+    }
+
+    async function loadStaffTodaySales() {
+      const box = document.getElementById('staff-today-sales-list');
+      if (!box) return;
+      try {
+        const res = await fetchWithAuth('/api/sales/history');
+        const json = await res.json();
+        const sales = json.sales || [];
+        if (!sales.length) {
+          box.innerHTML = '<div style="text-align:center; padding:8px; color:var(--text-muted);">Bugün henüz satış kaydı yok.</div>';
+          return;
+        }
+        box.innerHTML = sales.map(s => {
+          const isCanc = (s.status === 'cancelled');
+          const st = isCanc ? 'opacity:0.55; text-decoration:line-through; color:var(--text-muted);' : '';
+          const timePart = (s.sold_at || '').split(' ')[1] || '';
+          return `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px dashed var(--border); ${st}">
+              <div>
+                <b>#${s.id}</b> · ${timePart} · ${s.item_count || 0} ürün ${s.customer_name ? `(${s.customer_name})` : ''}
+                ${isCanc ? '<span style="color:#ef4444; font-weight:700; margin-left:6px; text-decoration:none; display:inline-block;">[İPTAL]</span>' : ''}
+              </div>
+              <div style="font-weight:800; color:${isCanc ? 'var(--text-muted)' : '#10B981'};">${Number(s.total_amount || 0).toFixed(2)} ₺</div>
+            </div>
+          `;
+        }).join('');
+      } catch (e) {
+        box.innerHTML = '<div style="color:var(--danger);">Bugünün satışları yüklenemedi.</div>';
+      }
+    }
+
+    async function handleAddCashMovementSubmit(e) {
+      e.preventDefault();
+      const movement_type = document.getElementById('cash-movement-type').value;
+      const description = document.getElementById('cash-movement-desc').value.trim();
+      const amount = parseFloat(document.getElementById('cash-movement-amount').value);
+      const customer_name = document.getElementById('cash-movement-customer').value.trim();
+
+      if (isNaN(amount) || amount <= 0) {
+        showToast("❌ Tutar 0'dan büyük olmalıdır!");
+        return;
+      }
+
+      const sendReq = async (confirmHigh = false) => {
+        const r = await fetchWithAuth('/api/cash-movements', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ movement_type, description, amount, customer_name: customer_name || null, confirm_high_amount: confirmHigh })
+        });
+        return { res: r, json: await r.json() };
+      };
+
+      try {
+        let { res, json } = await sendReq(false);
+        if (res.status === 409 && json.requires_confirmation) {
+          if (confirm(json.message || `⚠️ Yüksek tutar (${amount.toFixed(2)} ₺). Onaylıyor musunuz?`)) {
+            ({ res, json } = await sendReq(true));
+          } else {
+            return;
+          }
+        }
+        showToast(json.message || "Kayıt eklendi.");
+        if (json.ok) {
+          document.getElementById('cash-movement-desc').value = '';
+          document.getElementById('cash-movement-amount').value = '';
+          document.getElementById('cash-movement-customer').value = '';
+          loadCashMovements();
+          loadAuditLogs();
+        }
+      } catch (err) {
+        showToast("⚠️ Tahsilat / kasa hareketi kaydedilemedi.");
+      }
+    }
+
+    async function loadCashMovements() {
+      const box = document.getElementById('cash-movements-list');
+      const pills = document.getElementById('cash-summary-pills');
+      if (!box) return;
+      try {
+        let url = '/api/cash-movements?1=1';
+        if (currentStartDate) url += '&start_date=' + currentStartDate;
+        if (currentEndDate) url += '&end_date=' + currentEndDate;
+        const res = await fetchWithAuth(url);
+        const json = await res.json();
+        if (!json.ok) return;
+
+        const sm = json.summary || {};
+        if (pills) {
+          pills.innerHTML = `
+            <span style="background:rgba(16,185,129,0.14); color:#10B981; padding:3px 8px; border-radius:8px; font-weight:700;">Tahsilat: ${Number(sm.total_tahsilat || 0).toFixed(2)} ₺</span>
+            <span style="background:rgba(59,130,246,0.14); color:#3B82F6; padding:3px 8px; border-radius:8px; font-weight:700;">Giriş: ${Number(sm.total_kasa_giris || 0).toFixed(2)} ₺</span>
+            <span style="background:rgba(239,68,68,0.14); color:#EF4444; padding:3px 8px; border-radius:8px; font-weight:700;">Çıkış: ${Number(sm.total_kasa_cikis || 0).toFixed(2)} ₺</span>
+            <span style="background:var(--card); border:1px solid var(--border); padding:3px 8px; border-radius:8px; font-weight:800;">Net: ${Number(sm.net_cash || 0).toFixed(2)} ₺</span>
+          `;
+        }
+
+        const list = json.movements || [];
+        if (!list.length) {
+          box.innerHTML = '<div style="font-size:0.78rem; color:var(--text-muted); text-align:center; padding:8px;">Kayıtlı tahsilat veya kasa hareketi yok.</div>';
+          return;
+        }
+        const typeLabels = { tahsilat: '💵 Tahsilat', kasa_giris: '➕ Kasa Giriş', kasa_cikis: '➖ Kasa Çıkış' };
+        box.innerHTML = list.map(m => {
+          const isCanc = (m.status === 'cancelled');
+          const st = isCanc ? 'opacity:0.55; text-decoration:line-through; color:var(--text-muted);' : '';
+          const cancelBtn = !isCanc
+            ? `<button type="button" onclick="promptCancelRecord('cash_movement', ${m.id}, '${(m.description || '').replace(/'/g, "\\'")}', ${Number(m.amount || 0)})" style="margin-left:8px; padding:2px 7px; font-size:0.7rem; background:rgba(239,68,68,0.12); color:#ef4444; border:1px solid rgba(239,68,68,0.3); border-radius:6px; cursor:pointer;">🚫 İptal</button>`
+            : `<span style="font-size:0.68rem; color:#ef4444; margin-left:6px; text-decoration:none; display:inline-block;">[İPTAL: ${m.cancel_reason || ''}]</span>`;
+          return `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px dashed var(--border); font-size:0.8rem; ${st}">
+              <div>
+                <b>${typeLabels[m.movement_type] || m.movement_type}</b> · ${m.description}
+                ${m.customer_name ? `<span style="color:var(--text-muted);">(${m.customer_name})</span>` : ''}
+                <div style="font-size:0.7rem; color:var(--text-muted);">${m.movement_date || ''}</div>
+              </div>
+              <div style="display:flex; align-items:center;">
+                <span style="font-weight:800; color:${isCanc ? 'var(--text-muted)' : (m.movement_type === 'kasa_cikis' ? 'var(--danger)' : '#10B981')};">${Number(m.amount || 0).toFixed(2)} ₺</span>
+                ${cancelBtn}
+              </div>
+            </div>
+          `;
+        }).join('');
+      } catch (e) {}
+    }
+
+    async function loadCancelledReport() {
+      const box = document.getElementById('cancelled-report-list');
+      const badge = document.getElementById('cancelled-report-badge');
+      if (!box) return;
+      try {
+        let url = '/api/reports/cancelled?1=1';
+        if (currentStartDate) url += '&start_date=' + currentStartDate;
+        if (currentEndDate) url += '&end_date=' + currentEndDate;
+        const res = await fetchWithAuth(url);
+        const json = await res.json();
+        if (!json.ok || !json.report) return;
+        const rep = json.report;
+        if (badge) badge.innerText = `${rep.total_count} İptal · ${Number(rep.total_amount || 0).toFixed(2)} ₺`;
+        const recs = rep.records || [];
+        if (!recs.length) {
+          box.innerHTML = '<div style="font-size:0.78rem; color:var(--text-muted); text-align:center; padding:10px;">İptal edilmiş kayıt bulunmuyor.</div>';
+          return;
+        }
+        box.innerHTML = recs.map(r => `
+          <div style="padding:8px 0; border-bottom:1px dashed var(--border); font-size:0.8rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+              <div>
+                <span style="background:rgba(239,68,68,0.14); color:#ef4444; padding:1px 6px; border-radius:6px; font-size:0.7rem; font-weight:700;">${r.entity_label} #${r.record_id}</span>
+                <b style="margin-left:6px;">${r.title}</b>
+              </div>
+              <span style="font-weight:800; color:var(--text-muted); text-decoration:line-through;">${Number(r.amount || 0).toFixed(2)} ₺</span>
+            </div>
+            <div style="font-size:0.73rem; color:var(--text-muted); margin-top:3px;">
+              Neden: <b style="color:var(--danger);">${r.cancel_reason}</b>${r.cancel_note ? ` — <i>${r.cancel_note}</i>` : ''} | İptal Eden: <b>${r.cancelled_by}</b> (${r.cancelled_at || ''})
+            </div>
+          </div>
+        `).join('');
+      } catch (e) {}
+    }
+
+    async function loadAuditLogs() {
+      const box = document.getElementById('audit-logs-list');
+      if (!box) return;
+      try {
+        const actionFilter = (document.getElementById('audit-filter-action')?.value || '').trim();
+        let url = '/api/audit-logs?limit=100';
+        if (actionFilter) url += '&action=' + encodeURIComponent(actionFilter);
+        const res = await fetchWithAuth(url);
+        const json = await res.json();
+        if (!json.ok) return;
+        const logs = json.logs || [];
+        if (!logs.length) {
+          box.innerHTML = '<div style="font-size:0.78rem; color:var(--text-muted); text-align:center; padding:10px;">Denetim kaydı bulunamadı.</div>';
+          return;
+        }
+        box.innerHTML = logs.map(l => {
+          const isUnauth = (l.action === 'UNAUTHORIZED_ATTEMPT');
+          const badgeBg = isUnauth ? 'rgba(239,68,68,0.18)' : 'rgba(59,130,246,0.14)';
+          const badgeColor = isUnauth ? '#ef4444' : '#3B82F6';
+          return `
+            <div style="padding:7px 0; border-bottom:1px dashed var(--border); font-size:0.76rem;">
+              <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+                <div>
+                  <span style="background:${badgeBg}; color:${badgeColor}; padding:1px 6px; border-radius:6px; font-weight:800; font-size:0.68rem;">${l.action}</span>
+                  <span style="font-weight:700; margin-left:6px;">${l.actor_name} (${l.actor_role})</span>
+                  <span style="color:var(--text-muted); margin-left:4px;">· ${l.entity_type}${l.entity_id ? ' #' + l.entity_id : ''}</span>
+                </div>
+                <span style="color:var(--text-muted); font-size:0.7rem;">${l.created_at || ''}</span>
+              </div>
+              ${l.reason ? `<div style="color:var(--text-muted); margin-top:2px;">📝 ${l.reason}</div>` : ''}
+            </div>
+          `;
+        }).join('');
+      } catch (e) {}
+    }
+
     function initAppAfterGateUnlock() {
-      if (_appInitialized) return;
+      if (_appInitialized) {
+        syncCurrentRole();
+        return;
+      }
       _appInitialized = true;
       initIndexedDB();
       checkAIStatus();
@@ -6856,6 +8598,7 @@
       startRealtimeListener();
       setInterval(checkSyncStatus, 45000);
       setTheme(localStorage.getItem('app-theme') || 'light');
+      syncCurrentRole();
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -6896,6 +8639,9 @@
 
     function lockAppNow() {
       sessionStorage.removeItem('gate_unlocked');
+      sessionStorage.removeItem('stok_gate_token');
+      sessionStorage.removeItem('user_role');
+      document.cookie = 'stok_gate_token=; Max-Age=0; path=/';
       showGateLockModal();
       showToast("🔒 Sistem kilitlendi.");
     }
@@ -6983,13 +8729,21 @@
         const json = await res.json();
         if (res.ok && json.ok) {
           sessionStorage.setItem('gate_unlocked', 'true');
-          sessionStorage.setItem('farm_unlocked', 'true');
+          const role = json.role || 'patron';
+          window.currentUserRole = role;
+          sessionStorage.setItem('user_role', role);
+          if (role === 'patron') {
+            sessionStorage.setItem('farm_unlocked', 'true');
+          } else {
+            sessionStorage.removeItem('farm_unlocked');
+          }
           if (json.token) {
             sessionStorage.setItem('stok_gate_token', json.token);
           }
           hideGateLockModal();
           initAppAfterGateUnlock();
-          showToast("🔓 Yetkili girişi başarılı. Hoş geldiniz!");
+          applyRoleUI();
+          showToast(role === 'calisan' ? "👤 Çalışan girişi başarılı!" : "👑 Patron girişi başarılı. Hoş geldiniz!");
         } else {
           showGateError(json.message || "❌ Hatalı PIN kodu!");
         }

@@ -41,3 +41,9 @@ TOAST_DURATION_MS = 3000
 
 # Sistem Giriş Güvenlik Kilidi PIN Kodu (Yetkisiz internet erişimini ve botları engellemek için)
 GATE_PIN = os.getenv("GATE_PIN", "2805")
+# Çalışan (Kasiyer) Giriş PIN Kodu (Sadece satış girişi ve bugünün temel ekranları)
+STAFF_PIN = os.getenv("STAFF_PIN", "1234")
+
+# Finansal tutar güvenlik eşikleri (TL)
+HIGH_AMOUNT_WARNING_THRESHOLD = float(os.getenv("HIGH_AMOUNT_WARNING_THRESHOLD", "50000"))
+MAX_ALLOWED_SINGLE_AMOUNT = float(os.getenv("MAX_ALLOWED_SINGLE_AMOUNT", "10000000"))

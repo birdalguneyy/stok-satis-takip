@@ -20,10 +20,31 @@ from flask import Flask, jsonify, request, send_from_directory
 
 
 import hashlib
-from app.config import DATA_DIR, GATE_PIN
+from app.config import (
+    DATA_DIR,
+    GATE_PIN,
+    HIGH_AMOUNT_WARNING_THRESHOLD,
+    STAFF_PIN,
+    get_turkey_now_str,
+)
 from app.database.cloud_db import CloudDatabase
 from app.services.ai_package_service import AIPackageService
 from app.services.forecast_service import ForecastService
+from app.services.security_service import (
+    CANCEL_REASONS,
+    ROLE_CALISAN,
+    ROLE_PATRON,
+    build_actor,
+    get_audit_logs,
+    get_permissions_for_role,
+    has_permission,
+    log_audit,
+    log_unauthorized_attempt,
+    normalize_role,
+    validate_cancel_reason,
+    validate_cash_description,
+    validate_monetary_amount,
+)
 from app.utils.camera import decode_barcode_from_frame, is_valid_barcode
 
 logger = logging.getLogger(__name__)
@@ -45,7 +66,12 @@ def make_gate_token() -> str:
     return hashlib.sha256(f"{GATE_PIN}:{GATE_SECRET}".encode("utf-8")).hexdigest()
 
 
+def make_staff_gate_token() -> str:
+    return hashlib.sha256(f"STAFF:{STAFF_PIN}:{GATE_SECRET}".encode("utf-8")).hexdigest()
+
+
 EXPECTED_GATE_TOKEN = make_gate_token()
+EXPECTED_STAFF_GATE_TOKEN = make_staff_gate_token()
 
 # IP Brute-Force & Bot Koruması
 failed_pin_attempts: Dict[str, List[float]] = {}
@@ -97,14 +123,22 @@ def record_successful_pin_attempt(ip: str):
     blocked_ips.pop(ip, None)
 
 
-def is_gate_unlocked_request() -> bool:
+def get_gate_role_from_request() -> Optional[str]:
     token = (
         request.headers.get("X-Gate-Token", "").strip()
         or request.cookies.get("stok_gate_token", "").strip()
         or request.args.get("gate_token", "").strip()
     )
     pin_hdr = request.headers.get("X-Gate-PIN", "").strip()
-    return (token == EXPECTED_GATE_TOKEN) or (pin_hdr == str(GATE_PIN).strip())
+    if token == EXPECTED_GATE_TOKEN or pin_hdr == str(GATE_PIN).strip():
+        return ROLE_PATRON
+    if token == EXPECTED_STAFF_GATE_TOKEN or (STAFF_PIN and pin_hdr == str(STAFF_PIN).strip()):
+        return ROLE_CALISAN
+    return None
+
+
+def is_gate_unlocked_request() -> bool:
+    return get_gate_role_from_request() is not None
 
 
 @app.before_request
@@ -168,10 +202,58 @@ def gate_verify():
 
     data = request.json or {}
     pin = str(data.get("pin", "")).strip()
+    actor_name_in = str(data.get("actor_name", "")).strip()
     if pin == str(GATE_PIN).strip():
         record_successful_pin_attempt(client_ip)
         token = EXPECTED_GATE_TOKEN
-        resp = jsonify({"ok": True, "token": token, "message": "Giriş başarılı!"})
+        actor = build_actor(name=actor_name_in or "Patron", role=ROLE_PATRON, ip_address=client_ip)
+        log_audit(
+            action="AUTH_PIN_LOGIN",
+            entity_type="security",
+            entity_id="gate",
+            new_value={"role": ROLE_PATRON, "actor_name": actor["name"]},
+            actor=actor,
+            ip_address=client_ip,
+            db=cloud_db.db,
+        )
+        resp = jsonify({
+            "ok": True,
+            "token": token,
+            "role": ROLE_PATRON,
+            "actor_name": actor["name"],
+            "permissions": get_permissions_for_role(ROLE_PATRON),
+            "message": "Patron girişi başarılı!",
+        })
+        resp.set_cookie(
+            "stok_gate_token",
+            token,
+            max_age=86400 * 30,
+            httponly=False,
+            samesite="Lax"
+        )
+        return resp
+
+    if STAFF_PIN and pin == str(STAFF_PIN).strip():
+        record_successful_pin_attempt(client_ip)
+        token = EXPECTED_STAFF_GATE_TOKEN
+        actor = build_actor(name=actor_name_in or "Çalışan", role=ROLE_CALISAN, ip_address=client_ip)
+        log_audit(
+            action="AUTH_PIN_LOGIN",
+            entity_type="security",
+            entity_id="gate",
+            new_value={"role": ROLE_CALISAN, "actor_name": actor["name"]},
+            actor=actor,
+            ip_address=client_ip,
+            db=cloud_db.db,
+        )
+        resp = jsonify({
+            "ok": True,
+            "token": token,
+            "role": ROLE_CALISAN,
+            "actor_name": actor["name"],
+            "permissions": get_permissions_for_role(ROLE_CALISAN),
+            "message": "Çalışan girişi başarılı!",
+        })
         resp.set_cookie(
             "stok_gate_token",
             token,
@@ -182,6 +264,14 @@ def gate_verify():
         return resp
 
     attempts_count = record_failed_pin_attempt(client_ip)
+    log_unauthorized_attempt(
+        action="GATE_PIN_FAILED",
+        resource="/api/gate/verify",
+        actor=build_actor(name="Bilinmeyen", role=ROLE_CALISAN, ip_address=client_ip),
+        ip_address=client_ip,
+        details={"attempts": attempts_count},
+        db=cloud_db.db,
+    )
     remaining = max(0, 5 - attempts_count)
     if remaining == 0:
         return jsonify({
@@ -197,8 +287,16 @@ def gate_verify():
 
 @app.route("/api/gate/status", methods=["GET"])
 def gate_status():
-    unlocked = is_gate_unlocked_request()
-    return jsonify({"ok": True, "unlocked": unlocked})
+    role = get_gate_role_from_request()
+    unlocked = role is not None
+    return jsonify({
+        "ok": True,
+        "unlocked": unlocked,
+        "role": role,
+        "permissions": get_permissions_for_role(role) if role else [],
+        "cancel_reasons": CANCEL_REASONS,
+        "high_amount_threshold": HIGH_AMOUNT_WARNING_THRESHOLD,
+    })
 
 
 def get_local_ip() -> str:
@@ -254,6 +352,9 @@ def api_info():
 
 @app.route("/api/settings/gemini-key", methods=["GET", "POST"])
 def handle_gemini_key():
+    denied = enforce_permission("settings:manage", "SETTINGS_GEMINI_KEY")
+    if denied:
+        return denied
     if request.method == "POST":
         data = request.json or {}
         key = (data.get("key") or data.get("api_key") or "").strip()
@@ -356,6 +457,76 @@ def get_current_user_id() -> int:
             return user["id"]
     resolved = cloud_db._resolve_user_id()
     return resolved if resolved is not None else 1
+
+
+def get_current_actor() -> Dict[str, Any]:
+    """İstekten aktif kullanıcı rolünü ve kimliğini çözümler (Patron veya Çalışan)."""
+    gate_role = get_gate_role_from_request() or ROLE_PATRON
+    role = gate_role
+    actor_name = request.headers.get("X-Actor-Name", "").strip()
+    uid = get_current_user_id()
+
+    token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    if not token:
+        token = request.args.get("token", "").strip()
+    if token:
+        user = cloud_db.verify_token(token)
+        if user:
+            if not actor_name:
+                actor_name = user.get("full_name") or user.get("company_name") or ""
+            if normalize_role(user.get("role")) == ROLE_CALISAN:
+                role = ROLE_CALISAN
+
+    if not actor_name:
+        actor_name = "Patron" if role == ROLE_PATRON else "Çalışan"
+
+    return build_actor(
+        name=actor_name,
+        role=role,
+        user_id=uid,
+        ip_address=get_client_ip(),
+    )
+
+
+def enforce_permission(permission: str, action_label: Optional[str] = None):
+    """Yetki kontrolü yapar; yetkisiz denemeyi 403 ile engeller ve audit_logs tablosuna yazar."""
+    actor = get_current_actor()
+    if has_permission(actor["role"], permission):
+        return None
+
+    label = action_label or permission
+    log_unauthorized_attempt(
+        action=label,
+        resource=f"{request.method} {request.path}",
+        actor=actor,
+        user_id=actor.get("user_id"),
+        ip_address=actor.get("ip_address"),
+        details={
+            "required_permission": permission,
+            "query": dict(request.args),
+        },
+        db=cloud_db.db,
+    )
+    return jsonify({
+        "ok": False,
+        "forbidden": True,
+        "role": actor["role"],
+        "message": "🚫 Bu işlem için yetkiniz bulunmamaktadır. Sadece Patron yetkilidir.",
+    }), 403
+
+
+@app.route("/api/auth/role", methods=["GET"])
+def get_auth_role():
+    actor = get_current_actor()
+    return jsonify({
+        "ok": True,
+        "role": actor["role"],
+        "actor_name": actor["name"],
+        "permissions": get_permissions_for_role(actor["role"]),
+        "cancel_reasons": CANCEL_REASONS,
+        "high_amount_threshold": HIGH_AMOUNT_WARNING_THRESHOLD,
+        "today": get_turkey_now_str("%Y-%m-%d"),
+    })
 
 
 
@@ -484,6 +655,9 @@ def sync_status():
 @app.route("/api/firebase/config", methods=["POST"])
 def configure_firebase():
     """Web arayüzünden Firebase Service Account JSON kimlik bilgilerini yükler ve kaydeder."""
+    denied = enforce_permission("settings:manage", "FIREBASE_CONFIG")
+    if denied:
+        return denied
     data = request.json or {}
     cred_content = data.get("credentials")
     if not cred_content:
@@ -523,6 +697,9 @@ def firebase_status():
 @app.route("/api/firebase/export-config", methods=["GET"])
 def export_firebase_config():
     """Kullanıcının Render panelinde FIREBASE_CREDENTIALS_JSON ortam değişkenine ekleyebilmesi için JSON metnini döndürür."""
+    denied = enforce_permission("settings:manage", "FIREBASE_EXPORT_CONFIG")
+    if denied:
+        return denied
     user_id = get_current_user_id()
     if user_id is None:
         return jsonify({"ok": False, "message": "Yetkisiz erişim! Lütfen önce giriş yapınız."}), 401
@@ -560,6 +737,10 @@ def get_products():
             return jsonify([])
         search = request.args.get("search", "")
         products = cloud_db.get_products(user_id=user_id, search=search)
+        actor = get_current_actor()
+        if not has_permission(actor["role"], "profit:view"):
+            for p in products:
+                p.pop("purchase_price", None)
         return jsonify(products)
     except Exception as e:
         logger.error(f"/api/products rotası hatası: {e}", exc_info=True)
@@ -584,12 +765,19 @@ def get_product_by_barcode(barcode):
         if products:
             prod = products[0]
     if prod:
+        actor = get_current_actor()
+        if not has_permission(actor["role"], "profit:view"):
+            prod = dict(prod)
+            prod.pop("purchase_price", None)
         return jsonify({"found": True, "product": prod})
     return jsonify({"found": False, "message": f"'{code_clean}' kodlu veya isimli ürün bulunamadı"}), 404
 
 
 @app.route("/api/products", methods=["POST"])
 def save_product():
+    denied = enforce_permission("product:manage", "PRODUCT_SAVE")
+    if denied:
+        return denied
     user_id = get_current_user_id()
     if user_id is None:
         return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
@@ -630,6 +818,9 @@ def save_product():
 @app.route("/api/products/<int:product_id>", methods=["PUT", "POST"])
 def update_product_route(product_id: int):
     """Mevcut bir ürünün tüm bilgilerini veya seçili alanlarını günceller."""
+    denied = enforce_permission("product:manage", "PRODUCT_UPDATE")
+    if denied:
+        return denied
     user_id = get_current_user_id()
     if user_id is None:
         return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
@@ -725,6 +916,9 @@ def delete_product_image_route(product_id: int):
 @app.route("/api/products/<int:product_id>/price", methods=["POST"])
 def update_product_price_route(product_id: int):
     """Ürünün satış fiyatını hızlıca günceller."""
+    denied = enforce_permission("product:manage", "PRODUCT_PRICE_UPDATE")
+    if denied:
+        return denied
     user_id = get_current_user_id()
     if user_id is None:
         return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
@@ -750,6 +944,9 @@ def update_product_price_route(product_id: int):
 
 @app.route("/api/products/<int:product_id>", methods=["DELETE"])
 def delete_product_route(product_id):
+    denied = enforce_permission("product:manage", "PRODUCT_DELETE")
+    if denied:
+        return denied
     user_id = get_current_user_id()
     if user_id is None:
         return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
@@ -761,6 +958,9 @@ def delete_product_route(product_id):
 
 @app.route("/api/products/<int:product_id>/stock", methods=["POST"])
 def update_product_stock_route(product_id):
+    denied = enforce_permission("product:manage", "PRODUCT_STOCK_UPDATE")
+    if denied:
+        return denied
     user_id = get_current_user_id()
     if user_id is None:
         return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
@@ -829,16 +1029,90 @@ def record_sale():
     user_id = get_current_user_id()
     if user_id is None:
         return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
+    actor = get_current_actor()
     data = request.json or {}
     items = data.get("items", [])
     note = data.get("note", "Mobil Satış")
     channel = data.get("channel", "magaza")
+    payment_method = data.get("payment_method")
     total_amount = data.get("total_amount")
+    customer_id = data.get("customer_id")
     customer_name = data.get("customer_name")
+    paid_cash_amount = data.get("paid_cash_amount")
+    paid_pos_amount = data.get("paid_pos_amount")
+    overpayment_mode = data.get("overpayment_mode")
     idempotency_key = data.get("idempotency_key")
     sold_at = data.get("sold_at")
+    confirm_high_amount = bool(data.get("confirm_high_amount", False))
     if not items:
         return jsonify({"ok": False, "message": "Sepet boş!"}), 400
+
+    # Gün açılışı ve kapanış kilidi kontrolü
+    target_bdate = str(sold_at).strip()[:10] if (sold_at and str(sold_at).strip()) else get_turkey_now_str("%Y-%m-%d")
+    cash_day = cloud_db.get_cash_day(business_date=target_bdate, user_id=user_id)
+    if cash_day and str(cash_day.get("status") or "").lower() == "closed":
+        return jsonify({
+            "ok": False,
+            "day_closed": True,
+            "business_date": target_bdate,
+            "message": f"🔒 {target_bdate} günü kapatılmıştır! Kapanan günde satış girilemez; sadece Patron günü yeniden açabilir.",
+        }), 409
+    if not cash_day or cash_day.get("status") != "open":
+        return jsonify({
+            "ok": False,
+            "day_not_open": True,
+            "business_date": target_bdate,
+            "message": "⚠️ Gün açılışı yapılmadı! Satış girebilmek için önce açılış kasasını girerek günü açınız.",
+        }), 409
+
+    # Çalışan geçmiş veya gelecek güne tarihli satış giremez
+    if actor["role"] == ROLE_CALISAN and sold_at and str(sold_at).strip():
+        today_str = get_turkey_now_str("%Y-%m-%d")
+        req_date = str(sold_at).strip()[:10]
+        if req_date != today_str:
+            log_unauthorized_attempt(
+                action="BACKDATED_SALE_CREATE",
+                resource="POST /api/sales",
+                actor=actor,
+                user_id=user_id,
+                ip_address=actor.get("ip_address"),
+                details={"requested_sold_at": sold_at},
+                db=cloud_db.db,
+            )
+            return jsonify({
+                "ok": False,
+                "forbidden": True,
+                "message": "🚫 Çalışan sadece bugünün tarihine satış girebilir.",
+            }), 403
+
+    # Kalem ve toplam tutar doğrulaması (negatif / aşırı tutar kontrolü)
+    calc_total = 0.0
+    for it in items:
+        try:
+            u_price = float(it.get("unit_price", 0))
+            qty = float(it.get("quantity", 1))
+        except (ValueError, TypeError):
+            return jsonify({"ok": False, "message": "Geçersiz ürün fiyatı veya miktar!"}), 400
+        if u_price < 0 or qty <= 0:
+            return jsonify({"ok": False, "message": "Birim fiyat negatif, miktar 0 veya negatif olamaz!"}), 400
+        calc_total += float(it.get("subtotal", u_price * qty))
+
+    effective_total = total_amount if total_amount is not None else calc_total
+    val_check = validate_monetary_amount(
+        effective_total,
+        field_label="Satış tutarı",
+        allow_zero=True,
+        confirm_high_amount=confirm_high_amount,
+    )
+    if not val_check["ok"]:
+        status_code = 409 if val_check["requires_confirmation"] else 400
+        return jsonify({
+            "ok": False,
+            "message": val_check["message"],
+            "requires_confirmation": val_check["requires_confirmation"],
+            "amount": val_check["value"],
+            "warning_threshold": val_check["warning_threshold"],
+        }), status_code
 
     # Benzersiz imza / key ile çift tıklama ve mükerrer istek koruması
     now_ts = time.time()
@@ -881,13 +1155,19 @@ def record_sale():
             total_amount_override=total_override,
             customer_name=customer_name,
             sold_at=sold_at,
+            actor=actor,
+            payment_method=payment_method,
+            customer_id=customer_id,
+            paid_cash_amount=paid_cash_amount,
+            paid_pos_amount=paid_pos_amount,
+            overpayment_mode=overpayment_mode,
         )
         if ok:
             notify_data_change(user_id)
         resp_data = {"ok": ok, "message": msg}
         with _sale_idempotency_lock:
             _sale_idempotency_cache[cache_key] = {"timestamp": time.time(), "in_progress": False, "response": resp_data}
-        return jsonify(resp_data)
+        return jsonify(resp_data), (200 if ok else 400)
     except Exception as exc:
         with _sale_idempotency_lock:
             _sale_idempotency_cache.pop(cache_key, None)
@@ -932,8 +1212,27 @@ def record_online_sale():
             "message": f"Yetersiz stok! Mevcut stok: {current_stock:g} {p_unit}, girilen satış: {qty:g} {p_unit}."
         }), 400
 
-    unit_price = float(data.get("unit_price") or prod.get("sale_price", 0.0))
+    unit_price = float(data.get("unit_price") if data.get("unit_price") is not None else prod.get("sale_price", 0.0))
+    confirm_high_amount = bool(data.get("confirm_high_amount", False))
+    online_total = round(unit_price * qty, 2)
+    val_check = validate_monetary_amount(
+        online_total,
+        field_label="İnternet satış tutarı",
+        allow_zero=True,
+        confirm_high_amount=confirm_high_amount,
+    )
+    if not val_check["ok"]:
+        status_code = 409 if val_check["requires_confirmation"] else 400
+        return jsonify({
+            "ok": False,
+            "message": val_check["message"],
+            "requires_confirmation": val_check["requires_confirmation"],
+            "amount": val_check["value"],
+            "warning_threshold": val_check["warning_threshold"],
+        }), status_code
+
     platform = (data.get("platform") or data.get("note") or "İnternet Satışı").strip()
+    actor = get_current_actor()
 
     cart_items = [{
         "product_id": prod["id"],
@@ -941,7 +1240,7 @@ def record_online_sale():
         "barcode": prod["barcode"],
         "unit_price": unit_price,
         "quantity": qty,
-        "subtotal": round(unit_price * qty, 2),
+        "subtotal": online_total,
         "unit": p_unit,
     }]
 
@@ -963,6 +1262,7 @@ def record_online_sale():
             note=f"🌐 {platform}",
             user_id=user_id,
             channel="internet",
+            actor=actor,
         )
         if ok:
             notify_data_change(user_id)
@@ -987,6 +1287,9 @@ def get_sales_forecast():
     """Cihazın donanım gücünden (çok çekirdekli CPU) yararlanarak
     yoğun günler ve talep tahminlerini üretir.
     """
+    denied = enforce_permission("report:view", "SALES_FORECAST_VIEW")
+    if denied:
+        return denied
     user_id = get_current_user_id()
     if user_id is None:
         return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
@@ -996,20 +1299,60 @@ def get_sales_forecast():
 
 
 @app.route("/api/sales/<sale_id>", methods=["DELETE"])
+@app.route("/api/sales/<sale_id>/cancel", methods=["POST"])
 def delete_sale_route(sale_id):
+    denied = enforce_permission("sale:cancel", "SALE_CANCEL")
+    if denied:
+        return denied
     user_id = get_current_user_id()
     if user_id is None:
         return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
 
-    restore_stock = request.args.get("restore_stock", "true").lower() != "false"
-    ok, msg = cloud_db.delete_sale(sale_id, user_id=user_id, restore_stock=restore_stock)
+    data = request.get_json(silent=True) or {}
+    restore_stock_raw = data.get("restore_stock", request.args.get("restore_stock", "true"))
+    restore_stock = str(restore_stock_raw).lower() != "false" if not isinstance(restore_stock_raw, bool) else restore_stock_raw
+    cancel_reason = (data.get("cancel_reason") or data.get("reason") or request.args.get("cancel_reason") or request.args.get("reason") or "").strip()
+    cancel_note = (data.get("cancel_note") or data.get("note") or request.args.get("cancel_note") or "").strip()
+
+    ok_r, msg_r, clean_reason, clean_note = validate_cancel_reason(cancel_reason, cancel_note)
+    if not ok_r:
+        return jsonify({"ok": False, "message": msg_r}), 400
+
+    # Kapanan gün kilidi: satışın ait olduğu gün kapalıysa iptal edilemez
+    if not str(sale_id).strip().startswith("farm_"):
+        try:
+            with cloud_db.db.get_connection() as conn:
+                s_dt_row = conn.execute("SELECT sold_at FROM sales WHERE id = ?", (int(sale_id),)).fetchone()
+            if s_dt_row and s_dt_row["sold_at"]:
+                s_bdate = str(s_dt_row["sold_at"]).strip()[:10]
+                if cloud_db.is_cash_day_closed(business_date=s_bdate, user_id=user_id):
+                    return jsonify({
+                        "ok": False,
+                        "day_closed": True,
+                        "message": f"🔒 {s_bdate} günü kapatılmıştır! Kapanan günde satış iptal edilemez; önce Patron günü yeniden açmalıdır.",
+                    }), 409
+        except Exception:
+            pass
+
+    actor = get_current_actor()
+    ok, msg = cloud_db.cancel_sale(
+        sale_id,
+        cancel_reason=clean_reason,
+        cancel_note=clean_note,
+        user_id=user_id,
+        restore_stock=restore_stock,
+        actor=actor,
+    )
     if ok:
         notify_data_change(user_id)
-    return jsonify({"ok": ok, "message": msg})
+    return jsonify({"ok": ok, "message": msg}), (200 if ok else 400)
 
 
 @app.route("/api/sales/<sale_id>/datetime", methods=["POST", "PUT"])
 def update_sale_datetime_route(sale_id):
+    denied = enforce_permission("sale:edit", "SALE_DATETIME_UPDATE")
+    if denied:
+        return denied
     user_id = get_current_user_id()
     if user_id is None:
         return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
@@ -1019,7 +1362,23 @@ def update_sale_datetime_route(sale_id):
     if not new_dt:
         return jsonify({"ok": False, "message": "Geçerli bir tarih ve saat seçilmelidir!"}), 400
 
-    ok, msg = cloud_db.update_sale_datetime(sale_id, str(new_dt), user_id=user_id)
+    # Kapanan gün kilidi
+    new_bdate = str(new_dt).strip()[:10]
+    if cloud_db.is_cash_day_closed(business_date=new_bdate, user_id=user_id):
+        return jsonify({"ok": False, "day_closed": True, "message": f"🔒 {new_bdate} günü kapatılmıştır! Düzenleme için Patron günü yeniden açmalıdır."}), 409
+    if not str(sale_id).strip().startswith("farm_"):
+        try:
+            with cloud_db.db.get_connection() as conn:
+                s_dt_row = conn.execute("SELECT sold_at FROM sales WHERE id = ?", (int(sale_id),)).fetchone()
+            if s_dt_row and s_dt_row["sold_at"]:
+                old_bdate = str(s_dt_row["sold_at"]).strip()[:10]
+                if cloud_db.is_cash_day_closed(business_date=old_bdate, user_id=user_id):
+                    return jsonify({"ok": False, "day_closed": True, "message": f"🔒 {old_bdate} günü kapatılmıştır! Düzenleme için Patron günü yeniden açmalıdır."}), 409
+        except Exception:
+            pass
+
+    actor = get_current_actor()
+    ok, msg = cloud_db.update_sale_datetime(sale_id, str(new_dt), user_id=user_id, actor=actor)
     if ok:
         notify_data_change(user_id)
         raw = str(new_dt).strip().replace("T", " ")
@@ -1036,7 +1395,11 @@ def update_sale_datetime_route(sale_id):
 
 
 @app.route("/api/sales/bulk-delete", methods=["POST"])
+@app.route("/api/sales/bulk-cancel", methods=["POST"])
 def bulk_delete_sales_route():
+    denied = enforce_permission("sale:cancel", "SALE_BULK_CANCEL")
+    if denied:
+        return denied
     user_id = get_current_user_id()
     if user_id is None:
         return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
@@ -1044,13 +1407,46 @@ def bulk_delete_sales_route():
     data = request.json or {}
     sale_ids = data.get("sale_ids", [])
     restore_stock = bool(data.get("restore_stock", True))
-    if not sale_ids:
-        return jsonify({"ok": False, "message": "Silinecek satış seçilmedi!"}), 400
+    cancel_reason = (data.get("cancel_reason") or data.get("reason") or "").strip()
+    cancel_note = (data.get("cancel_note") or data.get("note") or "").strip()
 
-    ok, msg, count = cloud_db.delete_sales_bulk(sale_ids, user_id=user_id, restore_stock=restore_stock)
+    if not sale_ids:
+        return jsonify({"ok": False, "message": "İptal edilecek satış seçilmedi!"}), 400
+
+    ok_r, msg_r, clean_reason, clean_note = validate_cancel_reason(cancel_reason, cancel_note)
+    if not ok_r:
+        return jsonify({"ok": False, "message": msg_r}), 400
+
+    # Kapanan gün kilidi: seçilen satışlardan biri kapalı güne aitse engelle
+    for sid in sale_ids:
+        if not str(sid).strip().startswith("farm_"):
+            try:
+                with cloud_db.db.get_connection() as conn:
+                    s_dt_row = conn.execute("SELECT sold_at FROM sales WHERE id = ?", (int(sid),)).fetchone()
+                if s_dt_row and s_dt_row["sold_at"]:
+                    s_bdate = str(s_dt_row["sold_at"]).strip()[:10]
+                    if cloud_db.is_cash_day_closed(business_date=s_bdate, user_id=user_id):
+                        return jsonify({
+                            "ok": False,
+                            "day_closed": True,
+                            "message": f"🔒 {s_bdate} günü kapatılmıştır! Kapanan günde satış iptal edilemez; önce Patron günü yeniden açmalıdır.",
+                        }), 409
+            except Exception:
+                pass
+
+    actor = get_current_actor()
+    ok, msg, count = cloud_db.delete_sales_bulk(
+        sale_ids,
+        user_id=user_id,
+        restore_stock=restore_stock,
+        cancel_reason=clean_reason,
+        cancel_note=clean_note,
+        actor=actor,
+        require_reason=True,
+    )
     if ok:
         notify_data_change(user_id)
-    return jsonify({"ok": ok, "message": msg, "count": count})
+    return jsonify({"ok": ok, "message": msg, "count": count}), (200 if ok else 400)
 
 
 @app.route("/api/sales/history", methods=["GET"])
@@ -1058,20 +1454,47 @@ def get_sales_history():
     user_id = get_current_user_id()
     if user_id is None:
         return jsonify({"ok": False, "authenticated": False, "sales": []}), 401
+    actor = get_current_actor()
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
     customer_name = request.args.get("customer_name")
+
+    # Çalışan sadece bugünün satışlarını görebilir; geçmiş gün sorgusu engellenir ve loglanır
+    if not has_permission(actor["role"], "sale:view_history"):
+        today_str = get_turkey_now_str("%Y-%m-%d")
+        if (start_date and start_date.strip() != today_str) or (end_date and end_date.strip() != today_str):
+            log_unauthorized_attempt(
+                action="PAST_SALES_HISTORY_ACCESS",
+                resource="GET /api/sales/history",
+                actor=actor,
+                user_id=user_id,
+                ip_address=actor.get("ip_address"),
+                details={"start_date": start_date, "end_date": end_date, "today": today_str},
+                db=cloud_db.db,
+            )
+            return jsonify({
+                "ok": False,
+                "forbidden": True,
+                "message": "🚫 Çalışan sadece bugünün satışlarını görüntüleyebilir. Geçmiş günler için Patron yetkisi gerekir.",
+                "sales": [],
+            }), 403
+        start_date = today_str
+        end_date = today_str
+
     history = cloud_db.get_sales_history(
         user_id=user_id,
         start_date=start_date,
         end_date=end_date,
         customer_name=customer_name,
     )
-    return jsonify({"ok": True, "sales": history})
+    return jsonify({"ok": True, "sales": history, "role": actor["role"]})
 
 
 @app.route("/api/sales/analytics", methods=["GET"])
 def get_sales_analytics():
+    denied = enforce_permission("report:view", "SALES_ANALYTICS_VIEW")
+    if denied:
+        return denied
     user_id = get_current_user_id()
     if user_id is None:
         return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
@@ -1084,16 +1507,47 @@ def get_sales_analytics():
 
 @app.route("/api/expenses", methods=["GET", "POST"])
 def handle_expenses():
+    perm = "expense:create" if request.method == "POST" else "expense:view"
+    denied = enforce_permission(perm, "EXPENSE_ACCESS")
+    if denied:
+        return denied
     user_id = get_current_user_id()
     if user_id is None:
         return jsonify({"ok": False, "authenticated": False, "expenses": []}), 401
     if request.method == "POST":
         data = request.json or {}
         title = data.get("title", "")
-        amount = float(data.get("amount", 0))
+        raw_amount = data.get("amount", 0)
+        confirm_high_amount = bool(data.get("confirm_high_amount", False))
+        val_check = validate_monetary_amount(
+            raw_amount,
+            field_label="Gider tutarı",
+            allow_zero=False,
+            confirm_high_amount=confirm_high_amount,
+        )
+        if not val_check["ok"]:
+            status_code = 409 if val_check["requires_confirmation"] else 400
+            return jsonify({
+                "ok": False,
+                "message": val_check["message"],
+                "requires_confirmation": val_check["requires_confirmation"],
+                "amount": val_check["value"],
+                "warning_threshold": val_check["warning_threshold"],
+            }), status_code
+
+        amount = val_check["value"]
         category = data.get("category", "Fatura")
-        expense_date = data.get("expense_date")
+        payment_method = data.get("payment_method", "nakit")
+        expense_date = data.get("expense_date") or get_turkey_now_str("%Y-%m-%d")
         note = data.get("note", "")
+        actor = get_current_actor()
+
+        if cloud_db.is_cash_day_closed(business_date=str(expense_date)[:10], user_id=user_id):
+            return jsonify({
+                "ok": False,
+                "day_closed": True,
+                "message": f"🔒 {str(expense_date)[:10]} günü kapatılmıştır! Kapanan güne gider eklenemez.",
+            }), 409
 
         ok, msg, exp = cloud_db.add_expense(
             title=title,
@@ -1102,10 +1556,12 @@ def handle_expenses():
             expense_date=expense_date,
             note=note,
             user_id=user_id,
+            actor=actor,
+            payment_method=payment_method,
         )
         if ok:
             notify_data_change(user_id)
-        return jsonify({"ok": ok, "message": msg, "expense": exp})
+        return jsonify({"ok": ok, "message": msg, "expense": exp}), (200 if ok else 400)
 
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
@@ -1113,8 +1569,617 @@ def handle_expenses():
     return jsonify({"ok": True, "expenses": expenses})
 
 
+@app.route("/api/expenses/<int:expense_id>", methods=["DELETE"])
+@app.route("/api/expenses/<int:expense_id>/cancel", methods=["POST"])
+def cancel_expense_route(expense_id: int):
+    denied = enforce_permission("expense:cancel", "EXPENSE_CANCEL")
+    if denied:
+        return denied
+    user_id = get_current_user_id()
+    with cloud_db.db.get_connection() as conn:
+        e_row = conn.execute("SELECT expense_date FROM expenses WHERE id = ?", (expense_id,)).fetchone()
+    if e_row and e_row["expense_date"] and cloud_db.is_cash_day_closed(business_date=str(e_row["expense_date"])[:10], user_id=user_id):
+        return jsonify({"ok": False, "day_closed": True, "message": "🔒 Kapanan güne ait gider iptal edilemez!"}), 409
+
+    data = request.get_json(silent=True) or {}
+    cancel_reason = (data.get("cancel_reason") or data.get("reason") or request.args.get("cancel_reason") or "").strip()
+    cancel_note = (data.get("cancel_note") or data.get("note") or request.args.get("cancel_note") or "").strip()
+    actor = get_current_actor()
+
+    ok, msg = cloud_db.cancel_expense(
+        expense_id,
+        cancel_reason=cancel_reason,
+        cancel_note=cancel_note,
+        user_id=user_id,
+        actor=actor,
+    )
+    if ok:
+        notify_data_change(user_id)
+    return jsonify({"ok": ok, "message": msg}), (200 if ok else 400)
+
+
+@app.route("/api/cash-day/status", methods=["GET"])
+def get_cash_day_status():
+    user_id = get_current_user_id()
+    actor = get_current_actor()
+    today_str = get_turkey_now_str("%Y-%m-%d")
+    req_date = (request.args.get("date") or today_str).strip()[:10]
+    if req_date != today_str and not has_permission(actor["role"], "cash:view"):
+        log_unauthorized_attempt(
+            action="PAST_CASH_DAY_ACCESS",
+            resource="GET /api/cash-day/status",
+            actor=actor,
+            user_id=user_id,
+            ip_address=actor.get("ip_address"),
+            details={"requested_date": req_date},
+            db=cloud_db.db,
+        )
+        return jsonify({"ok": False, "forbidden": True, "message": "🚫 Geçmiş gün kasa bilgisi için Patron yetkisi gerekir."}), 403
+    day = cloud_db.get_cash_day(business_date=req_date, user_id=user_id)
+    return jsonify({
+        "ok": True,
+        "business_date": req_date,
+        "is_open": bool(day and day.get("status") == "open"),
+        "day": day,
+    })
+
+
+@app.route("/api/cash-day/open", methods=["POST"])
+def open_cash_day_route():
+    denied = enforce_permission("cash_day:open", "CASH_DAY_OPEN")
+    if denied:
+        return denied
+    user_id = get_current_user_id()
+    actor = get_current_actor()
+    data = request.json or {}
+    today_str = get_turkey_now_str("%Y-%m-%d")
+    b_date = str(data.get("business_date") or today_str).strip()[:10]
+
+    if b_date != today_str and not has_permission(actor["role"], "day:reopen"):
+        log_unauthorized_attempt(
+            action="PAST_CASH_DAY_OPEN",
+            resource="POST /api/cash-day/open",
+            actor=actor,
+            user_id=user_id,
+            ip_address=actor.get("ip_address"),
+            details={"requested_date": b_date},
+            db=cloud_db.db,
+        )
+        return jsonify({"ok": False, "forbidden": True, "message": "🚫 Çalışan sadece bugünün gün açılışını yapabilir."}), 403
+
+    confirm_high = bool(data.get("confirm_high_amount", False))
+    val_check = validate_monetary_amount(
+        data.get("opening_amount", 0),
+        field_label="Açılış kasası",
+        allow_zero=True,
+        confirm_high_amount=confirm_high,
+    )
+    if not val_check["ok"]:
+        code = 409 if val_check["requires_confirmation"] else 400
+        return jsonify({
+            "ok": False,
+            "message": val_check["message"],
+            "requires_confirmation": val_check["requires_confirmation"],
+            "amount": val_check["value"],
+        }), code
+
+    ok, msg, day_rec = cloud_db.open_cash_day(
+        opening_amount=val_check["value"],
+        business_date=b_date,
+        opening_note=str(data.get("opening_note") or data.get("note") or "").strip(),
+        user_id=user_id,
+        actor=actor,
+    )
+    if ok:
+        notify_data_change(user_id)
+    return jsonify({"ok": ok, "message": msg, "day": day_rec}), (200 if ok else 400)
+
+
+@app.route("/api/cash-day/summary", methods=["GET"])
+def get_cash_day_summary_route():
+    user_id = get_current_user_id()
+    actor = get_current_actor()
+    today_str = get_turkey_now_str("%Y-%m-%d")
+    req_date = (request.args.get("date") or today_str).strip()[:10]
+    if req_date != today_str and not has_permission(actor["role"], "cash:view"):
+        log_unauthorized_attempt(
+            action="PAST_CASH_SUMMARY_ACCESS",
+            resource="GET /api/cash-day/summary",
+            actor=actor,
+            user_id=user_id,
+            ip_address=actor.get("ip_address"),
+            details={"requested_date": req_date},
+            db=cloud_db.db,
+        )
+        return jsonify({"ok": False, "forbidden": True, "message": "🚫 Geçmiş gün kasa özetini sadece Patron görüntüleyebilir."}), 403
+
+    summary = cloud_db.get_cash_summary(business_date=req_date, user_id=user_id)
+    return jsonify({"ok": True, "summary": summary, "role": actor["role"]})
+
+
+@app.route("/api/cash-movements", methods=["GET", "POST"])
+def handle_cash_movements():
+    user_id = get_current_user_id()
+    actor = get_current_actor()
+
+    if request.method == "POST":
+        data = request.json or {}
+        movement_type = str(data.get("movement_type", "tahsilat")).strip().lower()
+        category = str(data.get("category", "genel")).strip().lower() or "genel"
+
+        # Rol yetki kontrolü: Patron çekimi ve nakit çıkış sadece Patron'a, nakit giriş (para üstü vb.) Çalışan'a da açık
+        if category == "patron_cekis":
+            denied = enforce_permission("cash:patron_withdraw", "PATRON_CASH_WITHDRAW")
+            if denied:
+                return denied
+            movement_type = "kasa_cikis"
+        elif movement_type == "kasa_giris":
+            denied = enforce_permission("cash:in", "CASH_IN_CREATE")
+            if denied:
+                return denied
+        else:
+            denied = enforce_permission("cash:create", "CASH_MOVEMENT_CREATE")
+            if denied:
+                return denied
+
+        description = data.get("description", "")
+        confirm_short_desc = bool(data.get("confirm_short_description", False))
+        desc_check = validate_cash_description(
+            description,
+            movement_type,
+            confirm_short_description=confirm_short_desc,
+        )
+        if not desc_check["ok"]:
+            status_code = 409 if desc_check["requires_confirmation"] else 400
+            return jsonify({
+                "ok": False,
+                "message": desc_check["message"],
+                "requires_confirmation": desc_check["requires_confirmation"],
+                "warning_type": desc_check.get("warning_type"),
+            }), status_code
+
+        customer_name = data.get("customer_name")
+        movement_date = data.get("movement_date")
+        note = data.get("note", "")
+        confirm_high_amount = bool(data.get("confirm_high_amount", False))
+
+        mov_bdate = str(movement_date).strip()[:10] if (movement_date and str(movement_date).strip()) else get_turkey_now_str("%Y-%m-%d")
+        if cloud_db.is_cash_day_closed(business_date=mov_bdate, user_id=user_id):
+            return jsonify({
+                "ok": False,
+                "day_closed": True,
+                "message": f"🔒 {mov_bdate} günü kapatılmıştır! Kapanan güne kasa hareketi eklenemez.",
+            }), 409
+
+        val_check = validate_monetary_amount(
+            data.get("amount", 0),
+            field_label="İşlem tutarı",
+            allow_zero=False,
+            confirm_high_amount=confirm_high_amount,
+        )
+        if not val_check["ok"]:
+            status_code = 409 if val_check["requires_confirmation"] else 400
+            return jsonify({
+                "ok": False,
+                "message": val_check["message"],
+                "requires_confirmation": val_check["requires_confirmation"],
+                "amount": val_check["value"],
+                "warning_threshold": val_check["warning_threshold"],
+            }), status_code
+
+        ok, msg, rec = cloud_db.add_cash_movement(
+            movement_type=movement_type,
+            amount=val_check["value"],
+            description=desc_check["value"],
+            category=category,
+            customer_name=customer_name,
+            movement_date=movement_date,
+            note=note,
+            user_id=user_id,
+            actor=actor,
+        )
+        if ok:
+            notify_data_change(user_id)
+        return jsonify({"ok": ok, "message": msg, "movement": rec}), (200 if ok else 400)
+
+    # GET
+    denied = enforce_permission("cash:view", "CASH_MOVEMENT_VIEW")
+    if denied:
+        return denied
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+    m_type = request.args.get("movement_type")
+    res = cloud_db.get_cash_movements(
+        user_id=user_id,
+        start_date=start_date,
+        end_date=end_date,
+        movement_type=m_type,
+        include_cancelled=True,
+    )
+    return jsonify({"ok": True, **res})
+
+
+@app.route("/api/cash-movements/<int:movement_id>", methods=["DELETE"])
+@app.route("/api/cash-movements/<int:movement_id>/cancel", methods=["POST"])
+def cancel_cash_movement_route(movement_id: int):
+    denied = enforce_permission("cash:cancel", "CASH_MOVEMENT_CANCEL")
+    if denied:
+        return denied
+    user_id = get_current_user_id()
+    with cloud_db.db.get_connection() as conn:
+        m_row = conn.execute("SELECT movement_date FROM cash_movements WHERE id = ?", (movement_id,)).fetchone()
+    if m_row and m_row["movement_date"] and cloud_db.is_cash_day_closed(business_date=str(m_row["movement_date"])[:10], user_id=user_id):
+        return jsonify({"ok": False, "day_closed": True, "message": "🔒 Kapanan güne ait kasa hareketi iptal edilemez!"}), 409
+
+    data = request.get_json(silent=True) or {}
+    cancel_reason = (data.get("cancel_reason") or data.get("reason") or request.args.get("cancel_reason") or "").strip()
+    cancel_note = (data.get("cancel_note") or data.get("note") or request.args.get("cancel_note") or "").strip()
+    actor = get_current_actor()
+
+    ok, msg = cloud_db.cancel_cash_movement(
+        movement_id,
+        cancel_reason=cancel_reason,
+        cancel_note=cancel_note,
+        user_id=user_id,
+        actor=actor,
+    )
+    if ok:
+        notify_data_change(user_id)
+    return jsonify({"ok": ok, "message": msg}), (200 if ok else 400)
+
+
+@app.route("/api/reports/cancelled", methods=["GET"])
+def get_cancelled_report_route():
+    """Patron için iptal edilen satış/gider/tahsilat/kasa/çiftlik kayıtları raporu."""
+    denied = enforce_permission("cancelled_report:view", "CANCELLED_REPORT_VIEW")
+    if denied:
+        return denied
+    user_id = get_current_user_id()
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+    entity_type = request.args.get("entity_type")
+    report = cloud_db.get_cancelled_report(
+        user_id=user_id,
+        start_date=start_date,
+        end_date=end_date,
+        entity_type=entity_type,
+    )
+    return jsonify({"ok": True, "report": report})
+
+
+@app.route("/api/reports/discrepancies", methods=["GET"])
+def get_discrepancy_report_route():
+    """Sadece Patron için gün sonu fark geçmişi, çalışan bazlı toplam/aylık rapor ve 3+ gün tekrar uyarıları."""
+    denied = enforce_permission("report:view", "DISCREPANCY_REPORT_VIEW")
+    if denied:
+        return denied
+    user_id = get_current_user_id()
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+    cashier_name = request.args.get("cashier_name")
+    report = cloud_db.get_discrepancy_report(
+        user_id=user_id,
+        start_date=start_date,
+        end_date=end_date,
+        cashier_name=cashier_name,
+    )
+    return jsonify({"ok": True, "report": report})
+
+
+@app.route("/api/audit-logs", methods=["GET"])
+def get_audit_logs_route():
+    """Patron için salt okunur denetim kayıtları (audit log) listesi."""
+    denied = enforce_permission("audit:view", "AUDIT_LOGS_VIEW")
+    if denied:
+        return denied
+    user_id = get_current_user_id()
+    entity_type = request.args.get("entity_type")
+    action = request.args.get("action")
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+    limit = request.args.get("limit", default=200, type=int)
+    logs = get_audit_logs(
+        user_id=user_id,
+        entity_type=entity_type,
+        action=action,
+        start_date=start_date,
+        end_date=end_date,
+        limit=limit,
+        db=cloud_db.db,
+    )
+    return jsonify({"ok": True, "logs": logs})
+
+
+@app.route("/api/cash-day/reconciliation", methods=["GET", "POST"])
+def cash_day_reconciliation_route():
+    """Gün sonu mutabakat önizlemesi: Sistem | Girilen | Fark karşılaştırması."""
+    user_id = get_current_user_id()
+    actor = get_current_actor()
+    today_str = get_turkey_now_str("%Y-%m-%d")
+
+    if request.method == "POST":
+        data = request.json or {}
+        req_date = str(data.get("business_date") or data.get("date") or today_str).strip()[:10]
+        counted_cash = data.get("counted_cash")
+        entered_pos_total = data.get("entered_pos_total")
+        entered_expenses_total = data.get("entered_expenses_total")
+        pending_expenses = data.get("new_expenses") or data.get("pending_expenses") or []
+    else:
+        req_date = (request.args.get("date") or today_str).strip()[:10]
+        counted_cash = request.args.get("counted_cash", type=float)
+        entered_pos_total = request.args.get("entered_pos_total", type=float)
+        entered_expenses_total = request.args.get("entered_expenses_total", type=float)
+        pending_expenses = []
+
+    if req_date != today_str and not has_permission(actor["role"], "cash:view"):
+        log_unauthorized_attempt(
+            action="PAST_DAY_RECONCILIATION_ACCESS",
+            resource=f"{request.method} /api/cash-day/reconciliation",
+            actor=actor,
+            user_id=user_id,
+            ip_address=actor.get("ip_address"),
+            details={"requested_date": req_date},
+            db=cloud_db.db,
+        )
+        return jsonify({"ok": False, "forbidden": True, "message": "🚫 Geçmiş gün mutabakatını sadece Patron görüntüleyebilir."}), 403
+
+    try:
+        c_cash = float(counted_cash) if counted_cash is not None and str(counted_cash).strip() != "" else None
+        e_pos = float(entered_pos_total) if entered_pos_total is not None and str(entered_pos_total).strip() != "" else None
+        e_exp = float(entered_expenses_total) if entered_expenses_total is not None and str(entered_expenses_total).strip() != "" else None
+    except (ValueError, TypeError):
+        return jsonify({"ok": False, "message": "Geçersiz sayısal mutabakat girişi!"}), 400
+
+    summary = cloud_db.get_cash_summary(
+        business_date=req_date,
+        user_id=user_id,
+        counted_cash=c_cash,
+        entered_pos_total=e_pos,
+        entered_expenses_total=e_exp,
+        pending_expenses=pending_expenses,
+    )
+    return jsonify({"ok": True, "reconciliation": summary, "role": actor["role"]})
+
+
+@app.route("/api/cash-day/close", methods=["POST"])
+def close_cash_day_route():
+    """Gün sonu kapanışını ve mutabakatı onaylar, günü kilitler."""
+    denied = enforce_permission("cash_day:close", "CASH_DAY_CLOSE")
+    if denied:
+        return denied
+    user_id = get_current_user_id()
+    actor = get_current_actor()
+    data = request.json or {}
+    today_str = get_turkey_now_str("%Y-%m-%d")
+    b_date = str(data.get("business_date") or data.get("date") or today_str).strip()[:10]
+
+    if b_date != today_str and not has_permission(actor["role"], "day:reopen"):
+        log_unauthorized_attempt(
+            action="PAST_CASH_DAY_CLOSE",
+            resource="POST /api/cash-day/close",
+            actor=actor,
+            user_id=user_id,
+            ip_address=actor.get("ip_address"),
+            details={"requested_date": b_date},
+            db=cloud_db.db,
+        )
+        return jsonify({"ok": False, "forbidden": True, "message": "🚫 Çalışan sadece bugünün kapanışını yapabilir."}), 403
+
+    confirm_high = bool(data.get("confirm_high_amount", False))
+    cash_val = validate_monetary_amount(
+        data.get("counted_cash"),
+        field_label="Sayılan nakit",
+        allow_zero=True,
+        confirm_high_amount=confirm_high,
+    )
+    if not cash_val["ok"]:
+        return jsonify({
+            "ok": False,
+            "message": cash_val["message"],
+            "requires_confirmation": cash_val["requires_confirmation"],
+        }), (409 if cash_val["requires_confirmation"] else 400)
+
+    pos_val = validate_monetary_amount(
+        data.get("entered_pos_total", 0),
+        field_label="POS toplamı",
+        allow_zero=True,
+        confirm_high_amount=confirm_high,
+    )
+    if not pos_val["ok"]:
+        return jsonify({
+            "ok": False,
+            "message": pos_val["message"],
+            "requires_confirmation": pos_val["requires_confirmation"],
+        }), (409 if pos_val["requires_confirmation"] else 400)
+
+    ent_exp = data.get("entered_expenses_total")
+    ent_exp_val = None
+    if ent_exp is not None and str(ent_exp).strip() != "":
+        exp_chk = validate_monetary_amount(
+            ent_exp,
+            field_label="Girilen gider toplamı",
+            allow_zero=True,
+            confirm_high_amount=confirm_high,
+        )
+        if not exp_chk["ok"]:
+            return jsonify({
+                "ok": False,
+                "message": exp_chk["message"],
+                "requires_confirmation": exp_chk["requires_confirmation"],
+            }), (409 if exp_chk["requires_confirmation"] else 400)
+        ent_exp_val = exp_chk["value"]
+
+    ok, msg, summary = cloud_db.close_cash_day(
+        counted_cash=cash_val["value"],
+        entered_pos_total=pos_val["value"],
+        business_date=b_date,
+        closing_note=str(data.get("closing_note") or "").strip(),
+        new_expenses=data.get("new_expenses") or [],
+        entered_expenses_total=ent_exp_val,
+        user_id=user_id,
+        actor=actor,
+    )
+    if ok:
+        notify_data_change(user_id)
+    return jsonify({"ok": ok, "message": msg, "reconciliation": summary}), (200 if ok else 400)
+
+
+@app.route("/api/day/reopen", methods=["POST"])
+def reopen_day_route():
+    """Kapanan günü sadece Patron yetkisiyle yeniden açar ve denetim kaydına işler."""
+    denied = enforce_permission("day:reopen", "DAY_REOPEN")
+    if denied:
+        return denied
+    user_id = get_current_user_id()
+    actor = get_current_actor()
+    data = request.json or {}
+    target_date = str(data.get("date") or data.get("business_date") or get_turkey_now_str("%Y-%m-%d")).strip()[:10]
+    reason = str(data.get("reason") or "").strip()
+
+    ok, msg, day_rec = cloud_db.reopen_cash_day(
+        business_date=target_date,
+        reason=reason,
+        user_id=user_id,
+        actor=actor,
+    )
+    if ok:
+        notify_data_change(user_id)
+    return jsonify({"ok": ok, "message": msg, "day": day_rec}), (200 if ok else 400)
+
+
+# ════════════════════════════════════════════════════════════════════
+# VERESİYE / CARİ HESAP & TAHSİLAT UÇ NOKTALARI
+# ════════════════════════════════════════════════════════════════════
+@app.route("/api/credit/customers", methods=["GET", "POST"])
+def handle_credit_customers():
+    denied = enforce_permission("credit:view", "CREDIT_CUSTOMERS_ACCESS")
+    if denied:
+        return denied
+    user_id = get_current_user_id()
+
+    if request.method == "POST":
+        data = request.json or {}
+        name = str(data.get("name") or "").strip()
+        phone = str(data.get("phone") or "").strip()
+        note = str(data.get("note") or "").strip()
+        actor = get_current_actor()
+        ok, msg, rec = cloud_db.get_or_create_credit_customer(
+            name=name, phone=phone, note=note, user_id=user_id, actor=actor
+        )
+        if ok:
+            notify_data_change(user_id)
+        return jsonify({"ok": ok, "message": msg, "customer": rec}), (200 if ok else 400)
+
+    search = request.args.get("search", "")
+    res = cloud_db.get_credit_customers(user_id=user_id, search=search)
+    return jsonify({"ok": True, **res})
+
+
+@app.route("/api/credit/customers/<int:customer_id>", methods=["GET"])
+def get_credit_customer_detail_route(customer_id: int):
+    denied = enforce_permission("credit:view", "CREDIT_CUSTOMER_DETAIL")
+    if denied:
+        return denied
+    user_id = get_current_user_id()
+    detail = cloud_db.get_credit_customer_detail(customer_id=customer_id, user_id=user_id)
+    if not detail:
+        return jsonify({"ok": False, "message": "Cari müşteri bulunamadı!"}), 404
+    return jsonify({"ok": True, **detail})
+
+
+@app.route("/api/credit/collections", methods=["POST"])
+def add_credit_collection_route():
+    """Sadece borç ödemesi (Tahsilat - Nakit veya POS) alır."""
+    denied = enforce_permission("credit:collect", "CREDIT_COLLECTION_CREATE")
+    if denied:
+        return denied
+    user_id = get_current_user_id()
+    actor = get_current_actor()
+    data = request.json or {}
+
+    customer_id = data.get("customer_id")
+    if not customer_id:
+        return jsonify({"ok": False, "message": "Tahsilat için müşteri seçilmesi zorunludur!"}), 400
+
+    tx_date = data.get("tx_date")
+    b_date = str(tx_date).strip()[:10] if (tx_date and str(tx_date).strip()) else get_turkey_now_str("%Y-%m-%d")
+    day = cloud_db.get_cash_day(business_date=b_date, user_id=user_id)
+    if day and str(day.get("status") or "").lower() == "closed":
+        return jsonify({
+            "ok": False,
+            "day_closed": True,
+            "message": f"🔒 {b_date} günü kapatılmıştır! Kapanan güne tahsilat girilemez.",
+        }), 409
+    if not day or day.get("status") != "open":
+        return jsonify({
+            "ok": False,
+            "day_not_open": True,
+            "message": "⚠️ Gün açılışı yapılmadı! Tahsilat alabilmek için önce açılış kasasını girerek günü açınız.",
+        }), 409
+
+    confirm_high = bool(data.get("confirm_high_amount", False))
+    val_check = validate_monetary_amount(
+        data.get("amount"),
+        field_label="Tahsilat tutarı",
+        allow_zero=False,
+        confirm_high_amount=confirm_high,
+    )
+    if not val_check["ok"]:
+        return jsonify({
+            "ok": False,
+            "message": val_check["message"],
+            "requires_confirmation": val_check["requires_confirmation"],
+            "amount": val_check["value"],
+        }), (409 if val_check["requires_confirmation"] else 400)
+
+    ok, msg, rec = cloud_db.add_credit_collection(
+        customer_id=int(customer_id),
+        amount=val_check["value"],
+        payment_method=data.get("payment_method", "nakit"),
+        note=str(data.get("note") or "").strip(),
+        tx_date=tx_date,
+        user_id=user_id,
+        actor=actor,
+    )
+    if ok:
+        notify_data_change(user_id)
+    return jsonify({"ok": ok, "message": msg, "collection": rec}), (200 if ok else 400)
+
+
+@app.route("/api/credit/collections/<int:tx_id>", methods=["DELETE"])
+@app.route("/api/credit/collections/<int:tx_id>/cancel", methods=["POST"])
+def cancel_credit_collection_route(tx_id: int):
+    denied = enforce_permission("credit:cancel", "CREDIT_COLLECTION_CANCEL")
+    if denied:
+        return denied
+    user_id = get_current_user_id()
+    with cloud_db.db.get_connection() as conn:
+        t_row = conn.execute("SELECT tx_date FROM credit_transactions WHERE id = ?", (tx_id,)).fetchone()
+    if t_row and t_row["tx_date"] and cloud_db.is_cash_day_closed(business_date=str(t_row["tx_date"])[:10], user_id=user_id):
+        return jsonify({"ok": False, "day_closed": True, "message": "🔒 Kapanan güne ait tahsilat iptal edilemez!"}), 409
+
+    data = request.get_json(silent=True) or {}
+    cancel_reason = (data.get("cancel_reason") or data.get("reason") or request.args.get("cancel_reason") or "").strip()
+    cancel_note = (data.get("cancel_note") or data.get("note") or request.args.get("cancel_note") or "").strip()
+    actor = get_current_actor()
+
+    ok, msg = cloud_db.cancel_credit_collection(
+        tx_id=tx_id,
+        cancel_reason=cancel_reason,
+        cancel_note=cancel_note,
+        user_id=user_id,
+        actor=actor,
+    )
+    if ok:
+        notify_data_change(user_id)
+    return jsonify({"ok": ok, "message": msg}), (200 if ok else 400)
+
+
 @app.route("/api/ai/analyze-sales", methods=["POST"])
 def api_analyze_sales():
+    denied = enforce_permission("report:view", "AI_ANALYZE_SALES")
+    if denied:
+        return denied
     user_id = get_current_user_id()
     if user_id is None:
         return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
@@ -1128,6 +2193,10 @@ def api_analyze_sales():
 
 @app.route("/api/settings/store-hours", methods=["GET", "POST"])
 def handle_store_hours():
+    if request.method == "POST":
+        denied = enforce_permission("settings:manage", "STORE_HOURS_UPDATE")
+        if denied:
+            return denied
     user_id = get_current_user_id()
     if user_id is None:
         return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
@@ -1213,6 +2282,9 @@ def farm_auth_check():
 
 @app.route("/api/farm/customers", methods=["GET"])
 def api_farm_customers():
+    denied = enforce_permission("farm:manage", "FARM_CUSTOMERS_VIEW")
+    if denied:
+        return denied
     uid = get_current_user_id()
     customers = cloud_db.get_farm_customers(user_id=uid)
     return jsonify({"ok": True, "customers": customers})
@@ -1220,6 +2292,9 @@ def api_farm_customers():
 
 @app.route("/api/farm/egg-sales", methods=["GET", "POST"])
 def api_farm_egg_sales():
+    denied = enforce_permission("farm:manage", "FARM_EGG_SALES_ACCESS")
+    if denied:
+        return denied
     uid = get_current_user_id()
     if request.method == "POST":
         data = request.json or {}
@@ -1255,19 +2330,46 @@ def api_farm_egg_sales():
     end = request.args.get("end_date")
     source = request.args.get("source")
     limit = request.args.get("limit", type=int)
-    sales = cloud_db.get_farm_egg_sales(user_id=uid, customer_name=cust, start_date=start, end_date=end, source=source, limit=limit)
+    include_cancelled = request.args.get("include_cancelled", "false").lower() == "true"
+    sales = cloud_db.get_farm_egg_sales(
+        user_id=uid,
+        customer_name=cust,
+        start_date=start,
+        end_date=end,
+        source=source,
+        limit=limit,
+        include_cancelled=include_cancelled,
+    )
     return jsonify({"ok": True, "sales": sales})
 
 
 @app.route("/api/farm/egg-sales/<int:sale_id>", methods=["DELETE"])
+@app.route("/api/farm/egg-sales/<int:sale_id>/cancel", methods=["POST"])
 def api_farm_delete_egg_sale(sale_id: int):
+    denied = enforce_permission("farm:manage", "FARM_EGG_SALE_CANCEL")
+    if denied:
+        return denied
     uid = get_current_user_id()
-    ok, msg = cloud_db.delete_farm_egg_sale(sale_id, user_id=uid)
+    data = request.get_json(silent=True) or {}
+    cancel_reason = (data.get("cancel_reason") or data.get("reason") or request.args.get("cancel_reason") or "").strip()
+    cancel_note = (data.get("cancel_note") or data.get("note") or request.args.get("cancel_note") or "").strip()
+    actor = get_current_actor()
+    ok, msg = cloud_db.delete_farm_egg_sale(
+        sale_id,
+        user_id=uid,
+        cancel_reason=cancel_reason,
+        cancel_note=cancel_note,
+        actor=actor,
+        require_reason=True,
+    )
     return jsonify({"ok": ok, "message": msg}), (200 if ok else 400)
 
 
 @app.route("/api/farm/feed-purchases", methods=["GET", "POST"])
 def api_farm_feed_purchases():
+    denied = enforce_permission("farm:manage", "FARM_FEED_PURCHASES_ACCESS")
+    if denied:
+        return denied
     uid = get_current_user_id()
     if request.method == "POST":
         data = request.json or {}
@@ -1295,20 +2397,45 @@ def api_farm_feed_purchases():
     start = request.args.get("start_date")
     end = request.args.get("end_date")
     limit = request.args.get("limit", type=int)
-    purchases = cloud_db.get_farm_feed_purchases(user_id=uid, start_date=start, end_date=end, limit=limit)
+    include_cancelled = request.args.get("include_cancelled", "false").lower() == "true"
+    purchases = cloud_db.get_farm_feed_purchases(
+        user_id=uid,
+        start_date=start,
+        end_date=end,
+        limit=limit,
+        include_cancelled=include_cancelled,
+    )
     summary = cloud_db.get_farm_feed_summary(user_id=uid)
     return jsonify({"ok": True, "purchases": purchases, "summary": summary})
 
 
 @app.route("/api/farm/feed-purchases/<int:purchase_id>", methods=["DELETE"])
+@app.route("/api/farm/feed-purchases/<int:purchase_id>/cancel", methods=["POST"])
 def api_farm_delete_feed_purchase(purchase_id: int):
+    denied = enforce_permission("farm:manage", "FARM_FEED_PURCHASE_CANCEL")
+    if denied:
+        return denied
     uid = get_current_user_id()
-    ok, msg = cloud_db.delete_farm_feed_purchase(purchase_id, user_id=uid)
+    data = request.get_json(silent=True) or {}
+    cancel_reason = (data.get("cancel_reason") or data.get("reason") or request.args.get("cancel_reason") or "").strip()
+    cancel_note = (data.get("cancel_note") or data.get("note") or request.args.get("cancel_note") or "").strip()
+    actor = get_current_actor()
+    ok, msg = cloud_db.delete_farm_feed_purchase(
+        purchase_id,
+        user_id=uid,
+        cancel_reason=cancel_reason,
+        cancel_note=cancel_note,
+        actor=actor,
+        require_reason=True,
+    )
     return jsonify({"ok": ok, "message": msg}), (200 if ok else 400)
 
 
 @app.route("/api/farm/analytics", methods=["GET"])
 def api_farm_analytics():
+    denied = enforce_permission("farm:manage", "FARM_ANALYTICS_VIEW")
+    if denied:
+        return denied
     uid = get_current_user_id()
     from app.services.farm_service import FarmService
     f_svc = FarmService(cloud_db)

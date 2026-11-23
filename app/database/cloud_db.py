@@ -15,6 +15,18 @@ from app.config import DATA_DIR, DB_PATH, TURKEY_TZ, get_turkey_now, get_turkey_
 from app.database.connection import Database
 from app.database.migrations import run_migrations
 from app.models.product import Product
+from app.services.cash_reconciliation_service import (
+    analyze_discrepancy_history,
+    calculate_day_reconciliation,
+    resolve_day_cashier,
+)
+from app.services.credit_service import from_kurus, to_kurus
+from app.services.security_service import (
+    CASH_MOVEMENT_TYPES,
+    log_audit,
+    normalize_role,
+    validate_cancel_reason,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1946,6 +1958,12 @@ class CloudDatabase:
         total_amount_override: Optional[float] = None,
         customer_name: Optional[str] = None,
         sold_at: Optional[str] = None,
+        actor: Optional[Dict[str, Any]] = None,
+        payment_method: Optional[str] = None,
+        customer_id: Optional[int] = None,
+        paid_cash_amount: Optional[float] = None,
+        paid_pos_amount: Optional[float] = None,
+        overpayment_mode: Optional[str] = None,
     ) -> tuple[bool, str]:
         if not cart_items:
             return False, "Sepet boş!"
@@ -1955,7 +1973,18 @@ class CloudDatabase:
         if ch not in ("magaza", "internet"):
             ch = "magaza"
 
+        pm_raw = str(payment_method or ("kart" if ch == "internet" else "nakit")).strip().lower()
+        if pm_raw == "pos":
+            pm_raw = "kart"
+        pm = pm_raw if pm_raw in ("nakit", "kart", "veresiye", "karma", "havale") else "nakit"
+
         cust_name = customer_name.strip() if customer_name and str(customer_name).strip() else None
+
+        for item in cart_items:
+            u_price = float(item.get("unit_price", 0))
+            qty = float(item.get("quantity", 1))
+            if u_price < 0 or qty <= 0:
+                return False, "Birim fiyat negatif, miktar 0 veya negatif olamaz!"
 
         calculated_total = sum(float(item.get("subtotal", item.get("unit_price", 0) * item.get("quantity", 1))) for item in cart_items)
         if total_amount_override is not None:
@@ -1966,13 +1995,89 @@ class CloudDatabase:
         else:
             total_amount = round(calculated_total, 2)
 
+        if total_amount < 0:
+            return False, "Satış toplam tutarı negatif olamaz!"
+
+        # Kuruş bazlı kesin ödeme ve cari hesap ayrıştırması
+        total_k = to_kurus(total_amount)
+        if paid_cash_amount is not None and float(paid_cash_amount) < 0:
+            return False, "Ödenen nakit tutarı negatif olamaz!"
+        if paid_pos_amount is not None and float(paid_pos_amount) < 0:
+            return False, "Ödenen POS tutarı negatif olamaz!"
+
+        if pm == "veresiye":
+            paid_cash_k = 0
+            paid_pos_k = 0
+        elif pm == "karma":
+            paid_cash_k = to_kurus(paid_cash_amount or 0)
+            paid_pos_k = to_kurus(paid_pos_amount or 0)
+        elif pm == "nakit":
+            paid_cash_k = to_kurus(paid_cash_amount) if paid_cash_amount is not None else total_k
+            paid_pos_k = to_kurus(paid_pos_amount or 0)
+        else:
+            paid_cash_k = to_kurus(paid_cash_amount or 0)
+            paid_pos_k = to_kurus(paid_pos_amount) if paid_pos_amount is not None else total_k
+
+        paid_total_k = paid_cash_k + paid_pos_k
+        diff_k = total_k - paid_total_k  # >0: veresiye borç, <0: fazla ödeme
+        ov_mode: Optional[str] = None
+        overpay_k = 0
+        if diff_k < 0:
+            overpay_k = abs(diff_k)
+            ov_mode = "change" if str(overpayment_mode or "credit").strip().lower() == "change" else "credit"
+
+        needs_credit_customer = (pm == "veresiye") or (diff_k > 0) or (overpay_k > 0 and ov_mode == "credit")
+        if needs_credit_customer and not customer_id and not cust_name:
+            return False, "Veresiye, kısmi ödeme veya cari alacak kaydı için müşteri seçilmesi zorunludur!"
+
+        act = actor or {"name": "Patron", "role": "patron", "user_id": uid}
+        created_by = str(act.get("name") or "Patron")
+        created_by_role = normalize_role(act.get("role"))
+
         item_count = len(cart_items)
         now = normalize_datetime_str(sold_at)
+        product_summary = ", ".join(
+            f"{str(it.get('product_name', 'Ürün')).strip()} x{float(it.get('quantity', 1)):g}"
+            for it in cart_items[:5]
+        )
+
+        # Cari müşteri çözümle (gerekiyorsa veya seçildiyse)
+        resolved_cust_id: Optional[int] = None
+        if customer_id:
+            with self.db.get_connection() as conn:
+                c_row = conn.execute(
+                    "SELECT id, name FROM credit_customers WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+                    (int(customer_id), uid),
+                ).fetchone()
+                if c_row:
+                    resolved_cust_id = int(c_row["id"])
+                    if not cust_name:
+                        cust_name = c_row["name"]
+                elif needs_credit_customer:
+                    return False, "Seçilen cari müşteri bulunamadı!"
+        elif needs_credit_customer and cust_name:
+            ok_c, _, cust_rec = self.get_or_create_credit_customer(cust_name, user_id=uid, actor=act)
+            if ok_c and cust_rec:
+                resolved_cust_id = int(cust_rec["id"])
+                cust_name = cust_rec["name"]
+
+        credit_net_k = diff_k if (overpay_k == 0 or ov_mode == "credit") else 0
 
         with self.db.get_connection() as conn:
             cursor = conn.execute(
-                "INSERT INTO sales (user_id, total_amount, item_count, sold_at, note, channel, customer_name) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (uid, total_amount, item_count, now, note, ch, cust_name),
+                """
+                INSERT INTO sales (
+                    user_id, total_amount, item_count, sold_at, note, channel, payment_method,
+                    customer_id, customer_name, paid_cash_amount, paid_pos_amount, credit_amount, overpayment_mode,
+                    status, created_by, created_by_role
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+                """,
+                (
+                    uid, total_amount, item_count, now, note, ch, pm,
+                    resolved_cust_id, cust_name,
+                    from_kurus(paid_cash_k), from_kurus(paid_pos_k), from_kurus(credit_net_k), ov_mode,
+                    created_by, created_by_role,
+                ),
             )
             sale_id = cursor.lastrowid
 
@@ -2021,6 +2126,95 @@ class CloudDatabase:
                         """,
                         (float(item["quantity"]), now, valid_pid, uid),
                     )
+
+            # Cari hesap hareketlerini kaydet (borç + satış anı ödemesi)
+            if resolved_cust_id is not None and total_k > 0:
+                conn.execute(
+                    """
+                    INSERT INTO credit_transactions (
+                        user_id, customer_id, sale_id, tx_type, payment_method,
+                        amount_kurus, signed_kurus, description, product_summary,
+                        tx_date, status, created_by, created_by_role, created_at
+                    ) VALUES (?, ?, ?, 'borc', ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+                    """,
+                    (
+                        uid, resolved_cust_id, sale_id, pm,
+                        total_k, total_k, f"Satış Fiş #{sale_id}", product_summary,
+                        now, created_by, created_by_role, now,
+                    ),
+                )
+                # Satış anında yapılan ödeme cariye alacak (-) olarak işlenir
+                ledger_pay_k = total_k if (overpay_k > 0 and ov_mode == "change") else paid_total_k
+                if ledger_pay_k > 0:
+                    pay_pm = "karma" if (paid_cash_k > 0 and paid_pos_k > 0) else ("nakit" if paid_cash_k > 0 else "kart")
+                    pay_desc = (
+                        f"Satış Fiş #{sale_id} ödemesi (fazla ödeme alacak işlendi)"
+                        if (overpay_k > 0 and ov_mode == "credit")
+                        else f"Satış Fiş #{sale_id} ödemesi"
+                    )
+                    conn.execute(
+                        """
+                        INSERT INTO credit_transactions (
+                            user_id, customer_id, sale_id, tx_type, payment_method,
+                            amount_kurus, signed_kurus, description, product_summary,
+                            tx_date, status, created_by, created_by_role, created_at
+                        ) VALUES (?, ?, ?, 'odeme', ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+                        """,
+                        (
+                            uid, resolved_cust_id, sale_id, pay_pm,
+                            ledger_pay_k, -ledger_pay_k, pay_desc, product_summary,
+                            now, created_by, created_by_role, now,
+                        ),
+                    )
+
+            # Fazla ödeme para üstü olarak kasadan verildiyse kasa çıkışı kaydet
+            if overpay_k > 0 and ov_mode == "change":
+                change_tl = from_kurus(overpay_k)
+                day_row = conn.execute(
+                    "SELECT id FROM cash_days WHERE business_date = ? AND (user_id = ? OR user_id IS NULL) LIMIT 1",
+                    (now[:10], uid),
+                ).fetchone()
+                cday_id = day_row["id"] if day_row else None
+                conn.execute(
+                    """
+                    INSERT INTO cash_movements (
+                        user_id, cash_day_id, movement_type, category, amount, description, customer_name,
+                        movement_date, note, status, created_by, created_by_role, synced_to_cloud, created_at
+                    ) VALUES (?, ?, 'kasa_cikis', 'para_ustu_verildi', ?, ?, ?, ?, ?, 'active', ?, ?, 0, ?)
+                    """,
+                    (
+                        uid, cday_id, change_tl,
+                        f"Fiş #{sale_id} para üstü iadesi",
+                        cust_name, now, f"Satış #{sale_id} fazla ödeme para üstü",
+                        created_by, created_by_role, now,
+                    ),
+                )
+
+            log_audit(
+                action="SALE_CREATE",
+                entity_type="sale",
+                entity_id=sale_id,
+                old_value=None,
+                new_value={
+                    "id": sale_id,
+                    "total_amount": total_amount,
+                    "item_count": item_count,
+                    "channel": ch,
+                    "payment_method": pm,
+                    "customer_id": resolved_cust_id,
+                    "customer_name": cust_name,
+                    "paid_cash_amount": from_kurus(paid_cash_k),
+                    "paid_pos_amount": from_kurus(paid_pos_k),
+                    "credit_amount": from_kurus(credit_net_k),
+                    "overpayment_mode": ov_mode,
+                    "sold_at": now,
+                    "note": note,
+                    "status": "active",
+                },
+                actor=act,
+                user_id=uid,
+                conn=conn,
+            )
 
         # Dükkan satışındaki yumurtaları otomatik Çiftlik kaydına aktar
         try:
@@ -2074,6 +2268,7 @@ class CloudDatabase:
                     "sold_at": now,
                     "note": note,
                     "channel": ch,
+                    "payment_method": pm,
                     "customer_name": cust_name,
                     "items": cart_items,
                     "synced_to_cloud": 1,
@@ -2118,21 +2313,64 @@ class CloudDatabase:
 
         return True, f"Satış başarıyla tamamlandı. Toplam: {total_amount:.2f} ₺"
 
+    def cancel_sale(
+        self,
+        sale_id: Union[int, str],
+        cancel_reason: str,
+        cancel_note: str = "",
+        user_id: Optional[int] = None,
+        restore_stock: bool = True,
+        actor: Optional[Dict[str, Any]] = None,
+    ) -> tuple[bool, str]:
+        """Satışı fiziksel olarak silmek yerine zorunlu neden ile 'cancelled' durumuna alır."""
+        return self.delete_sale(
+            sale_id,
+            user_id=user_id,
+            restore_stock=restore_stock,
+            cancel_reason=cancel_reason,
+            cancel_note=cancel_note,
+            actor=actor,
+            require_reason=True,
+        )
+
     def delete_sale(
         self,
         sale_id: Union[int, str],
         user_id: Optional[int] = None,
         restore_stock: bool = True,
+        cancel_reason: Optional[str] = None,
+        cancel_note: str = "",
+        actor: Optional[Dict[str, Any]] = None,
+        require_reason: bool = False,
     ) -> tuple[bool, str]:
+        """Satışı fiziksel olarak silmez; iptal edildi (cancelled) durumuna alır, stok iade eder ve audit log yazar."""
+        if require_reason:
+            ok_r, msg_r, clean_reason, clean_note = validate_cancel_reason(cancel_reason, cancel_note)
+            if not ok_r:
+                return False, msg_r
+        else:
+            clean_reason = str(cancel_reason or "Sistem / Yönetici iptali").strip()
+            clean_note = str(cancel_note or "").strip()
+
         uid = self._resolve_user_id(user_id)
         now = get_turkey_now_str()
+        act = actor or {"name": "Patron", "role": "patron", "user_id": uid}
+        actor_name = str(act.get("name") or "Patron")
+        actor_role = normalize_role(act.get("role"))
 
-        # Handle farm egg sale deletion if ID has "farm_" prefix
+        # Handle farm egg sale cancellation if ID has "farm_" prefix
         s_id_str = str(sale_id).strip()
         if s_id_str.startswith("farm_"):
             try:
                 fid = int(s_id_str.replace("farm_", ""))
-                return self.delete_farm_egg_sale(fid, user_id=uid)
+                return self.delete_farm_egg_sale(
+                    fid,
+                    user_id=uid,
+                    cancel_reason=clean_reason,
+                    cancel_note=clean_note,
+                    actor=act,
+                    require_reason=require_reason,
+                )
             except ValueError:
                 return False, "Geçersiz çiftlik satış numarası!"
 
@@ -2144,20 +2382,31 @@ class CloudDatabase:
         affected_product_ids = set()
 
         with self.db.get_connection() as conn:
-            # Satışın bu kullanıcıya ait olduğunu doğrula (veya genel kullanıcı)
             sale = conn.execute(
-                "SELECT id, total_amount FROM sales WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
-                (numeric_sale_id, uid)
+                "SELECT * FROM sales WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+                (numeric_sale_id, uid),
             ).fetchone()
 
             if not sale:
                 return False, "Satış kaydı bulunamadı veya bu hesaba ait değil!"
 
+            if str(sale["status"] or "active").lower() == "cancelled":
+                return False, "Bu satış zaten iptal edilmiş!"
+
+            old_snapshot = {
+                "id": sale["id"],
+                "total_amount": sale["total_amount"],
+                "item_count": sale["item_count"],
+                "sold_at": sale["sold_at"],
+                "channel": sale["channel"],
+                "customer_name": sale["customer_name"],
+                "status": sale["status"] or "active",
+            }
+
             if restore_stock:
-                # Satıştaki ürünlerin stoklarını geri yükle (aktif ürünler için)
                 items = conn.execute(
                     "SELECT product_id, barcode, quantity FROM sale_items WHERE sale_id = ?",
-                    (numeric_sale_id,)
+                    (numeric_sale_id,),
                 ).fetchall()
                 for it in items:
                     pid = it["product_id"]
@@ -2197,23 +2446,103 @@ class CloudDatabase:
                             if p_row:
                                 affected_product_ids.add(p_row["id"])
 
-            # Satış kalemlerini ve ana satış kaydını sil
-            conn.execute("DELETE FROM sale_items WHERE sale_id = ?", (numeric_sale_id,))
-            conn.execute("DELETE FROM sales WHERE id = ? AND (user_id = ? OR user_id IS NULL)", (numeric_sale_id, uid))
-            # Varsa bu dükkan fişinden türemiş çiftlik yumurta kaydını da temizle
+            # Fiziksel silme yerine iptal edildi (cancelled) durumuna al
             conn.execute(
-                "DELETE FROM farm_egg_sales WHERE (note LIKE ? OR note LIKE ?) AND (user_id = ? OR user_id IS NULL)",
-                (f"%Fiş #{numeric_sale_id}%", f"%Fiş #{numeric_sale_id})%", uid)
+                """
+                UPDATE sales
+                SET status = 'cancelled',
+                    cancelled_at = ?,
+                    cancelled_by = ?,
+                    cancelled_by_role = ?,
+                    cancel_reason = ?,
+                    cancel_note = ?,
+                    synced_to_cloud = 0
+                WHERE id = ? AND (user_id = ? OR user_id IS NULL)
+                """,
+                (now, actor_name, actor_role, clean_reason, clean_note, numeric_sale_id, uid),
+            )
+            # Varsa bu dükkan fişinden türemiş çiftlik yumurta kaydını da iptal et
+            conn.execute(
+                """
+                UPDATE farm_egg_sales
+                SET status = 'cancelled',
+                    cancelled_at = ?,
+                    cancelled_by = ?,
+                    cancelled_by_role = ?,
+                    cancel_reason = ?,
+                    cancel_note = ?,
+                    synced_to_cloud = 0
+                WHERE (note LIKE ? OR note LIKE ?) AND (user_id = ? OR user_id IS NULL)
+                  AND COALESCE(status, 'active') != 'cancelled'
+                """,
+                (now, actor_name, actor_role, clean_reason, clean_note, f"%Fiş #{numeric_sale_id}%", f"%Fiş #{numeric_sale_id})%", uid),
+            )
+            # Varsa bu satışa bağlı cari hesap (veresiye) hareketlerini ve para üstü çıkışını da iptal et
+            conn.execute(
+                """
+                UPDATE credit_transactions
+                SET status = 'cancelled',
+                    cancelled_at = ?,
+                    cancelled_by = ?,
+                    cancelled_by_role = ?,
+                    cancel_reason = ?,
+                    cancel_note = ?
+                WHERE sale_id = ? AND COALESCE(status, 'active') != 'cancelled'
+                """,
+                (now, actor_name, actor_role, clean_reason, clean_note, numeric_sale_id),
+            )
+            conn.execute(
+                """
+                UPDATE cash_movements
+                SET status = 'cancelled',
+                    cancelled_at = ?,
+                    cancelled_by = ?,
+                    cancelled_by_role = ?,
+                    cancel_reason = ?,
+                    cancel_note = ?,
+                    synced_to_cloud = 0
+                WHERE category = 'para_ustu_verildi' AND description LIKE ?
+                  AND COALESCE(status, 'active') != 'cancelled'
+                """,
+                (now, actor_name, actor_role, clean_reason, clean_note, f"Fiş #{numeric_sale_id} %"),
+            )
+
+            log_audit(
+                action="SALE_CANCEL",
+                entity_type="sale",
+                entity_id=numeric_sale_id,
+                old_value=old_snapshot,
+                new_value={
+                    "status": "cancelled",
+                    "cancelled_at": now,
+                    "cancelled_by": actor_name,
+                    "cancelled_by_role": actor_role,
+                    "cancel_reason": clean_reason,
+                    "cancel_note": clean_note,
+                    "restore_stock": restore_stock,
+                },
+                reason=clean_reason + (f" — {clean_note}" if clean_note else ""),
+                actor=act,
+                user_id=uid,
+                conn=conn,
             )
 
         if self.firestore_db:
             try:
                 doc_id = f"u{uid}_s{numeric_sale_id}"
-                self.firestore_db.collection("sales").document(doc_id).delete()
-                # Eski ID ile de silmeyi dene
-                self.firestore_db.collection("sales").document(str(numeric_sale_id)).delete()
+                self.firestore_db.collection("sales").document(doc_id).set(
+                    {
+                        "status": "cancelled",
+                        "cancelled_at": now,
+                        "cancelled_by": actor_name,
+                        "cancelled_by_role": actor_role,
+                        "cancel_reason": clean_reason,
+                        "cancel_note": clean_note,
+                    },
+                    merge=True,
+                )
             except Exception as e:
-                logger.warning(f"Firestore satış silme uyarısı: {e}")
+                logger.warning(f"Firestore satış iptal güncelleme uyarısı: {e}")
 
             if restore_stock and affected_product_ids:
                 with self.db.get_connection() as conn:
@@ -2233,22 +2562,36 @@ class CloudDatabase:
                             except Exception as ex:
                                 logger.warning(f"Firestore ürün stok güncelleme uyarısı ({pid}): {ex}")
 
-        return True, "Satış başarıyla silindi ve ürün stokları depoya geri yüklendi."
+        return True, "Satış iptal edildi ve ürün stokları depoya geri yüklendi."
 
     def delete_sales_bulk(
         self,
         sale_ids: List[Union[int, str]],
         user_id: Optional[int] = None,
         restore_stock: bool = True,
+        cancel_reason: Optional[str] = None,
+        cancel_note: str = "",
+        actor: Optional[Dict[str, Any]] = None,
+        require_reason: bool = False,
     ) -> tuple[bool, str, int]:
-        """Birden fazla satışı tek işlemde siler ve istenirse satılan stokları depoya iade eder."""
+        """Birden fazla satışı fiziksel silme yerine tek işlemde iptal eder ve stokları iade eder."""
         if not sale_ids:
-            return False, "Silinecek satış seçilmedi!", 0
+            return False, "İptal edilecek satış seçilmedi!", 0
+
+        if require_reason:
+            ok_r, msg_r, clean_reason, clean_note = validate_cancel_reason(cancel_reason, cancel_note)
+            if not ok_r:
+                return False, msg_r, 0
+        else:
+            clean_reason = str(cancel_reason or "Toplu yönetici iptali").strip()
+            clean_note = str(cancel_note or "").strip()
 
         uid = self._resolve_user_id(user_id)
         now = get_turkey_now_str()
+        act = actor or {"name": "Patron", "role": "patron", "user_id": uid}
+        actor_name = str(act.get("name") or "Patron")
+        actor_role = normalize_role(act.get("role"))
 
-        # Ayrıştır: Çiftlik satışları ve dükkan satışları
         farm_ids: List[int] = []
         cleaned_ids: List[int] = []
         for sid in sale_ids:
@@ -2264,17 +2607,23 @@ class CloudDatabase:
                 except (ValueError, TypeError):
                     pass
 
-        total_deleted = 0
+        total_cancelled = 0
 
-        # Çiftlik satışlarını sil
         for fid in farm_ids:
-            ok, _ = self.delete_farm_egg_sale(fid, user_id=uid)
+            ok, _ = self.delete_farm_egg_sale(
+                fid,
+                user_id=uid,
+                cancel_reason=clean_reason,
+                cancel_note=clean_note,
+                actor=act,
+                require_reason=require_reason,
+            )
             if ok:
-                total_deleted += 1
+                total_cancelled += 1
 
         if not cleaned_ids:
-            if total_deleted > 0:
-                return True, f"{total_deleted} adet satış başarıyla silindi.", total_deleted
+            if total_cancelled > 0:
+                return True, f"{total_cancelled} adet satış başarıyla iptal edildi.", total_cancelled
             return False, "Geçersiz satış listesi!", 0
 
         affected_product_ids = set()
@@ -2282,13 +2631,18 @@ class CloudDatabase:
         with self.db.get_connection() as conn:
             placeholders = ",".join("?" for _ in cleaned_ids)
             valid_sales = conn.execute(
-                f"SELECT id FROM sales WHERE id IN ({placeholders}) AND (user_id = ? OR user_id IS NULL)",
+                f"""
+                SELECT * FROM sales
+                WHERE id IN ({placeholders})
+                  AND (user_id = ? OR user_id IS NULL)
+                  AND COALESCE(status, 'active') != 'cancelled'
+                """,
                 (*cleaned_ids, uid),
             ).fetchall()
             valid_ids = [r["id"] for r in valid_sales]
 
-            if not valid_ids and total_deleted == 0:
-                return False, "Seçilen satışlar bulunamadı veya bu hesaba ait değil!", 0
+            if not valid_ids and total_cancelled == 0:
+                return False, "Seçilen satışlar bulunamadı veya zaten iptal edilmiş!", 0
 
             if valid_ids and restore_stock:
                 v_placeholders = ",".join("?" for _ in valid_ids)
@@ -2336,20 +2690,89 @@ class CloudDatabase:
 
             if valid_ids:
                 v_placeholders = ",".join("?" for _ in valid_ids)
-                conn.execute(f"DELETE FROM sale_items WHERE sale_id IN ({v_placeholders})", valid_ids)
-                conn.execute(f"DELETE FROM sales WHERE id IN ({v_placeholders}) AND (user_id = ? OR user_id IS NULL)", (*valid_ids, uid))
-                for vid in valid_ids:
+                conn.execute(
+                    f"""
+                    UPDATE sales
+                    SET status = 'cancelled',
+                        cancelled_at = ?,
+                        cancelled_by = ?,
+                        cancelled_by_role = ?,
+                        cancel_reason = ?,
+                        cancel_note = ?,
+                        synced_to_cloud = 0
+                    WHERE id IN ({v_placeholders}) AND (user_id = ? OR user_id IS NULL)
+                    """,
+                    (now, actor_name, actor_role, clean_reason, clean_note, *valid_ids, uid),
+                )
+                for sr in valid_sales:
+                    vid = sr["id"]
                     conn.execute(
-                        "DELETE FROM farm_egg_sales WHERE (note LIKE ? OR note LIKE ?) AND (user_id = ? OR user_id IS NULL)",
-                        (f"%Fiş #{vid}%", f"%Fiş #{vid})%", uid)
+                        """
+                        UPDATE farm_egg_sales
+                        SET status = 'cancelled',
+                            cancelled_at = ?,
+                            cancelled_by = ?,
+                            cancelled_by_role = ?,
+                            cancel_reason = ?,
+                            cancel_note = ?,
+                            synced_to_cloud = 0
+                        WHERE (note LIKE ? OR note LIKE ?) AND (user_id = ? OR user_id IS NULL)
+                          AND COALESCE(status, 'active') != 'cancelled'
+                        """,
+                        (now, actor_name, actor_role, clean_reason, clean_note, f"%Fiş #{vid}%", f"%Fiş #{vid})%", uid),
                     )
-                total_deleted += len(valid_ids)
+                    conn.execute(
+                        """
+                        UPDATE credit_transactions
+                        SET status = 'cancelled',
+                            cancelled_at = ?,
+                            cancelled_by = ?,
+                            cancelled_by_role = ?,
+                            cancel_reason = ?,
+                            cancel_note = ?
+                        WHERE sale_id = ? AND COALESCE(status, 'active') != 'cancelled'
+                        """,
+                        (now, actor_name, actor_role, clean_reason, clean_note, vid),
+                    )
+                    log_audit(
+                        action="SALE_CANCEL",
+                        entity_type="sale",
+                        entity_id=vid,
+                        old_value={
+                            "id": vid,
+                            "total_amount": sr["total_amount"],
+                            "sold_at": sr["sold_at"],
+                            "status": sr["status"] or "active",
+                        },
+                        new_value={
+                            "status": "cancelled",
+                            "cancelled_at": now,
+                            "cancelled_by": actor_name,
+                            "cancelled_by_role": actor_role,
+                            "cancel_reason": clean_reason,
+                            "cancel_note": clean_note,
+                        },
+                        reason=clean_reason + (f" — {clean_note}" if clean_note else ""),
+                        actor=act,
+                        user_id=uid,
+                        conn=conn,
+                    )
+                total_cancelled += len(valid_ids)
 
         if self.firestore_db and valid_ids:
             for sid in valid_ids:
                 try:
-                    self.firestore_db.collection("sales").document(f"u{uid}_s{sid}").delete()
-                    self.firestore_db.collection("sales").document(str(sid)).delete()
+                    self.firestore_db.collection("sales").document(f"u{uid}_s{sid}").set(
+                        {
+                            "status": "cancelled",
+                            "cancelled_at": now,
+                            "cancelled_by": actor_name,
+                            "cancelled_by_role": actor_role,
+                            "cancel_reason": clean_reason,
+                            "cancel_note": clean_note,
+                        },
+                        merge=True,
+                    )
                 except Exception:
                     pass
 
@@ -2370,16 +2793,18 @@ class CloudDatabase:
                             except Exception as ex:
                                 logger.warning(f"Firestore ürün stok güncelleme uyarısı ({pid}): {ex}")
 
-        return True, f"{total_deleted} adet satış başarıyla silindi ve ürün stokları depoya geri yüklendi.", total_deleted
+        return True, f"{total_cancelled} adet satış iptal edildi ve ürün stokları depoya geri yüklendi.", total_cancelled
 
     def update_sale_datetime(
         self,
         sale_id: Union[int, str],
         new_sold_at: str,
         user_id: Optional[int] = None,
+        actor: Optional[Dict[str, Any]] = None,
     ) -> tuple[bool, str]:
         """Satış kaydının tarih ve saatini günceller (geriye dönük satış düzenleme)."""
         uid = self._resolve_user_id(user_id)
+        act = actor or {"name": "Patron", "role": "patron", "user_id": uid}
         if not new_sold_at or not str(new_sold_at).strip():
             return False, "Geçerli bir tarih ve saat belirtilmelidir."
 
@@ -2409,14 +2834,27 @@ class CloudDatabase:
 
             with self.db.get_connection() as conn:
                 row = conn.execute(
-                    "SELECT id FROM farm_egg_sales WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+                    "SELECT id, sale_date, status FROM farm_egg_sales WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
                     (fid, uid)
                 ).fetchone()
                 if not row:
                     return False, "Çiftlik satış kaydı bulunamadı veya bu hesaba ait değil!"
+                if str(row["status"] or "active").lower() == "cancelled":
+                    return False, "İptal edilmiş kayıt düzenlenemez!"
+                old_dt = row["sale_date"]
                 conn.execute(
                     "UPDATE farm_egg_sales SET sale_date = ?, synced_to_cloud = 0 WHERE id = ?",
                     (formatted_dt, fid)
+                )
+                log_audit(
+                    action="FARM_EGG_SALE_DATETIME_UPDATE",
+                    entity_type="farm_egg_sale",
+                    entity_id=fid,
+                    old_value={"sale_date": old_dt},
+                    new_value={"sale_date": formatted_dt},
+                    actor=act,
+                    user_id=uid,
+                    conn=conn,
                 )
 
             if self.firestore_db:
@@ -2438,13 +2876,16 @@ class CloudDatabase:
 
         with self.db.get_connection() as conn:
             sale = conn.execute(
-                "SELECT id FROM sales WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+                "SELECT id, sold_at, status FROM sales WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
                 (numeric_sale_id, uid)
             ).fetchone()
 
             if not sale:
                 return False, "Satış kaydı bulunamadı veya bu hesaba ait değil!"
+            if str(sale["status"] or "active").lower() == "cancelled":
+                return False, "İptal edilmiş satış düzenlenemez!"
 
+            old_dt = sale["sold_at"]
             conn.execute(
                 "UPDATE sales SET sold_at = ?, synced_to_cloud = 0 WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
                 (formatted_dt, numeric_sale_id, uid)
@@ -2453,6 +2894,16 @@ class CloudDatabase:
             conn.execute(
                 "UPDATE farm_egg_sales SET sale_date = ?, synced_to_cloud = 0 WHERE (note LIKE ? OR note LIKE ?) AND (user_id = ? OR user_id IS NULL)",
                 (formatted_dt, f"%Fiş #{numeric_sale_id}%", f"%Fiş #{numeric_sale_id})%", uid)
+            )
+            log_audit(
+                action="SALE_DATETIME_UPDATE",
+                entity_type="sale",
+                entity_id=numeric_sale_id,
+                old_value={"sold_at": old_dt},
+                new_value={"sold_at": formatted_dt},
+                actor=act,
+                user_id=uid,
+                conn=conn,
             )
 
         if self.firestore_db:
@@ -2610,7 +3061,11 @@ class CloudDatabase:
     ) -> Dict[str, Any]:
         uid = self._resolve_user_id(user_id)
         with self.db.get_connection() as conn:
-            sales_query = "SELECT COUNT(*) as total_transactions, SUM(total_amount) as total_revenue, SUM(item_count) as total_items FROM sales WHERE (user_id = ? OR user_id IS NULL)"
+            sales_query = (
+                "SELECT COUNT(*) as total_transactions, SUM(total_amount) as total_revenue, "
+                "SUM(item_count) as total_items FROM sales "
+                "WHERE (user_id = ? OR user_id IS NULL) AND COALESCE(status, 'active') != 'cancelled'"
+            )
             s_params: list = [uid]
             if start_date:
                 sales_query += " AND replace(sold_at, 'T', ' ') >= ?"
@@ -2655,12 +3110,12 @@ class CloudDatabase:
             total_items = s_row["total_items"] or 0
             avg_cart = (total_rev / total_tx) if total_tx > 0 else 0.0
 
-            # Top 5 Best Selling Products for this user
+            # Top 5 Best Selling Products for this user (iptal edilen satışlar hariç)
             top_query = f"""
                 SELECT si.product_name, SUM(si.quantity) as total_qty, SUM(si.subtotal) as total_sales_amount
                 FROM sale_items si
                 JOIN sales s ON si.sale_id = s.id
-                WHERE {uid_filter}
+                WHERE {uid_filter} AND COALESCE(s.status, 'active') != 'cancelled'
             """
             if start_date:
                 top_query += " AND replace(s.sold_at, 'T', ' ') >= ?"
@@ -2679,8 +3134,11 @@ class CloudDatabase:
                 low_rows = conn.execute("SELECT id, name, barcode, stock_quantity, critical_stock_level FROM products WHERE is_active = 1 AND stock_quantity <= critical_stock_level").fetchall()
             low_stock_items = [dict(r) for r in low_rows]
 
-            # Total Expenses for this user
-            exp_query = "SELECT SUM(amount) as total_exp FROM expenses WHERE (user_id = ? OR user_id IS NULL)"
+            # Total Expenses for this user (iptal edilen giderler hariç)
+            exp_query = (
+                "SELECT SUM(amount) as total_exp FROM expenses "
+                "WHERE (user_id = ? OR user_id IS NULL) AND COALESCE(status, 'active') != 'cancelled'"
+            )
             exp_params: list = [uid]
             if start_date:
                 exp_query += " AND expense_date >= ?"
@@ -2693,14 +3151,14 @@ class CloudDatabase:
             total_exp = exp_row["total_exp"] or 0.0 if exp_row else 0.0
             net_profit = total_rev - total_exp
 
-            # Channel Breakdown (Mağaza vs İnternet)
+            # Channel Breakdown (Mağaza vs İnternet, iptal edilenler hariç)
             ch_query = f"""
                 SELECT COALESCE(channel, 'magaza') as channel,
                        COUNT(*) as tx_count,
                        SUM(total_amount) as revenue,
                        SUM(item_count) as items
                 FROM sales
-                WHERE {ch_uid_filter}
+                WHERE {ch_uid_filter} AND COALESCE(status, 'active') != 'cancelled'
             """
             ch_params: list = ch_params_extra
             if start_date:
@@ -2722,7 +3180,7 @@ class CloudDatabase:
                 channel_stats[k]["items"] = int(row["items"] or 0)
                 channel_stats[k]["transactions"] = int(row["tx_count"] or 0)
 
-            # Monthly Breakdown (Her Ayın Toplam Cirosu)
+            # Monthly Breakdown (Her Ayın Toplam Cirosu - iptal edilenler hariç)
             month_query = """
                 SELECT strftime('%Y-%m', sold_at) as month_key,
                        COUNT(*) as tx_count,
@@ -2731,7 +3189,7 @@ class CloudDatabase:
                        SUM(CASE WHEN COALESCE(channel, 'magaza') = 'magaza' THEN total_amount ELSE 0 END) as store_revenue,
                        SUM(CASE WHEN COALESCE(channel, 'magaza') = 'internet' THEN total_amount ELSE 0 END) as net_revenue
                 FROM sales
-                WHERE (user_id = ? OR user_id IS NULL)
+                WHERE (user_id = ? OR user_id IS NULL) AND COALESCE(status, 'active') != 'cancelled'
                 GROUP BY month_key
                 ORDER BY month_key DESC
                 LIMIT 24
@@ -2762,7 +3220,7 @@ class CloudDatabase:
                     "net_revenue": round(float(mr["net_revenue"] or 0), 2),
                 })
 
-            # Weekly Breakdown (Her Haftanın Toplam Cirosu)
+            # Weekly Breakdown (Her Haftanın Toplam Cirosu - iptal edilenler hariç)
             week_query = """
                 SELECT strftime('%Y-W%W', sold_at) as week_key,
                        MIN(date(sold_at)) as week_start,
@@ -2773,7 +3231,7 @@ class CloudDatabase:
                        SUM(CASE WHEN COALESCE(channel, 'magaza') = 'magaza' THEN total_amount ELSE 0 END) as store_revenue,
                        SUM(CASE WHEN COALESCE(channel, 'magaza') = 'internet' THEN total_amount ELSE 0 END) as net_revenue
                 FROM sales
-                WHERE (user_id = ? OR user_id IS NULL)
+                WHERE (user_id = ? OR user_id IS NULL) AND COALESCE(status, 'active') != 'cancelled'
                 GROUP BY week_key
                 ORDER BY week_key DESC
                 LIMIT 16
@@ -2812,6 +3270,17 @@ class CloudDatabase:
                     "net_revenue": round(float(wr["net_revenue"] or 0), 2),
                 })
 
+            # İptal edilen satış özeti (toplama DAHİL EDİLMEZ, sadece bilgi amaçlı)
+            canc_q = "SELECT COUNT(*) as cnt, COALESCE(SUM(total_amount), 0) as amt FROM sales WHERE (user_id = ? OR user_id IS NULL) AND status = 'cancelled'"
+            canc_p: list = [uid]
+            if start_date:
+                canc_q += " AND replace(sold_at, 'T', ' ') >= ?"
+                canc_p.append(start_date + " 00:00:00")
+            if end_date:
+                canc_q += " AND replace(sold_at, 'T', ' ') <= ?"
+                canc_p.append(end_date + " 23:59:59")
+            canc_row = conn.execute(canc_q, canc_p).fetchone()
+
             return {
                 "total_revenue": round(total_rev, 2),
                 "total_items_sold": total_items,
@@ -2824,6 +3293,8 @@ class CloudDatabase:
                 "channel_stats": channel_stats,
                 "monthly_stats": monthly_stats,
                 "weekly_stats": weekly_stats,
+                "cancelled_sales_count": int(canc_row["cnt"] if canc_row else 0),
+                "cancelled_sales_amount": round(float(canc_row["amt"] if canc_row else 0.0), 2),
             }
 
     # ════════════════════════════════════════════════════════════════════
@@ -2837,24 +3308,52 @@ class CloudDatabase:
         expense_date: Optional[str] = None,
         note: str = "",
         user_id: Optional[int] = None,
+        actor: Optional[Dict[str, Any]] = None,
+        payment_method: str = "nakit",
     ) -> tuple[bool, str, Optional[Dict[str, Any]]]:
         t_clean = title.strip()
         if not t_clean or amount <= 0:
-            return False, "Lütfen geçerli bir gider adı ve tutar giriniz!", None
+            return False, "Lütfen geçerli bir gider adı ve 0'dan büyük tutar giriniz!", None
 
         uid = user_id or 1
         exp_date = expense_date or get_turkey_now_str("%Y-%m-%d")
         now = get_turkey_now_str()
+        pm_raw = str(payment_method or "nakit").strip().lower()
+        pm = pm_raw if pm_raw in ("nakit", "kart", "havale") else "nakit"
+        act = actor or {"name": "Patron", "role": "patron", "user_id": uid}
+        created_by = str(act.get("name") or "Patron")
+        created_by_role = normalize_role(act.get("role"))
 
         with self.db.get_connection() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO expenses (user_id, title, amount, category, expense_date, note, synced_to_cloud, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+                INSERT INTO expenses (
+                    user_id, title, amount, category, payment_method, expense_date, note,
+                    status, created_by, created_by_role, synced_to_cloud, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, 0, ?)
                 """,
-                (uid, t_clean, amount, category.strip(), exp_date, note.strip(), now),
+                (uid, t_clean, amount, category.strip(), pm, exp_date, note.strip(), created_by, created_by_role, now),
             )
             eid = cursor.lastrowid
+            log_audit(
+                action="EXPENSE_CREATE",
+                entity_type="expense",
+                entity_id=eid,
+                old_value=None,
+                new_value={
+                    "id": eid,
+                    "title": t_clean,
+                    "amount": amount,
+                    "category": category.strip(),
+                    "payment_method": pm,
+                    "expense_date": exp_date,
+                    "note": note.strip(),
+                    "status": "active",
+                },
+                actor=act,
+                user_id=uid,
+                conn=conn,
+            )
 
         exp_data = {
             "id": eid,
@@ -2862,8 +3361,12 @@ class CloudDatabase:
             "title": t_clean,
             "amount": amount,
             "category": category,
+            "payment_method": pm,
             "expense_date": exp_date,
             "note": note,
+            "status": "active",
+            "created_by": created_by,
+            "created_by_role": created_by_role,
             "created_at": now,
         }
 
@@ -2882,6 +3385,1430 @@ class CloudDatabase:
 
         exp_data["synced_to_cloud"] = synced
         return True, f"'{t_clean}' ({amount:.2f} ₺) gideri başarıyla eklendi.", exp_data
+
+    def cancel_expense(
+        self,
+        expense_id: int,
+        cancel_reason: str,
+        cancel_note: str = "",
+        user_id: Optional[int] = None,
+        actor: Optional[Dict[str, Any]] = None,
+    ) -> tuple[bool, str]:
+        """Gider kaydını fiziksel silmek yerine iptal edildi (cancelled) durumuna alır ve audit log yazar."""
+        ok_r, msg_r, clean_reason, clean_note = validate_cancel_reason(cancel_reason, cancel_note)
+        if not ok_r:
+            return False, msg_r
+
+        uid = self._resolve_user_id(user_id)
+        now = get_turkey_now_str()
+        act = actor or {"name": "Patron", "role": "patron", "user_id": uid}
+        actor_name = str(act.get("name") or "Patron")
+        actor_role = normalize_role(act.get("role"))
+
+        with self.db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM expenses WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+                (expense_id, uid),
+            ).fetchone()
+            if not row:
+                return False, "Gider kaydı bulunamadı!"
+            if str(row["status"] or "active").lower() == "cancelled":
+                return False, "Bu gider zaten iptal edilmiş!"
+
+            old_val = {
+                "id": row["id"],
+                "title": row["title"],
+                "amount": row["amount"],
+                "category": row["category"],
+                "expense_date": row["expense_date"],
+                "status": row["status"] or "active",
+            }
+            conn.execute(
+                """
+                UPDATE expenses
+                SET status = 'cancelled',
+                    cancelled_at = ?,
+                    cancelled_by = ?,
+                    cancelled_by_role = ?,
+                    cancel_reason = ?,
+                    cancel_note = ?,
+                    synced_to_cloud = 0
+                WHERE id = ?
+                """,
+                (now, actor_name, actor_role, clean_reason, clean_note, expense_id),
+            )
+            log_audit(
+                action="EXPENSE_CANCEL",
+                entity_type="expense",
+                entity_id=expense_id,
+                old_value=old_val,
+                new_value={
+                    "status": "cancelled",
+                    "cancelled_at": now,
+                    "cancelled_by": actor_name,
+                    "cancelled_by_role": actor_role,
+                    "cancel_reason": clean_reason,
+                    "cancel_note": clean_note,
+                },
+                reason=clean_reason + (f" — {clean_note}" if clean_note else ""),
+                actor=act,
+                user_id=uid,
+                conn=conn,
+            )
+
+        if self.firestore_db:
+            try:
+                self.firestore_db.collection("expenses").document(f"u{uid}_e{expense_id}").set(
+                    {
+                        "status": "cancelled",
+                        "cancelled_at": now,
+                        "cancelled_by": actor_name,
+                        "cancel_reason": clean_reason,
+                        "cancel_note": clean_note,
+                    },
+                    merge=True,
+                )
+            except Exception:
+                pass
+
+        return True, "Gider kaydı iptal edildi."
+
+    # ════════════════════════════════════════════════════════════════════
+    # GÜN AÇILIŞI VE KASA YÖNETİMİ (CASH DAYS + BEKLENEN NAKİT)
+    # ════════════════════════════════════════════════════════════════════
+    def get_cash_day(
+        self,
+        business_date: Optional[str] = None,
+        user_id: Optional[Union[int, str]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        uid = self._resolve_user_id(user_id)
+        b_date = (business_date or get_turkey_now_str("%Y-%m-%d")).strip()[:10]
+        with self.db.get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM cash_days
+                WHERE business_date = ? AND (user_id = ? OR user_id IS NULL)
+                ORDER BY id DESC LIMIT 1
+                """,
+                (b_date, uid),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def open_cash_day(
+        self,
+        opening_amount: float,
+        *,
+        business_date: Optional[str] = None,
+        opening_note: str = "",
+        user_id: Optional[int] = None,
+        actor: Optional[Dict[str, Any]] = None,
+    ) -> tuple[bool, str, Optional[Dict[str, Any]]]:
+        """Belirtilen gün için açılış kasasını kaydeder, kim/saat bilgisini tutar ve audit log yazar."""
+        if opening_amount < 0:
+            return False, "Açılış kasası negatif olamaz!", None
+
+        uid = self._resolve_user_id(user_id)
+        b_date = (business_date or get_turkey_now_str("%Y-%m-%d")).strip()[:10]
+        now = get_turkey_now_str()
+        act = actor or {"name": "Patron", "role": "patron", "user_id": uid}
+        opened_by = str(act.get("name") or "Patron")
+        opened_by_role = normalize_role(act.get("role"))
+        clean_amt = round(float(opening_amount), 2)
+        clean_note = str(opening_note or "").strip()
+
+        with self.db.get_connection() as conn:
+            existing = conn.execute(
+                "SELECT * FROM cash_days WHERE business_date = ? AND (user_id = ? OR user_id IS NULL)",
+                (b_date, uid),
+            ).fetchone()
+            if existing:
+                if existing["status"] == "open":
+                    return False, f"{b_date} günü zaten açılmış (Açılış kasası: {float(existing['opening_amount']):.2f} ₺).", dict(existing)
+                return False, f"{b_date} günü kapatılmış; yeniden açmak için Patron yetkisi gerekir.", dict(existing)
+
+            cur = conn.execute(
+                """
+                INSERT INTO cash_days (
+                    user_id, business_date, opening_amount, opened_at,
+                    opened_by, opened_by_role, opening_note, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'open')
+                """,
+                (uid, b_date, clean_amt, now, opened_by, opened_by_role, clean_note),
+            )
+            day_id = cur.lastrowid
+            row = conn.execute("SELECT * FROM cash_days WHERE id = ?", (day_id,)).fetchone()
+            day_dict = dict(row)
+
+            log_audit(
+                action="CASH_DAY_OPEN",
+                entity_type="cash_day",
+                entity_id=day_id,
+                old_value=None,
+                new_value={
+                    "id": day_id,
+                    "business_date": b_date,
+                    "opening_amount": clean_amt,
+                    "opened_at": now,
+                    "opened_by": opened_by,
+                    "opened_by_role": opened_by_role,
+                    "opening_note": clean_note,
+                },
+                reason=clean_note or f"{b_date} gün açılışı",
+                actor=act,
+                user_id=uid,
+                conn=conn,
+            )
+
+        return True, f"Gün açıldı! Açılış kasası: {clean_amt:.2f} ₺", day_dict
+
+    def is_cash_day_closed(
+        self,
+        business_date: Optional[str] = None,
+        user_id: Optional[Union[int, str]] = None,
+    ) -> bool:
+        day = self.get_cash_day(business_date=business_date, user_id=user_id)
+        return bool(day and str(day.get("status") or "").lower() == "closed")
+
+    def get_cash_summary(
+        self,
+        business_date: Optional[str] = None,
+        user_id: Optional[Union[int, str]] = None,
+        counted_cash: Optional[float] = None,
+        entered_pos_total: Optional[float] = None,
+        entered_expenses_total: Optional[float] = None,
+        pending_expenses: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """Kasa özeti ve gün sonu mutabakat hesabı (genişletilebilir formül motoruyla)."""
+        uid = self._resolve_user_id(user_id)
+        b_date = (business_date or get_turkey_now_str("%Y-%m-%d")).strip()[:10]
+        day = self.get_cash_day(business_date=b_date, user_id=uid)
+        is_open = bool(day and day.get("status") == "open")
+        is_closed = bool(day and day.get("status") == "closed")
+        opening_amount = round(float(day["opening_amount"]), 2) if day else 0.0
+
+        start_ts = f"{b_date} 00:00:00"
+        end_ts = f"{b_date} 23:59:59"
+
+        with self.db.get_connection() as conn:
+            # 1. Aktif satışlar (nakit, POS/kart, karma, veresiye, internet)
+            sales_rows = conn.execute(
+                """
+                SELECT id, total_amount, sold_at, channel, COALESCE(payment_method, 'nakit') as payment_method,
+                       COALESCE(paid_cash_amount, 0) as paid_cash_amount,
+                       COALESCE(paid_pos_amount, 0) as paid_pos_amount,
+                       customer_name, note, created_by
+                FROM sales
+                WHERE (user_id = ? OR user_id IS NULL)
+                  AND COALESCE(status, 'active') != 'cancelled'
+                  AND replace(sold_at, 'T', ' ') >= ?
+                  AND replace(sold_at, 'T', ' ') <= ?
+                ORDER BY replace(sold_at, 'T', ' ') DESC, id DESC
+                """,
+                (uid, start_ts, end_ts),
+            ).fetchall()
+
+            cash_sales = 0.0
+            cash_sales_count = 0
+            pos_sales = 0.0
+            pos_sales_count = 0
+            internet_sales = 0.0
+            internet_sales_count = 0
+            for sr in sales_rows:
+                amt = float(sr["total_amount"] or 0.0)
+                pm = str(sr["payment_method"] or "nakit").lower()
+                ch = str(sr["channel"] or "magaza").lower()
+                p_cash = float(sr["paid_cash_amount"] or 0.0)
+                p_pos = float(sr["paid_pos_amount"] or 0.0)
+                if ch == "internet":
+                    internet_sales += amt
+                    internet_sales_count += 1
+                elif pm == "veresiye":
+                    # Tamamı veresiye: kasaya veya POS'a girmez
+                    continue
+                elif pm == "karma" or p_cash > 0 or p_pos > 0:
+                    if p_cash > 0:
+                        cash_sales += p_cash
+                        cash_sales_count += 1
+                    if p_pos > 0:
+                        pos_sales += p_pos
+                        pos_sales_count += 1
+                elif pm == "nakit":
+                    cash_sales += amt
+                    cash_sales_count += 1
+                else:
+                    pos_sales += amt
+                    pos_sales_count += 1
+
+            # 2. Gün içi kasa hareketleri
+            mov_rows = conn.execute(
+                """
+                SELECT * FROM cash_movements
+                WHERE (user_id = ? OR user_id IS NULL)
+                  AND replace(movement_date, 'T', ' ') >= ?
+                  AND replace(movement_date, 'T', ' ') <= ?
+                ORDER BY replace(movement_date, 'T', ' ') DESC, id DESC
+                """,
+                (uid, start_ts, end_ts),
+            ).fetchall()
+            movements = [dict(r) for r in mov_rows]
+
+            # 3. Günün giderleri (nakit ve kart ayrı)
+            exp_rows = conn.execute(
+                """
+                SELECT * FROM expenses
+                WHERE (user_id = ? OR user_id IS NULL)
+                  AND expense_date = ?
+                ORDER BY id DESC
+                """,
+                (uid, b_date),
+            ).fetchall()
+            expenses = [dict(r) for r in exp_rows]
+
+            # 4. Günün veresiye tahsilatları (nakit -> Beklenen Nakit, POS -> Beklenen POS)
+            col_rows = conn.execute(
+                """
+                SELECT payment_method, amount_kurus FROM credit_transactions
+                WHERE (user_id = ? OR user_id IS NULL)
+                  AND tx_type = 'tahsilat'
+                  AND COALESCE(status, 'active') != 'cancelled'
+                  AND replace(tx_date, 'T', ' ') >= ?
+                  AND replace(tx_date, 'T', ' ') <= ?
+                """,
+                (uid, start_ts, end_ts),
+            ).fetchall()
+
+        other_cash_in = 0.0
+        other_cash_out = 0.0
+        patron_withdrawals = 0.0
+        credit_collections_cash_k = 0
+        credit_collections_pos_k = 0
+        for cr in col_rows:
+            cpm = str(cr["payment_method"] or "nakit").lower()
+            ak = int(cr["amount_kurus"] or 0)
+            if cpm == "nakit":
+                credit_collections_cash_k += ak
+            else:
+                credit_collections_pos_k += ak
+
+        credit_collections_cash = from_kurus(credit_collections_cash_k)
+        credit_collections_pos = from_kurus(credit_collections_pos_k)
+
+        for m in movements:
+            if str(m.get("status") or "active").lower() == "cancelled":
+                continue
+            amt = float(m.get("amount") or 0.0)
+            mt = str(m.get("movement_type") or "")
+            cat = str(m.get("category") or "genel")
+            if mt == "tahsilat":
+                credit_collections_cash = round(credit_collections_cash + amt, 2)
+            elif mt == "kasa_giris":
+                other_cash_in += amt
+            elif mt == "kasa_cikis":
+                if cat == "patron_cekis":
+                    patron_withdrawals += amt
+                else:
+                    other_cash_out += amt
+
+        cash_expenses = 0.0
+        card_expenses = 0.0
+        for ex in expenses:
+            if str(ex.get("status") or "active").lower() == "cancelled":
+                continue
+            amt = float(ex.get("amount") or 0.0)
+            pm = str(ex.get("payment_method") or "nakit").lower()
+            if pm == "nakit":
+                cash_expenses += amt
+            else:
+                card_expenses += amt
+
+        # Önizlemede henüz kaydedilmemiş kalem kalem giderler varsa ekle
+        if pending_expenses:
+            for pe in pending_expenses:
+                try:
+                    p_amt = float(pe.get("amount") or 0.0)
+                except (ValueError, TypeError):
+                    p_amt = 0.0
+                if p_amt <= 0:
+                    continue
+                p_pm = str(pe.get("payment_method") or "nakit").lower()
+                if p_pm == "nakit":
+                    cash_expenses += p_amt
+                else:
+                    card_expenses += p_amt
+
+        eff_counted = counted_cash if counted_cash is not None else (day.get("counted_cash") if is_closed and day else None)
+        eff_pos = entered_pos_total if entered_pos_total is not None else (day.get("entered_pos_total") if is_closed and day else None)
+        eff_exp = entered_expenses_total if entered_expenses_total is not None else (day.get("entered_expenses_total") if is_closed and day else None)
+
+        rec = calculate_day_reconciliation(
+            opening_amount=opening_amount,
+            cash_sales=cash_sales,
+            pos_sales=pos_sales,
+            internet_sales=internet_sales,
+            cash_expenses=cash_expenses,
+            card_expenses=card_expenses,
+            patron_withdrawals=patron_withdrawals,
+            other_cash_in=other_cash_in,
+            other_cash_out=other_cash_out,
+            credit_collections_cash=credit_collections_cash,
+            credit_collections_pos=credit_collections_pos,
+            counted_cash=eff_counted,
+            entered_pos_total=eff_pos,
+            entered_expenses_total=eff_exp,
+        )
+
+        cash_in = round(other_cash_in + credit_collections_cash, 2)
+        cash_out = round(patron_withdrawals + other_cash_out, 2)
+        card_sales = round(pos_sales + internet_sales, 2)
+
+        return {
+            "business_date": b_date,
+            "is_open": is_open,
+            "is_closed": is_closed,
+            "day": day,
+            "opening_amount": rec["opening_amount"],
+            "cash_sales": rec["cash_sales"],
+            "cash_sales_count": cash_sales_count,
+            "pos_sales": rec["pos_sales"],
+            "pos_sales_count": pos_sales_count,
+            "internet_sales": rec["internet_sales"],
+            "internet_sales_count": internet_sales_count,
+            "card_sales": card_sales,
+            "card_sales_count": pos_sales_count + internet_sales_count,
+            "cash_expenses": rec["cash_expenses"],
+            "card_expenses": rec["card_expenses"],
+            "total_expenses": rec["total_expenses"],
+            "cash_in": cash_in,
+            "cash_out": cash_out,
+            "other_cash_in": rec["other_cash_in"],
+            "other_cash_out": rec["other_cash_out"],
+            "patron_withdrawals": rec["patron_withdrawals"],
+            "credit_collections_cash": rec["credit_collections_cash"],
+            "credit_collections_pos": rec["credit_collections_pos"],
+            "expected_cash": rec["expected_cash"],
+            "expected_pos": rec["expected_pos"],
+            "cash_formula_items": rec["cash_formula_items"],
+            "pos_formula_items": rec["pos_formula_items"],
+            "comparison": rec["comparison"],
+            "has_difference": rec["has_difference"],
+            "movements": movements,
+            "expenses": expenses,
+        }
+
+    def close_cash_day(
+        self,
+        *,
+        counted_cash: float,
+        entered_pos_total: float,
+        business_date: Optional[str] = None,
+        closing_note: str = "",
+        new_expenses: Optional[List[Dict[str, Any]]] = None,
+        entered_expenses_total: Optional[float] = None,
+        user_id: Optional[int] = None,
+        actor: Optional[Dict[str, Any]] = None,
+    ) -> tuple[bool, str, Optional[Dict[str, Any]]]:
+        """Gün sonu kapanışını ve mutabakatı kaydeder, günü kilitler ve audit log yazar."""
+        if counted_cash < 0 or entered_pos_total < 0:
+            return False, "Sayılan nakit ve POS toplamı negatif olamaz!", None
+
+        uid = self._resolve_user_id(user_id)
+        b_date = (business_date or get_turkey_now_str("%Y-%m-%d")).strip()[:10]
+        day = self.get_cash_day(business_date=b_date, user_id=uid)
+        if not day:
+            return False, f"{b_date} günü için henüz açılış kasası girilmemiş!", None
+        if str(day.get("status") or "").lower() == "closed":
+            return False, f"{b_date} günü zaten kapatılmış! Değişiklik için Patron'un günü yeniden açması gerekir.", None
+
+        act = actor or {"name": "Patron", "role": "patron", "user_id": uid}
+        closed_by = str(act.get("name") or "Patron")
+        closed_by_role = normalize_role(act.get("role"))
+        clean_note = str(closing_note or "").strip()
+
+        # Önce yeni kalem giderlerin doğrulamasını yap (kayıttan önce önizleme ile fark kontrolü)
+        cleaned_new_expenses: List[Dict[str, Any]] = []
+        for item in (new_expenses or []):
+            t = str(item.get("title") or item.get("description") or "").strip()
+            try:
+                amt = float(item.get("amount") or 0.0)
+            except (ValueError, TypeError):
+                return False, "Gider tutarı geçersiz!", None
+            if not t:
+                return False, "Her gider kalemi için açıklama zorunludur!", None
+            if amt <= 0:
+                return False, f"'{t}' gider tutarı 0'dan büyük olmalıdır!", None
+            pm = str(item.get("payment_method") or "nakit").strip().lower()
+            if pm not in ("nakit", "kart"):
+                pm = "nakit"
+            cat = str(item.get("category") or "Gün Sonu Gider").strip() or "Gün Sonu Gider"
+            cleaned_new_expenses.append({"title": t, "amount": round(amt, 2), "payment_method": pm, "category": cat})
+
+        # Fark kontrolü: Fark varsa açıklama notu zorunlu!
+        preview = self.get_cash_summary(
+            business_date=b_date,
+            user_id=uid,
+            counted_cash=counted_cash,
+            entered_pos_total=entered_pos_total,
+            entered_expenses_total=entered_expenses_total,
+            pending_expenses=cleaned_new_expenses,
+        )
+        if preview["has_difference"] and len(clean_note) < 3:
+            return False, "⚠️ Kasa, POS veya gider mutabakatında fark bulunduğu için açıklama notu girilmesi zorunludur!", preview
+
+        # Kalem kalem giderleri kaydet
+        for ex in cleaned_new_expenses:
+            ok_e, msg_e, _ = self.add_expense(
+                title=ex["title"],
+                amount=ex["amount"],
+                category=ex["category"],
+                expense_date=b_date,
+                note="Gün sonu kapanış gideri",
+                user_id=uid,
+                actor=act,
+                payment_method=ex["payment_method"],
+            )
+            if not ok_e:
+                return False, msg_e, None
+
+        # Nihai mutabakatı hesapla
+        final_summary = self.get_cash_summary(
+            business_date=b_date,
+            user_id=uid,
+            counted_cash=counted_cash,
+            entered_pos_total=entered_pos_total,
+            entered_expenses_total=entered_expenses_total,
+        )
+        comp = final_summary["comparison"]
+        now = get_turkey_now_str()
+
+        with self.db.get_connection() as conn:
+            conn.execute(
+                """
+                UPDATE cash_days
+                SET status = 'closed',
+                    closed_at = ?,
+                    closed_by = ?,
+                    closed_by_role = ?,
+                    closing_amount = ?,
+                    expected_cash = ?,
+                    expected_pos = ?,
+                    expected_expenses = ?,
+                    counted_cash = ?,
+                    entered_pos_total = ?,
+                    entered_expenses_total = ?,
+                    cash_diff = ?,
+                    pos_diff = ?,
+                    expense_diff = ?,
+                    closing_note = ?
+                WHERE id = ?
+                """,
+                (
+                    now,
+                    closed_by,
+                    closed_by_role,
+                    round(float(counted_cash), 2),
+                    comp["cash"]["system"],
+                    comp["pos"]["system"],
+                    comp["expenses"]["system"],
+                    comp["cash"]["entered"],
+                    comp["pos"]["entered"],
+                    comp["expenses"]["entered"],
+                    comp["cash"]["diff"],
+                    comp["pos"]["diff"],
+                    comp["expenses"]["diff"],
+                    clean_note,
+                    day["id"],
+                ),
+            )
+            log_audit(
+                action="CASH_DAY_CLOSE",
+                entity_type="cash_day",
+                entity_id=day["id"],
+                old_value={"status": "open", "business_date": b_date, "opening_amount": day["opening_amount"]},
+                new_value={
+                    "status": "closed",
+                    "business_date": b_date,
+                    "closed_at": now,
+                    "closed_by": closed_by,
+                    "expected_cash": comp["cash"]["system"],
+                    "counted_cash": comp["cash"]["entered"],
+                    "cash_diff": comp["cash"]["diff"],
+                    "expected_pos": comp["pos"]["system"],
+                    "entered_pos_total": comp["pos"]["entered"],
+                    "pos_diff": comp["pos"]["diff"],
+                    "expected_expenses": comp["expenses"]["system"],
+                    "entered_expenses_total": comp["expenses"]["entered"],
+                    "expense_diff": comp["expenses"]["diff"],
+                    "closing_note": clean_note,
+                },
+                reason=clean_note or f"{b_date} gün sonu kapanışı (Tutuyor)",
+                actor=act,
+                user_id=uid,
+                conn=conn,
+            )
+
+            if final_summary["has_difference"]:
+                cashier_name = resolve_day_cashier({
+                    "opened_by": day.get("opened_by"),
+                    "opened_by_role": day.get("opened_by_role"),
+                    "closed_by": closed_by,
+                    "closed_by_role": closed_by_role,
+                })
+                log_audit(
+                    action="DISCREPANCY_ALERT",
+                    entity_type="cash_day",
+                    entity_id=day["id"],
+                    old_value=None,
+                    new_value={
+                        "business_date": b_date,
+                        "cashier_name": cashier_name,
+                        "cash_diff": comp["cash"]["diff"],
+                        "pos_diff": comp["pos"]["diff"],
+                        "expense_diff": comp["expenses"]["diff"],
+                        "closing_note": clean_note,
+                    },
+                    reason=f"Gün sonu fark uyarısı ({cashier_name}): {clean_note}",
+                    actor=act,
+                    user_id=uid,
+                    conn=conn,
+                )
+
+        updated = self.get_cash_summary(business_date=b_date, user_id=uid)
+        if final_summary["has_difference"]:
+            disc_report = self.get_discrepancy_report(user_id=uid)
+            cashier_name = resolve_day_cashier(updated.get("day") or {})
+            matched_alert = next(
+                (a for a in disc_report.get("repeat_alerts", []) if a.get("cashier_name") == cashier_name),
+                None,
+            )
+            if matched_alert:
+                updated["repeat_alert"] = matched_alert
+                log_audit(
+                    action="REPEATED_DISCREPANCY_ALERT",
+                    entity_type="cash_day",
+                    entity_id=day["id"],
+                    old_value=None,
+                    new_value=matched_alert,
+                    reason=matched_alert["message"],
+                    actor=act,
+                    user_id=uid,
+                    db=self.db,
+                )
+
+        return True, f"{b_date} günü başarıyla kapatıldı ve kilitlendi.", updated
+
+    def get_discrepancy_report(
+        self,
+        user_id: Optional[Union[int, str]] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        cashier_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Patron için gün sonu fark geçmişi, çalışan bazında toplam/aylık rapor ve 3 gün tekrar uyarıları."""
+        uid = self._resolve_user_id(user_id)
+        q = "SELECT * FROM cash_days WHERE (user_id = ? OR user_id IS NULL) AND status = 'closed'"
+        params: list = [uid]
+        if start_date and str(start_date).strip():
+            q += " AND business_date >= ?"
+            params.append(str(start_date).strip()[:10])
+        if end_date and str(end_date).strip():
+            q += " AND business_date <= ?"
+            params.append(str(end_date).strip()[:10])
+        q += " ORDER BY business_date ASC"
+
+        with self.db.get_connection() as conn:
+            rows = [dict(r) for r in conn.execute(q, params).fetchall()]
+
+        if cashier_name and str(cashier_name).strip():
+            target = str(cashier_name).strip().lower()
+            rows = [r for r in rows if resolve_day_cashier(r).lower() == target]
+
+        return analyze_discrepancy_history(rows, repeat_threshold=3)
+
+    def reopen_cash_day(
+        self,
+        *,
+        business_date: str,
+        reason: str,
+        user_id: Optional[int] = None,
+        actor: Optional[Dict[str, Any]] = None,
+    ) -> tuple[bool, str, Optional[Dict[str, Any]]]:
+        """Kapanan günü sadece Patron yetkisiyle yeniden açar ve denetim kaydına işler."""
+        clean_reason = str(reason or "").strip()
+        if not clean_reason:
+            return False, "Günü yeniden açmak için neden belirtilmesi zorunludur!", None
+
+        uid = self._resolve_user_id(user_id)
+        b_date = str(business_date or get_turkey_now_str("%Y-%m-%d")).strip()[:10]
+        now = get_turkey_now_str()
+        act = actor or {"name": "Patron", "role": "patron", "user_id": uid}
+        reopened_by = str(act.get("name") or "Patron")
+
+        day = self.get_cash_day(business_date=b_date, user_id=uid)
+        with self.db.get_connection() as conn:
+            if day:
+                old_status = day.get("status") or "closed"
+                conn.execute(
+                    """
+                    UPDATE cash_days
+                    SET status = 'open',
+                        reopened_at = ?,
+                        reopened_by = ?,
+                        reopen_reason = ?
+                    WHERE id = ?
+                    """,
+                    (now, reopened_by, clean_reason, day["id"]),
+                )
+                entity_id: Any = day["id"]
+            else:
+                old_status = "none"
+                entity_id = b_date
+
+            log_audit(
+                action="DAY_REOPEN",
+                entity_type="cash_day",
+                entity_id=entity_id,
+                old_value={"status": old_status, "business_date": b_date},
+                new_value={"status": "open", "business_date": b_date, "reopened_at": now, "reopened_by": reopened_by},
+                reason=clean_reason,
+                actor=act,
+                user_id=uid,
+                conn=conn,
+            )
+
+        return True, f"{b_date} günü Patron yetkisiyle yeniden açıldı ve denetim kaydına işlendi.", self.get_cash_day(b_date, uid)
+
+    # ════════════════════════════════════════════════════════════════════
+    # TAHSİLAT VE KASA HAREKETLERİ (SOFT-CANCEL + AUDIT LOG)
+    # ════════════════════════════════════════════════════════════════════
+    def add_cash_movement(
+        self,
+        movement_type: str,
+        amount: float,
+        description: str,
+        *,
+        category: str = "genel",
+        customer_name: Optional[str] = None,
+        movement_date: Optional[str] = None,
+        note: str = "",
+        user_id: Optional[int] = None,
+        actor: Optional[Dict[str, Any]] = None,
+    ) -> tuple[bool, str, Optional[Dict[str, Any]]]:
+        m_type = str(movement_type or "").strip().lower()
+        if m_type not in CASH_MOVEMENT_TYPES:
+            return False, "Geçersiz hareket türü! (tahsilat, kasa_giris veya kasa_cikis olmalıdır)", None
+
+        desc = str(description or "").strip()
+        if not desc:
+            return False, "Açıklama zorunludur!", None
+        if amount <= 0:
+            return False, "Tutar 0'dan büyük olmalıdır!", None
+
+        uid = self._resolve_user_id(user_id)
+        now = get_turkey_now_str()
+        m_date = normalize_datetime_str(movement_date) if movement_date else now
+        b_date = m_date[:10]
+        day = self.get_cash_day(business_date=b_date, user_id=uid)
+        cash_day_id = day["id"] if day else None
+        clean_cat = str(category or "genel").strip().lower() or "genel"
+        cust = str(customer_name or "").strip() or None
+        act = actor or {"name": "Patron", "role": "patron", "user_id": uid}
+        created_by = str(act.get("name") or "Patron")
+        created_by_role = normalize_role(act.get("role"))
+        clean_amt = round(float(amount), 2)
+
+        with self.db.get_connection() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO cash_movements (
+                    user_id, cash_day_id, movement_type, category, amount, description, customer_name,
+                    movement_date, note, status, created_by, created_by_role, synced_to_cloud, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, 0, ?)
+                """,
+                (uid, cash_day_id, m_type, clean_cat, clean_amt, desc, cust, m_date, str(note or "").strip(), created_by, created_by_role, now),
+            )
+            mid = cur.lastrowid
+            if m_type == "tahsilat":
+                action_name = "COLLECTION_CREATE"
+                entity_name = "collection"
+            elif clean_cat == "patron_cekis":
+                action_name = "PATRON_CASH_WITHDRAW"
+                entity_name = "cash_movement"
+            else:
+                action_name = "CASH_MOVEMENT_CREATE"
+                entity_name = "cash_movement"
+            log_audit(
+                action=action_name,
+                entity_type=entity_name,
+                entity_id=mid,
+                old_value=None,
+                new_value={
+                    "id": mid,
+                    "cash_day_id": cash_day_id,
+                    "movement_type": m_type,
+                    "category": clean_cat,
+                    "amount": clean_amt,
+                    "description": desc,
+                    "customer_name": cust,
+                    "movement_date": m_date,
+                    "note": str(note or "").strip(),
+                    "status": "active",
+                },
+                reason=desc,
+                actor=act,
+                user_id=uid,
+                conn=conn,
+            )
+
+        rec = {
+            "id": mid,
+            "user_id": uid,
+            "cash_day_id": cash_day_id,
+            "movement_type": m_type,
+            "category": clean_cat,
+            "amount": clean_amt,
+            "description": desc,
+            "customer_name": cust,
+            "movement_date": m_date,
+            "note": str(note or "").strip(),
+            "status": "active",
+            "created_by": created_by,
+            "created_by_role": created_by_role,
+            "created_at": now,
+        }
+        return True, f"Kasa hareketi kaydedildi ({clean_amt:.2f} ₺).", rec
+
+    def get_cash_movements(
+        self,
+        user_id: Optional[Union[int, str]] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        movement_type: Optional[str] = None,
+        include_cancelled: bool = True,
+    ) -> Dict[str, Any]:
+        uid = self._resolve_user_id(user_id)
+        query = "SELECT * FROM cash_movements WHERE (user_id = ? OR user_id IS NULL)"
+        params: list = [uid]
+        if not include_cancelled:
+            query += " AND COALESCE(status, 'active') != 'cancelled'"
+        if movement_type and str(movement_type).strip() in CASH_MOVEMENT_TYPES:
+            query += " AND movement_type = ?"
+            params.append(str(movement_type).strip())
+        if start_date:
+            query += " AND replace(movement_date, 'T', ' ') >= ?"
+            params.append(start_date + " 00:00:00")
+        if end_date:
+            query += " AND replace(movement_date, 'T', ' ') <= ?"
+            params.append(end_date + " 23:59:59")
+        query += " ORDER BY replace(movement_date, 'T', ' ') DESC, id DESC LIMIT 200"
+
+        with self.db.get_connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            items = [dict(r) for r in rows]
+
+        total_tahsilat = round(
+            sum(float(x["amount"] or 0) for x in items if x.get("status") != "cancelled" and x.get("movement_type") == "tahsilat"),
+            2,
+        )
+        total_giris = round(
+            sum(float(x["amount"] or 0) for x in items if x.get("status") != "cancelled" and x.get("movement_type") == "kasa_giris"),
+            2,
+        )
+        total_cikis = round(
+            sum(float(x["amount"] or 0) for x in items if x.get("status") != "cancelled" and x.get("movement_type") == "kasa_cikis"),
+            2,
+        )
+        return {
+            "movements": items,
+            "summary": {
+                "total_tahsilat": total_tahsilat,
+                "total_kasa_giris": total_giris,
+                "total_kasa_cikis": total_cikis,
+                "net_cash": round(total_tahsilat + total_giris - total_cikis, 2),
+            },
+        }
+
+    def cancel_cash_movement(
+        self,
+        movement_id: int,
+        cancel_reason: str,
+        cancel_note: str = "",
+        user_id: Optional[int] = None,
+        actor: Optional[Dict[str, Any]] = None,
+    ) -> tuple[bool, str]:
+        ok_r, msg_r, clean_reason, clean_note = validate_cancel_reason(cancel_reason, cancel_note)
+        if not ok_r:
+            return False, msg_r
+
+        uid = self._resolve_user_id(user_id)
+        now = get_turkey_now_str()
+        act = actor or {"name": "Patron", "role": "patron", "user_id": uid}
+        actor_name = str(act.get("name") or "Patron")
+        actor_role = normalize_role(act.get("role"))
+
+        with self.db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM cash_movements WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+                (movement_id, uid),
+            ).fetchone()
+            if not row:
+                return False, "Tahsilat / kasa hareketi bulunamadı!"
+            if str(row["status"] or "active").lower() == "cancelled":
+                return False, "Bu kayıt zaten iptal edilmiş!"
+
+            old_val = {
+                "id": row["id"],
+                "movement_type": row["movement_type"],
+                "amount": row["amount"],
+                "description": row["description"],
+                "status": row["status"] or "active",
+            }
+            conn.execute(
+                """
+                UPDATE cash_movements
+                SET status = 'cancelled',
+                    cancelled_at = ?,
+                    cancelled_by = ?,
+                    cancelled_by_role = ?,
+                    cancel_reason = ?,
+                    cancel_note = ?,
+                    synced_to_cloud = 0
+                WHERE id = ?
+                """,
+                (now, actor_name, actor_role, clean_reason, clean_note, movement_id),
+            )
+            action_name = "COLLECTION_CANCEL" if row["movement_type"] == "tahsilat" else "CASH_MOVEMENT_CANCEL"
+            entity_name = "collection" if row["movement_type"] == "tahsilat" else "cash_movement"
+            log_audit(
+                action=action_name,
+                entity_type=entity_name,
+                entity_id=movement_id,
+                old_value=old_val,
+                new_value={
+                    "status": "cancelled",
+                    "cancelled_at": now,
+                    "cancelled_by": actor_name,
+                    "cancelled_by_role": actor_role,
+                    "cancel_reason": clean_reason,
+                    "cancel_note": clean_note,
+                },
+                reason=clean_reason + (f" — {clean_note}" if clean_note else ""),
+                actor=act,
+                user_id=uid,
+                conn=conn,
+            )
+
+        return True, "Tahsilat / kasa hareketi iptal edildi."
+
+    # ════════════════════════════════════════════════════════════════════
+    # VERESİYE / CARİ HESAP YÖNETİMİ (BAKİYE HAREKETLERDEN KURUŞ OLARAK TÜRETİLİR)
+    # ════════════════════════════════════════════════════════════════════
+    def get_or_create_credit_customer(
+        self,
+        name: str,
+        phone: str = "",
+        note: str = "",
+        user_id: Optional[int] = None,
+        actor: Optional[Dict[str, Any]] = None,
+    ) -> tuple[bool, str, Optional[Dict[str, Any]]]:
+        clean_name = str(name or "").strip()
+        if not clean_name:
+            return False, "Müşteri adı boş olamaz!", None
+
+        uid = self._resolve_user_id(user_id)
+        now = get_turkey_now_str()
+        clean_phone = str(phone or "").strip() or None
+        clean_note = str(note or "").strip() or None
+
+        with self.db.get_connection() as conn:
+            existing = conn.execute(
+                """
+                SELECT * FROM credit_customers
+                WHERE (user_id = ? OR user_id IS NULL) AND LOWER(name) = LOWER(?) AND is_active = 1
+                LIMIT 1
+                """,
+                (uid, clean_name),
+            ).fetchone()
+            if existing:
+                return True, f"'{existing['name']}' cari hesabı seçildi.", dict(existing)
+
+            cur = conn.execute(
+                """
+                INSERT INTO credit_customers (user_id, name, phone, note, is_active, created_at)
+                VALUES (?, ?, ?, ?, 1, ?)
+                """,
+                (uid, clean_name, clean_phone, clean_note, now),
+            )
+            cid = cur.lastrowid
+            row = conn.execute("SELECT * FROM credit_customers WHERE id = ?", (cid,)).fetchone()
+            log_audit(
+                action="CREDIT_CUSTOMER_CREATE",
+                entity_type="credit_customer",
+                entity_id=cid,
+                new_value={"id": cid, "name": clean_name, "phone": clean_phone},
+                actor=actor,
+                user_id=uid,
+                conn=conn,
+            )
+            return True, f"'{clean_name}' cari hesabı oluşturuldu.", dict(row)
+
+    def get_credit_customers(
+        self,
+        user_id: Optional[Union[int, str]] = None,
+        search: str = "",
+    ) -> Dict[str, Any]:
+        """Tüm cari müşterileri hareketlerden türetilmiş borç bakiyesine göre (en çok borçlu başta) listeler."""
+        uid = self._resolve_user_id(user_id)
+        q = """
+            SELECT
+                c.id, c.name, c.phone, c.note, c.created_at,
+                COALESCE(SUM(CASE WHEN COALESCE(t.status, 'active') != 'cancelled' THEN t.signed_kurus ELSE 0 END), 0) AS balance_kurus,
+                COALESCE(SUM(CASE WHEN COALESCE(t.status, 'active') != 'cancelled' AND t.signed_kurus > 0 THEN t.amount_kurus ELSE 0 END), 0) AS total_debt_kurus,
+                COALESCE(SUM(CASE WHEN COALESCE(t.status, 'active') != 'cancelled' AND t.signed_kurus < 0 THEN t.amount_kurus ELSE 0 END), 0) AS total_paid_kurus,
+                MAX(CASE WHEN COALESCE(t.status, 'active') != 'cancelled' THEN t.tx_date ELSE NULL END) AS last_tx_date
+            FROM credit_customers c
+            LEFT JOIN credit_transactions t ON t.customer_id = c.id
+            WHERE (c.user_id = ? OR c.user_id IS NULL) AND c.is_active = 1
+        """
+        params: list = [uid]
+        if search and str(search).strip():
+            q += " AND (LOWER(c.name) LIKE ? OR COALESCE(c.phone, '') LIKE ?)"
+            s = f"%{str(search).strip().lower()}%"
+            params.extend([s, s])
+        q += " GROUP BY c.id ORDER BY balance_kurus DESC, c.name ASC"
+
+        with self.db.get_connection() as conn:
+            rows = conn.execute(q, params).fetchall()
+
+        customers: List[Dict[str, Any]] = []
+        total_receivable_k = 0
+        total_customer_credit_k = 0
+        debtor_count = 0
+
+        for r in rows:
+            bal_k = int(r["balance_kurus"] or 0)
+            if bal_k > 0:
+                total_receivable_k += bal_k
+                debtor_count += 1
+            elif bal_k < 0:
+                total_customer_credit_k += abs(bal_k)
+            customers.append({
+                "id": r["id"],
+                "name": r["name"],
+                "phone": r["phone"] or "",
+                "note": r["note"] or "",
+                "created_at": r["created_at"],
+                "last_tx_date": r["last_tx_date"],
+                "balance_kurus": bal_k,
+                "balance": from_kurus(bal_k),
+                "total_debt": from_kurus(int(r["total_debt_kurus"] or 0)),
+                "total_paid": from_kurus(int(r["total_paid_kurus"] or 0)),
+                "balance_status": "borclu" if bal_k > 0 else ("alacakli" if bal_k < 0 else "kapali"),
+            })
+
+        return {
+            "customers": customers,
+            "summary": {
+                "customer_count": len(customers),
+                "debtor_count": debtor_count,
+                "total_receivable": from_kurus(total_receivable_k),
+                "total_customer_credit": from_kurus(total_customer_credit_k),
+                "net_receivable": from_kurus(total_receivable_k - total_customer_credit_k),
+            },
+        }
+
+    def get_credit_customer_detail(
+        self,
+        customer_id: int,
+        user_id: Optional[Union[int, str]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Müşteri detayı: kronolojik hareket dökümü ve her satırda yürüyen (türetilmiş) güncel bakiye."""
+        uid = self._resolve_user_id(user_id)
+        with self.db.get_connection() as conn:
+            c_row = conn.execute(
+                "SELECT * FROM credit_customers WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+                (int(customer_id), uid),
+            ).fetchone()
+            if not c_row:
+                return None
+
+            tx_rows = conn.execute(
+                """
+                SELECT * FROM credit_transactions
+                WHERE customer_id = ?
+                ORDER BY replace(tx_date, 'T', ' ') ASC, id ASC
+                """,
+                (int(customer_id),),
+            ).fetchall()
+
+        running_k = 0
+        total_debt_k = 0
+        total_paid_k = 0
+        transactions: List[Dict[str, Any]] = []
+
+        for tr in tx_rows:
+            is_canc = str(tr["status"] or "active").lower() == "cancelled"
+            signed_k = int(tr["signed_kurus"] or 0)
+            amt_k = int(tr["amount_kurus"] or 0)
+            if not is_canc:
+                running_k += signed_k
+                if signed_k > 0:
+                    total_debt_k += amt_k
+                else:
+                    total_paid_k += amt_k
+            transactions.append({
+                "id": tr["id"],
+                "customer_id": tr["customer_id"],
+                "sale_id": tr["sale_id"],
+                "tx_type": tr["tx_type"],
+                "payment_method": tr["payment_method"],
+                "amount_kurus": amt_k,
+                "amount": from_kurus(amt_k),
+                "signed_kurus": signed_k,
+                "signed_amount": from_kurus(signed_k),
+                "description": tr["description"],
+                "product_summary": tr["product_summary"] or "",
+                "tx_date": tr["tx_date"],
+                "status": tr["status"] or "active",
+                "cancelled_at": tr["cancelled_at"],
+                "cancelled_by": tr["cancelled_by"],
+                "cancel_reason": tr["cancel_reason"],
+                "cancel_note": tr["cancel_note"],
+                "created_by": tr["created_by"] or "Patron",
+                "running_balance_kurus": running_k,
+                "running_balance": from_kurus(running_k),
+            })
+
+        # En yeni hareket üstte görünecek şekilde ters çevir (yürüyen bakiye doğru hesaplandı)
+        transactions.reverse()
+
+        return {
+            "customer": {
+                "id": c_row["id"],
+                "name": c_row["name"],
+                "phone": c_row["phone"] or "",
+                "note": c_row["note"] or "",
+                "balance_kurus": running_k,
+                "balance": from_kurus(running_k),
+                "total_debt": from_kurus(total_debt_k),
+                "total_paid": from_kurus(total_paid_k),
+                "balance_status": "borclu" if running_k > 0 else ("alacakli" if running_k < 0 else "kapali"),
+            },
+            "transactions": transactions,
+        }
+
+    def add_credit_collection(
+        self,
+        customer_id: int,
+        amount: float,
+        payment_method: str = "nakit",
+        *,
+        note: str = "",
+        tx_date: Optional[str] = None,
+        user_id: Optional[int] = None,
+        actor: Optional[Dict[str, Any]] = None,
+    ) -> tuple[bool, str, Optional[Dict[str, Any]]]:
+        """Cari müşteriden sadece borç ödemesi (Tahsilat - Nakit veya POS) alır."""
+        amt_k = to_kurus(amount)
+        if amt_k <= 0:
+            return False, "Tahsilat tutarı 0'dan büyük olmalıdır!", None
+
+        pm_raw = str(payment_method or "nakit").strip().lower()
+        if pm_raw == "pos":
+            pm_raw = "kart"
+        if pm_raw not in ("nakit", "kart"):
+            return False, "Tahsilat ödeme tipi 'nakit' veya 'POS (kart)' olmalıdır!", None
+
+        uid = self._resolve_user_id(user_id)
+        now = normalize_datetime_str(tx_date) if tx_date else get_turkey_now_str()
+        act = actor or {"name": "Patron", "role": "patron", "user_id": uid}
+        created_by = str(act.get("name") or "Patron")
+        created_by_role = normalize_role(act.get("role"))
+        clean_note = str(note or "").strip()
+
+        with self.db.get_connection() as conn:
+            c_row = conn.execute(
+                "SELECT * FROM credit_customers WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+                (int(customer_id), uid),
+            ).fetchone()
+            if not c_row:
+                return False, "Cari müşteri bulunamadı!", None
+
+            pm_label = "Nakit" if pm_raw == "nakit" else "POS"
+            desc = f"Tahsilat ({pm_label})" + (f" — {clean_note}" if clean_note else "")
+            cur = conn.execute(
+                """
+                INSERT INTO credit_transactions (
+                    user_id, customer_id, sale_id, tx_type, payment_method,
+                    amount_kurus, signed_kurus, description, product_summary,
+                    tx_date, status, created_by, created_by_role, created_at
+                ) VALUES (?, ?, NULL, 'tahsilat', ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+                """,
+                (
+                    uid, int(customer_id), pm_raw,
+                    amt_k, -amt_k, desc, f"Tahsilat ({pm_label})",
+                    now, created_by, created_by_role, now,
+                ),
+            )
+            tx_id = cur.lastrowid
+
+            bal_row = conn.execute(
+                "SELECT COALESCE(SUM(signed_kurus), 0) AS bal FROM credit_transactions WHERE customer_id = ? AND COALESCE(status, 'active') != 'cancelled'",
+                (int(customer_id),),
+            ).fetchone()
+            new_bal_k = int(bal_row["bal"] or 0)
+
+            log_audit(
+                action="CREDIT_COLLECTION_CREATE",
+                entity_type="credit_collection",
+                entity_id=tx_id,
+                old_value={"customer_id": int(customer_id), "balance": from_kurus(new_bal_k + amt_k)},
+                new_value={
+                    "id": tx_id,
+                    "customer_id": int(customer_id),
+                    "customer_name": c_row["name"],
+                    "amount": from_kurus(amt_k),
+                    "payment_method": pm_raw,
+                    "new_balance": from_kurus(new_bal_k),
+                    "tx_date": now,
+                },
+                reason=clean_note or desc,
+                actor=act,
+                user_id=uid,
+                conn=conn,
+            )
+
+        return True, f"'{c_row['name']}' müşterisinden {from_kurus(amt_k):.2f} ₺ ({pm_label}) tahsilat alındı.", {
+            "id": tx_id,
+            "customer_id": int(customer_id),
+            "customer_name": c_row["name"],
+            "amount": from_kurus(amt_k),
+            "amount_kurus": amt_k,
+            "payment_method": pm_raw,
+            "tx_date": now,
+            "new_balance": from_kurus(new_bal_k),
+            "new_balance_kurus": new_bal_k,
+        }
+
+    def cancel_credit_collection(
+        self,
+        tx_id: int,
+        cancel_reason: str,
+        cancel_note: str = "",
+        user_id: Optional[int] = None,
+        actor: Optional[Dict[str, Any]] = None,
+    ) -> tuple[bool, str]:
+        """Tahsilat kaydını fiziksel silmek yerine zorunlu nedenle iptal eder ve bakiyeyi günceller."""
+        ok_r, msg_r, clean_reason, clean_note = validate_cancel_reason(cancel_reason, cancel_note)
+        if not ok_r:
+            return False, msg_r
+
+        uid = self._resolve_user_id(user_id)
+        now = get_turkey_now_str()
+        act = actor or {"name": "Patron", "role": "patron", "user_id": uid}
+        actor_name = str(act.get("name") or "Patron")
+        actor_role = normalize_role(act.get("role"))
+
+        with self.db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM credit_transactions WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+                (int(tx_id), uid),
+            ).fetchone()
+            if not row:
+                return False, "Tahsilat hareketi bulunamadı!"
+            if row["tx_type"] != "tahsilat":
+                return False, "Satış kaynaklı cari hareketler ilgili satışın iptaliyle geri alınır!"
+            if str(row["status"] or "active").lower() == "cancelled":
+                return False, "Bu tahsilat zaten iptal edilmiş!"
+
+            conn.execute(
+                """
+                UPDATE credit_transactions
+                SET status = 'cancelled',
+                    cancelled_at = ?,
+                    cancelled_by = ?,
+                    cancelled_by_role = ?,
+                    cancel_reason = ?,
+                    cancel_note = ?
+                WHERE id = ?
+                """,
+                (now, actor_name, actor_role, clean_reason, clean_note, int(tx_id)),
+            )
+            log_audit(
+                action="CREDIT_COLLECTION_CANCEL",
+                entity_type="credit_collection",
+                entity_id=int(tx_id),
+                old_value={
+                    "id": row["id"],
+                    "customer_id": row["customer_id"],
+                    "amount": from_kurus(int(row["amount_kurus"] or 0)),
+                    "payment_method": row["payment_method"],
+                    "status": "active",
+                },
+                new_value={
+                    "status": "cancelled",
+                    "cancelled_at": now,
+                    "cancelled_by": actor_name,
+                    "cancel_reason": clean_reason,
+                    "cancel_note": clean_note,
+                },
+                reason=clean_reason + (f" — {clean_note}" if clean_note else ""),
+                actor=act,
+                user_id=uid,
+                conn=conn,
+            )
+
+        return True, "Tahsilat kaydı iptal edildi ve müşteri bakiyesi güncellendi."
+
+    def get_cancelled_report(
+        self,
+        user_id: Optional[Union[int, str]] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        entity_type: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Patron için tüm iptal edilen finansal kayıtların (satış, gider, tahsilat, kasa, çiftlik) raporu."""
+        uid = self._resolve_user_id(user_id)
+        records: List[Dict[str, Any]] = []
+        filter_type = str(entity_type or "").strip().lower()
+
+        with self.db.get_connection() as conn:
+            if not filter_type or filter_type == "sale":
+                q = "SELECT * FROM sales WHERE (user_id = ? OR user_id IS NULL) AND status = 'cancelled'"
+                p: list = [uid]
+                if start_date:
+                    q += " AND COALESCE(cancelled_at, sold_at) >= ?"
+                    p.append(start_date + " 00:00:00")
+                if end_date:
+                    q += " AND COALESCE(cancelled_at, sold_at) <= ?"
+                    p.append(end_date + " 23:59:59")
+                for r in conn.execute(q, p).fetchall():
+                    records.append({
+                        "entity_type": "sale",
+                        "entity_label": "Satış",
+                        "record_id": r["id"],
+                        "amount": round(float(r["total_amount"] or 0), 2),
+                        "title": r["customer_name"] or r["note"] or f"Fiş #{r['id']}",
+                        "original_date": r["sold_at"],
+                        "cancelled_at": r["cancelled_at"],
+                        "cancelled_by": r["cancelled_by"] or "Patron",
+                        "cancelled_by_role": r["cancelled_by_role"] or "patron",
+                        "cancel_reason": r["cancel_reason"] or "",
+                        "cancel_note": r["cancel_note"] or "",
+                    })
+
+            if not filter_type or filter_type == "expense":
+                q = "SELECT * FROM expenses WHERE (user_id = ? OR user_id IS NULL) AND status = 'cancelled'"
+                p = [uid]
+                if start_date:
+                    q += " AND COALESCE(cancelled_at, expense_date) >= ?"
+                    p.append(start_date + " 00:00:00")
+                if end_date:
+                    q += " AND COALESCE(cancelled_at, expense_date) <= ?"
+                    p.append(end_date + " 23:59:59")
+                for r in conn.execute(q, p).fetchall():
+                    records.append({
+                        "entity_type": "expense",
+                        "entity_label": "Gider",
+                        "record_id": r["id"],
+                        "amount": round(float(r["amount"] or 0), 2),
+                        "title": f"{r['title']} ({r['category'] or 'Gider'})",
+                        "original_date": r["expense_date"],
+                        "cancelled_at": r["cancelled_at"],
+                        "cancelled_by": r["cancelled_by"] or "Patron",
+                        "cancelled_by_role": r["cancelled_by_role"] or "patron",
+                        "cancel_reason": r["cancel_reason"] or "",
+                        "cancel_note": r["cancel_note"] or "",
+                    })
+
+            if not filter_type or filter_type in ("cash_movement", "collection"):
+                q = "SELECT * FROM cash_movements WHERE (user_id = ? OR user_id IS NULL) AND status = 'cancelled'"
+                p = [uid]
+                if start_date:
+                    q += " AND COALESCE(cancelled_at, movement_date) >= ?"
+                    p.append(start_date + " 00:00:00")
+                if end_date:
+                    q += " AND COALESCE(cancelled_at, movement_date) <= ?"
+                    p.append(end_date + " 23:59:59")
+                for r in conn.execute(q, p).fetchall():
+                    et = "collection" if r["movement_type"] == "tahsilat" else "cash_movement"
+                    if filter_type and filter_type != et:
+                        continue
+                    lbl = "Tahsilat" if r["movement_type"] == "tahsilat" else ("Kasa Giriş" if r["movement_type"] == "kasa_giris" else "Kasa Çıkış")
+                    records.append({
+                        "entity_type": et,
+                        "entity_label": lbl,
+                        "record_id": r["id"],
+                        "amount": round(float(r["amount"] or 0), 2),
+                        "title": r["description"],
+                        "original_date": r["movement_date"],
+                        "cancelled_at": r["cancelled_at"],
+                        "cancelled_by": r["cancelled_by"] or "Patron",
+                        "cancelled_by_role": r["cancelled_by_role"] or "patron",
+                        "cancel_reason": r["cancel_reason"] or "",
+                        "cancel_note": r["cancel_note"] or "",
+                    })
+
+            if not filter_type or filter_type == "farm_egg_sale":
+                q = "SELECT * FROM farm_egg_sales WHERE (user_id = ? OR user_id IS NULL) AND status = 'cancelled'"
+                p = [uid]
+                if start_date:
+                    q += " AND COALESCE(cancelled_at, sale_date) >= ?"
+                    p.append(start_date + " 00:00:00")
+                if end_date:
+                    q += " AND COALESCE(cancelled_at, sale_date) <= ?"
+                    p.append(end_date + " 23:59:59")
+                for r in conn.execute(q, p).fetchall():
+                    records.append({
+                        "entity_type": "farm_egg_sale",
+                        "entity_label": "Yumurta Satışı",
+                        "record_id": r["id"],
+                        "amount": round(float(r["total_amount"] or 0), 2),
+                        "title": f"{r['customer_name']} ({r['source']})",
+                        "original_date": r["sale_date"],
+                        "cancelled_at": r["cancelled_at"],
+                        "cancelled_by": r["cancelled_by"] or "Patron",
+                        "cancelled_by_role": r["cancelled_by_role"] or "patron",
+                        "cancel_reason": r["cancel_reason"] or "",
+                        "cancel_note": r["cancel_note"] or "",
+                    })
+
+            if not filter_type or filter_type == "farm_feed_purchase":
+                q = "SELECT * FROM farm_feed_purchases WHERE (user_id = ? OR user_id IS NULL) AND status = 'cancelled'"
+                p = [uid]
+                if start_date:
+                    q += " AND COALESCE(cancelled_at, purchase_date) >= ?"
+                    p.append(start_date + " 00:00:00")
+                if end_date:
+                    q += " AND COALESCE(cancelled_at, purchase_date) <= ?"
+                    p.append(end_date + " 23:59:59")
+                for r in conn.execute(q, p).fetchall():
+                    records.append({
+                        "entity_type": "farm_feed_purchase",
+                        "entity_label": "Yem Alımı",
+                        "record_id": r["id"],
+                        "amount": round(float(r["total_amount"] or 0), 2),
+                        "title": r["supplier"] or f"Yem Alımı #{r['id']}",
+                        "original_date": r["purchase_date"],
+                        "cancelled_at": r["cancelled_at"],
+                        "cancelled_by": r["cancelled_by"] or "Patron",
+                        "cancelled_by_role": r["cancelled_by_role"] or "patron",
+                        "cancel_reason": r["cancel_reason"] or "",
+                        "cancel_note": r["cancel_note"] or "",
+                    })
+
+        records.sort(key=lambda x: str(x.get("cancelled_at") or x.get("original_date") or ""), reverse=True)
+        total_amount = round(sum(float(x["amount"] or 0) for x in records), 2)
+        by_reason: Dict[str, int] = {}
+        for rec in records:
+            rs = rec.get("cancel_reason") or "Belirtilmedi"
+            by_reason[rs] = by_reason.get(rs, 0) + 1
+
+        return {
+            "records": records,
+            "total_count": len(records),
+            "total_amount": total_amount,
+            "by_reason": by_reason,
+        }
 
     def get_expenses(
         self,
@@ -3260,7 +5187,7 @@ class CloudDatabase:
         # 1. SQLite kontrolü
         with self.db.get_connection() as conn:
             row = conn.execute(
-                "SELECT id, company_name, full_name, phone, email, auth_token FROM users WHERE auth_token = ?",
+                "SELECT id, company_name, full_name, phone, email, auth_token, COALESCE(role, 'patron') as role FROM users WHERE auth_token = ?",
                 (tok,),
             ).fetchone()
             if row:
@@ -3478,12 +5405,31 @@ class CloudDatabase:
                 """
                 INSERT INTO farm_egg_sales (
                     user_id, customer_name, box_count, unit_type, piece_count, unit_price, total_amount,
-                    source, sale_date, note, synced_to_cloud, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                    source, sale_date, note, status, synced_to_cloud, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 0, ?)
                 """,
                 (uid, clean_cust, b_count, u_type, p_count, u_price, tot_amount, source, s_date, (note or "").strip(), now_dt),
             )
             sale_id = cursor.lastrowid
+            log_audit(
+                action="FARM_EGG_SALE_CREATE",
+                entity_type="farm_egg_sale",
+                entity_id=sale_id,
+                old_value=None,
+                new_value={
+                    "id": sale_id,
+                    "customer_name": clean_cust,
+                    "box_count": b_count,
+                    "unit_type": u_type,
+                    "piece_count": p_count,
+                    "unit_price": u_price,
+                    "total_amount": tot_amount,
+                    "source": source,
+                    "sale_date": s_date,
+                },
+                user_id=uid,
+                conn=conn,
+            )
 
         self.ensure_firebase()
         if sale_id and self.firestore_db:
@@ -3520,10 +5466,13 @@ class CloudDatabase:
         end_date: Optional[str] = None,
         source: Optional[str] = None,
         limit: Optional[int] = None,
+        include_cancelled: bool = False,
     ) -> List[Dict[str, Any]]:
         """Yumurta satış kayıtlarını filtreli ve tarih sırasına göre döner."""
         uid = self._resolve_user_id(user_id)
         query = "SELECT * FROM farm_egg_sales WHERE (user_id = ? OR user_id IS NULL)"
+        if not include_cancelled:
+            query += " AND COALESCE(status, 'active') != 'cancelled'"
         params: list = [uid]
 
         if customer_name and customer_name.strip():
@@ -3574,28 +5523,90 @@ class CloudDatabase:
 
             return sales
 
-    def delete_farm_egg_sale(self, sale_id: int, user_id: Optional[int] = None) -> tuple[bool, str]:
-        """Yumurta satışı kaydını siler."""
+    def delete_farm_egg_sale(
+        self,
+        sale_id: int,
+        user_id: Optional[int] = None,
+        cancel_reason: Optional[str] = None,
+        cancel_note: str = "",
+        actor: Optional[Dict[str, Any]] = None,
+        require_reason: bool = False,
+    ) -> tuple[bool, str]:
+        """Yumurta satışı kaydını fiziksel silmek yerine iptal edildi (cancelled) durumuna alır."""
+        if require_reason:
+            ok_r, msg_r, clean_reason, clean_note = validate_cancel_reason(cancel_reason, cancel_note)
+            if not ok_r:
+                return False, msg_r
+        else:
+            clean_reason = str(cancel_reason or "Çiftlik satış iptali").strip()
+            clean_note = str(cancel_note or "").strip()
+
         uid = self._resolve_user_id(user_id) or 1
+        now = get_turkey_now_str()
+        act = actor or {"name": "Patron", "role": "patron", "user_id": uid}
+        actor_name = str(act.get("name") or "Patron")
+        actor_role = normalize_role(act.get("role"))
+
         with self.db.get_connection() as conn:
             row = conn.execute(
-                "SELECT id FROM farm_egg_sales WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+                "SELECT * FROM farm_egg_sales WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
                 (sale_id, uid),
             ).fetchone()
             if not row:
                 return False, "Satış kaydı bulunamadı!"
-            conn.execute("DELETE FROM farm_egg_sales WHERE id = ?", (sale_id,))
+            if str(row["status"] or "active").lower() == "cancelled":
+                return False, "Bu yumurta satışı zaten iptal edilmiş!"
+
+            old_val = {
+                "id": row["id"],
+                "customer_name": row["customer_name"],
+                "total_amount": row["total_amount"],
+                "sale_date": row["sale_date"],
+                "status": row["status"] or "active",
+            }
+            conn.execute(
+                """
+                UPDATE farm_egg_sales
+                SET status = 'cancelled',
+                    cancelled_at = ?,
+                    cancelled_by = ?,
+                    cancelled_by_role = ?,
+                    cancel_reason = ?,
+                    cancel_note = ?,
+                    synced_to_cloud = 0
+                WHERE id = ?
+                """,
+                (now, actor_name, actor_role, clean_reason, clean_note, sale_id),
+            )
+            log_audit(
+                action="FARM_EGG_SALE_CANCEL",
+                entity_type="farm_egg_sale",
+                entity_id=sale_id,
+                old_value=old_val,
+                new_value={
+                    "status": "cancelled",
+                    "cancelled_at": now,
+                    "cancelled_by": actor_name,
+                    "cancel_reason": clean_reason,
+                    "cancel_note": clean_note,
+                },
+                reason=clean_reason + (f" — {clean_note}" if clean_note else ""),
+                actor=act,
+                user_id=uid,
+                conn=conn,
+            )
 
         if self.firestore_db:
-            def _del_egg():
+            def _cancel_egg():
                 try:
-                    self.firestore_db.collection("farm_egg_sales").document(f"u{uid}_es{sale_id}").delete()
-                    self.firestore_db.collection("farm_egg_sales").document(str(sale_id)).delete()
+                    self.firestore_db.collection("farm_egg_sales").document(f"u{uid}_es{sale_id}").set(
+                        {"status": "cancelled", "cancelled_at": now, "cancel_reason": clean_reason}, merge=True
+                    )
                 except Exception:
                     pass
-            threading.Thread(target=_del_egg, daemon=True).start()
+            threading.Thread(target=_cancel_egg, daemon=True).start()
 
-        return True, "Yumurta satışı kaydı silindi."
+        return True, "Yumurta satışı kaydı iptal edildi."
 
     def add_farm_feed_purchase(
         self,
@@ -3635,8 +5646,8 @@ class CloudDatabase:
                 """
                 INSERT INTO farm_feed_purchases (
                     user_id, bag_count, bag_weight_kg, total_weight_kg, total_weight_ton,
-                    unit_price, total_amount, purchase_date, supplier, note, synced_to_cloud, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                    unit_price, total_amount, purchase_date, supplier, note, status, synced_to_cloud, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 0, ?)
                 """,
                 (
                     uid,
@@ -3653,6 +5664,22 @@ class CloudDatabase:
                 ),
             )
             purchase_id = cursor.lastrowid
+            log_audit(
+                action="FARM_FEED_PURCHASE_CREATE",
+                entity_type="farm_feed_purchase",
+                entity_id=purchase_id,
+                old_value=None,
+                new_value={
+                    "id": purchase_id,
+                    "bag_count": b_count,
+                    "total_weight_ton": total_weight_ton,
+                    "total_amount": t_amount,
+                    "purchase_date": p_date,
+                    "supplier": (supplier or "").strip(),
+                },
+                user_id=uid,
+                conn=conn,
+            )
 
         if purchase_id and self.firestore_db:
             def _sync_feed():
@@ -3687,10 +5714,13 @@ class CloudDatabase:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         limit: Optional[int] = None,
+        include_cancelled: bool = False,
     ) -> List[Dict[str, Any]]:
         """Yem alım kayıtlarını tarih sırasına göre döner."""
         uid = self._resolve_user_id(user_id)
         query = "SELECT * FROM farm_feed_purchases WHERE (user_id = ? OR user_id IS NULL)"
+        if not include_cancelled:
+            query += " AND COALESCE(status, 'active') != 'cancelled'"
         params: list = [uid]
 
         if start_date and start_date.strip():
@@ -3734,7 +5764,7 @@ class CloudDatabase:
             return purchases
 
     def get_farm_feed_summary(self, user_id: Optional[Union[int, str]] = None) -> Dict[str, float]:
-        """Yem alımları için genel toplam özetini döner."""
+        """Yem alımları için genel toplam özetini döner (iptal edilenler hariç)."""
         uid = self._resolve_user_id(user_id)
         with self.db.get_connection() as conn:
             row = conn.execute(
@@ -3745,6 +5775,7 @@ class CloudDatabase:
                     COALESCE(SUM(total_amount), 0) as total_cost
                 FROM farm_feed_purchases
                 WHERE (user_id = ? OR user_id IS NULL)
+                  AND COALESCE(status, 'active') != 'cancelled'
                 """,
                 (uid,)
             ).fetchone()
@@ -3759,6 +5790,7 @@ class CloudDatabase:
                             COALESCE(SUM(total_amount), 0) as total_cost
                         FROM farm_feed_purchases
                         WHERE (user_id = ? OR user_id IS NULL)
+                          AND COALESCE(status, 'active') != 'cancelled'
                         """,
                         (uid,)
                     ).fetchone()
@@ -3772,6 +5804,7 @@ class CloudDatabase:
                         COALESCE(SUM(total_weight_ton), 0) as total_tons,
                         COALESCE(SUM(total_amount), 0) as total_cost
                     FROM farm_feed_purchases
+                    WHERE COALESCE(status, 'active') != 'cancelled'
                     """
                 ).fetchone()
                 if fb_row:
@@ -3784,26 +5817,88 @@ class CloudDatabase:
             }
 
 
-    def delete_farm_feed_purchase(self, purchase_id: int, user_id: Optional[int] = None) -> tuple[bool, str]:
-        """Yem alım kaydını siler."""
+    def delete_farm_feed_purchase(
+        self,
+        purchase_id: int,
+        user_id: Optional[int] = None,
+        cancel_reason: Optional[str] = None,
+        cancel_note: str = "",
+        actor: Optional[Dict[str, Any]] = None,
+        require_reason: bool = False,
+    ) -> tuple[bool, str]:
+        """Yem alım kaydını fiziksel silmek yerine iptal edildi (cancelled) durumuna alır."""
+        if require_reason:
+            ok_r, msg_r, clean_reason, clean_note = validate_cancel_reason(cancel_reason, cancel_note)
+            if not ok_r:
+                return False, msg_r
+        else:
+            clean_reason = str(cancel_reason or "Yem alım iptali").strip()
+            clean_note = str(cancel_note or "").strip()
+
         uid = self._resolve_user_id(user_id) or 1
+        now = get_turkey_now_str()
+        act = actor or {"name": "Patron", "role": "patron", "user_id": uid}
+        actor_name = str(act.get("name") or "Patron")
+        actor_role = normalize_role(act.get("role"))
+
         with self.db.get_connection() as conn:
             row = conn.execute(
-                "SELECT id FROM farm_feed_purchases WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+                "SELECT * FROM farm_feed_purchases WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
                 (purchase_id, uid),
             ).fetchone()
             if not row:
                 return False, "Yem alım kaydı bulunamadı!"
-            conn.execute("DELETE FROM farm_feed_purchases WHERE id = ?", (purchase_id,))
+            if str(row["status"] or "active").lower() == "cancelled":
+                return False, "Bu yem alımı zaten iptal edilmiş!"
+
+            old_val = {
+                "id": row["id"],
+                "bag_count": row["bag_count"],
+                "total_amount": row["total_amount"],
+                "supplier": row["supplier"],
+                "status": row["status"] or "active",
+            }
+            conn.execute(
+                """
+                UPDATE farm_feed_purchases
+                SET status = 'cancelled',
+                    cancelled_at = ?,
+                    cancelled_by = ?,
+                    cancelled_by_role = ?,
+                    cancel_reason = ?,
+                    cancel_note = ?,
+                    synced_to_cloud = 0
+                WHERE id = ?
+                """,
+                (now, actor_name, actor_role, clean_reason, clean_note, purchase_id),
+            )
+            log_audit(
+                action="FARM_FEED_PURCHASE_CANCEL",
+                entity_type="farm_feed_purchase",
+                entity_id=purchase_id,
+                old_value=old_val,
+                new_value={
+                    "status": "cancelled",
+                    "cancelled_at": now,
+                    "cancelled_by": actor_name,
+                    "cancel_reason": clean_reason,
+                    "cancel_note": clean_note,
+                },
+                reason=clean_reason + (f" — {clean_note}" if clean_note else ""),
+                actor=act,
+                user_id=uid,
+                conn=conn,
+            )
 
         if self.firestore_db:
-            def _del_feed():
+            def _cancel_feed():
                 try:
-                    self.firestore_db.collection("farm_feed_purchases").document(f"u{uid}_fp{purchase_id}").delete()
-                    self.firestore_db.collection("farm_feed_purchases").document(str(purchase_id)).delete()
+                    self.firestore_db.collection("farm_feed_purchases").document(f"u{uid}_fp{purchase_id}").set(
+                        {"status": "cancelled", "cancelled_at": now, "cancel_reason": clean_reason}, merge=True
+                    )
                 except Exception:
                     pass
-            threading.Thread(target=_del_feed, daemon=True).start()
+            threading.Thread(target=_cancel_feed, daemon=True).start()
 
-        return True, "Yem alım kaydı silindi."
+        return True, "Yem alım kaydı iptal edildi."
 

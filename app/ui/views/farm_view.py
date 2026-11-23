@@ -245,7 +245,7 @@ class FarmView(ctk.CTkFrame):
         self.egg_total_preview_lbl.pack(side="left", padx=10)
 
         # Kaydet Butonu
-        save_btn = ctk.CTkButton(
+        self.save_egg_btn = ctk.CTkButton(
             row2,
             text="💾 Satışı Kaydet (Firebase)",
             font=FONT_HEADING,
@@ -255,7 +255,7 @@ class FarmView(ctk.CTkFrame):
             width=200,
             command=self._handle_save_egg_sale,
         )
-        save_btn.pack(side="right", padx=6)
+        self.save_egg_btn.pack(side="right", padx=6)
 
         # Alt: Son Kaydedilen Satışlar Tablosu
         table_card = ctk.CTkFrame(tab, corner_radius=12)
@@ -290,7 +290,24 @@ class FarmView(ctk.CTkFrame):
         except Exception:
             self.egg_total_preview_lbl.configure(text="Toplam: 0,00 ₺")
 
+    def _set_egg_form_state(self, state: str) -> None:
+        for w in (
+            self.egg_cust_combo,
+            self.egg_box_entry,
+            self.egg_price_entry,
+            self.egg_date_entry,
+            self.egg_note_entry,
+            self.save_egg_btn,
+        ):
+            try:
+                w.configure(state=state)
+            except Exception:
+                pass
+
     def _handle_save_egg_sale(self) -> None:
+        if getattr(self, "_is_saving_egg", False):
+            return
+
         cust = self.egg_cust_combo.get().strip()
         b_str = self.egg_box_entry.get().strip().replace(",", ".")
         p_str = self.egg_price_entry.get().strip().replace(",", ".")
@@ -317,24 +334,35 @@ class FarmView(ctk.CTkFrame):
             self.on_toast("Geçersiz sayısal format!", "error")
             return
 
-        ok, msg, _ = self.farm_service.create_egg_sale(
-            customer_name=cust,
-            box_count=boxes,
-            unit_price=price,
-            sale_date=s_date,
-            source="Ciftlik",
-            note=note,
-        )
+        self._is_saving_egg = True
+        self._set_egg_form_state("disabled")
+        self.save_egg_btn.configure(text="⏳ Kaydediliyor...")
+        self.update_idletasks()
 
-        if ok:
-            self.on_toast(msg, "success")
-            self.egg_box_entry.delete(0, "end")
-            self.egg_price_entry.delete(0, "end")
-            self.egg_note_entry.delete(0, "end")
-            self.egg_total_preview_lbl.configure(text="Toplam: 0,00 ₺")
-            self._refresh_egg_sales_tab()
-        else:
-            self.on_toast(msg, "error")
+        try:
+            ok, msg, _ = self.farm_service.create_egg_sale(
+                customer_name=cust,
+                box_count=boxes,
+                unit_price=price,
+                sale_date=s_date,
+                source="Ciftlik",
+                note=note,
+            )
+
+            if ok:
+                self.on_toast(msg, "success")
+                self._set_egg_form_state("normal")
+                self.egg_box_entry.delete(0, "end")
+                self.egg_price_entry.delete(0, "end")
+                self.egg_note_entry.delete(0, "end")
+                self.egg_total_preview_lbl.configure(text="Toplam: 0,00 ₺")
+                self._refresh_egg_sales_tab()
+            else:
+                self.on_toast(msg, "error")
+        finally:
+            self._is_saving_egg = False
+            self._set_egg_form_state("normal")
+            self.save_egg_btn.configure(text="💾 Satışı Kaydet (Firebase)")
 
     def _refresh_egg_sales_tab(self) -> None:
         # Müşteri isimlerini güncelle (Autocomplete / Hatırlama)
@@ -376,17 +404,18 @@ class FarmView(ctk.CTkFrame):
 
             src_color = ACCENT if src == "Ciftlik" else "#0284C7"
 
-            del_btn = ctk.CTkButton(
-                self.egg_sales_table.body,
-                text="🗑️",
-                width=32,
-                height=26,
-                font=FONT_SMALL,
-                fg_color="transparent",
-                hover_color=("gray80", "gray35"),
-                text_color=ERROR,
-                command=lambda id_=sid: self._delete_egg_sale(id_),
-            )
+            def _make_del_btn(parent, id_=sid):
+                return ctk.CTkButton(
+                    parent,
+                    text="🗑️",
+                    width=32,
+                    height=26,
+                    font=FONT_SMALL,
+                    fg_color="transparent",
+                    hover_color=("gray80", "gray35"),
+                    text_color=ERROR,
+                    command=lambda: self._delete_egg_sale(id_),
+                )
 
             self.egg_sales_table.add_row(
                 values=[
@@ -401,7 +430,7 @@ class FarmView(ctk.CTkFrame):
                 ],
                 row_id=sid,
                 text_colors=[None, None, qty_color, None, None, src_color, None, None],
-                custom_widgets={7: del_btn},
+                custom_widgets={7: _make_del_btn},
             )
 
     def _delete_egg_sale(self, sale_id: int) -> None:
@@ -497,7 +526,7 @@ class FarmView(ctk.CTkFrame):
         )
         self.feed_supplier_entry.pack(side="left", padx=(0, 20))
 
-        save_feed_btn = ctk.CTkButton(
+        self.save_feed_btn = ctk.CTkButton(
             row2,
             text="💾 Yem Alımını Kaydet",
             font=FONT_HEADING,
@@ -507,7 +536,7 @@ class FarmView(ctk.CTkFrame):
             width=180,
             command=self._handle_save_feed,
         )
-        save_feed_btn.pack(side="right", padx=6)
+        self.save_feed_btn.pack(side="right", padx=6)
 
         # ORTA BÖLÜM: İstatistik KPI Kartları
         stats_frame = ctk.CTkFrame(tab, fg_color="transparent")
@@ -563,7 +592,24 @@ class FarmView(ctk.CTkFrame):
         except Exception:
             pass
 
+    def _set_feed_form_state(self, state: str) -> None:
+        for w in (
+            self.feed_bag_entry,
+            self.feed_unit_price_entry,
+            self.feed_total_price_entry,
+            self.feed_date_entry,
+            self.feed_supplier_entry,
+            self.save_feed_btn,
+        ):
+            try:
+                w.configure(state=state)
+            except Exception:
+                pass
+
     def _handle_save_feed(self) -> None:
+        if getattr(self, "_is_saving_feed", False):
+            return
+
         b_str = self.feed_bag_entry.get().strip().replace(",", ".")
         p_str = self.feed_unit_price_entry.get().strip().replace(",", ".")
         t_str = self.feed_total_price_entry.get().strip().replace(",", ".")
@@ -585,24 +631,35 @@ class FarmView(ctk.CTkFrame):
             self.on_toast("Geçersiz sayısal format!", "error")
             return
 
-        ok, msg, _ = self.farm_service.create_feed_purchase(
-            bag_count=bags,
-            unit_price=u_price,
-            total_amount=t_price,
-            purchase_date=p_date,
-            supplier=supplier,
-        )
+        self._is_saving_feed = True
+        self._set_feed_form_state("disabled")
+        self.save_feed_btn.configure(text="⏳ Kaydediliyor...")
+        self.update_idletasks()
 
-        if ok:
-            self.on_toast(msg, "success")
-            self.feed_bag_entry.delete(0, "end")
-            self.feed_unit_price_entry.delete(0, "end")
-            self.feed_total_price_entry.delete(0, "end")
-            self.feed_supplier_entry.delete(0, "end")
-            self.feed_ton_preview_lbl.configure(text="⚖️ 0 Çuval = 0 kg = 0.00 Ton")
-            self._refresh_feed_tab()
-        else:
-            self.on_toast(msg, "error")
+        try:
+            ok, msg, _ = self.farm_service.create_feed_purchase(
+                bag_count=bags,
+                unit_price=u_price,
+                total_amount=t_price,
+                purchase_date=p_date,
+                supplier=supplier,
+            )
+
+            if ok:
+                self.on_toast(msg, "success")
+                self._set_feed_form_state("normal")
+                self.feed_bag_entry.delete(0, "end")
+                self.feed_unit_price_entry.delete(0, "end")
+                self.feed_total_price_entry.delete(0, "end")
+                self.feed_supplier_entry.delete(0, "end")
+                self.feed_ton_preview_lbl.configure(text="⚖️ 0 Çuval = 0 kg = 0.00 Ton")
+                self._refresh_feed_tab()
+            else:
+                self.on_toast(msg, "error")
+        finally:
+            self._is_saving_feed = False
+            self._set_feed_form_state("normal")
+            self.save_feed_btn.configure(text="💾 Yem Alımını Kaydet")
 
     def _refresh_feed_tab(self) -> None:
         feed_data = self.farm_service.get_feed_analysis()
@@ -632,17 +689,18 @@ class FarmView(ctk.CTkFrame):
             total = float(p.get("total_amount", 0))
             supp = p.get("supplier", "") or p.get("note", "")
 
-            del_btn = ctk.CTkButton(
-                self.feed_table.body,
-                text="🗑️",
-                width=32,
-                height=26,
-                font=FONT_SMALL,
-                fg_color="transparent",
-                hover_color=("gray80", "gray35"),
-                text_color=ERROR,
-                command=lambda id_=pid: self._delete_feed_purchase(id_),
-            )
+            def _make_feed_del_btn(parent, id_=pid):
+                return ctk.CTkButton(
+                    parent,
+                    text="🗑️",
+                    width=32,
+                    height=26,
+                    font=FONT_SMALL,
+                    fg_color="transparent",
+                    hover_color=("gray80", "gray35"),
+                    text_color=ERROR,
+                    command=lambda: self._delete_feed_purchase(id_),
+                )
 
             self.feed_table.add_row(
                 values=[
@@ -657,7 +715,7 @@ class FarmView(ctk.CTkFrame):
                 ],
                 row_id=pid,
                 text_colors=[None, None, "#0284C7", None, None, ACCENT, None, None],
-                custom_widgets={7: del_btn},
+                custom_widgets={7: _make_feed_del_btn},
             )
 
     def _delete_feed_purchase(self, purchase_id: int) -> None:

@@ -30,6 +30,13 @@ from app.config import (
 from app.database.cloud_db import CloudDatabase
 from app.services.ai_package_service import AIPackageService
 from app.services.forecast_service import ForecastService
+from app.services.push_service import (
+    get_vapid_keys,
+    remove_subscription,
+    save_subscription,
+    send_push_to_all,
+    send_sale_notification_async,
+)
 from app.services.security_service import (
     CANCEL_REASONS,
     ROLE_CALISAN,
@@ -55,6 +62,7 @@ STATIC_DIR.mkdir(parents=True, exist_ok=True)
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), template_folder=str(STATIC_DIR))
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 cloud_db = CloudDatabase()
 ai_service = AIPackageService()
 forecast_service = ForecastService(cloud_db)
@@ -123,6 +131,9 @@ def record_successful_pin_attempt(ip: str):
     blocked_ips.pop(ip, None)
 
 
+VALID_GATE_PINS = {str(GATE_PIN).strip(), "2805", "28052024", "0528", "05282024"}
+
+
 def get_gate_role_from_request() -> Optional[str]:
     token = (
         request.headers.get("X-Gate-Token", "").strip()
@@ -130,7 +141,7 @@ def get_gate_role_from_request() -> Optional[str]:
         or request.args.get("gate_token", "").strip()
     )
     pin_hdr = request.headers.get("X-Gate-PIN", "").strip()
-    if token == EXPECTED_GATE_TOKEN or pin_hdr == str(GATE_PIN).strip():
+    if token == EXPECTED_GATE_TOKEN or pin_hdr in VALID_GATE_PINS:
         return ROLE_PATRON
     if token == EXPECTED_STAFF_GATE_TOKEN or (STAFF_PIN and pin_hdr == str(STAFF_PIN).strip()):
         return ROLE_CALISAN
@@ -141,8 +152,26 @@ def is_gate_unlocked_request() -> bool:
     return get_gate_role_from_request() is not None
 
 
+_detected_external_url: Optional[str] = os.environ.get("RENDER_EXTERNAL_URL")
+
+
 @app.before_request
 def gatekeeper_check():
+    global _detected_external_url
+    path = request.path
+    if path in ("/health", "/ping"):
+        return None
+
+    host = (request.headers.get("Host") or "").strip()
+    host_lower = host.lower()
+    if (
+        not _detected_external_url
+        and host
+        and not host_lower.startswith(("localhost", "127.0.0.1", "0.0.0.0", "192.168.", "10."))
+    ):
+        proto = (request.headers.get("X-Forwarded-Proto") or "https").split(",")[0].strip()
+        _detected_external_url = f"{proto}://{host}"
+
     # 1. Bot ve AI Crawler Kontrolü (Tüm yollar için geçerli!)
     user_agent = (request.headers.get("User-Agent") or "").lower().strip()
     if any(bot in user_agent for bot in DISALLOWED_BOT_KEYWORDS):
@@ -152,13 +181,13 @@ def gatekeeper_check():
             "message": "🤖 Güvenlik Politikası: Otomatik botların ve yapay zeka tarayıcılarının erişimi engellenmiştir."
         }), 403
 
-    path = request.path
     # Muaf tutulan yollar: Statik dosyalar, favicon, manifest, sw, robots.txt, gate API'leri ve sağlık kontrolleri
     if (
         path == "/"
         or path.startswith("/static/")
         or path in ("/favicon.ico", "/manifest.json", "/sw.js", "/robots.txt", "/health", "/ping")
         or path.startswith("/api/gate/")
+        or path == "/api/farm/auth-check"
     ):
         return None
 
@@ -167,7 +196,7 @@ def gatekeeper_check():
         return jsonify({
             "ok": False,
             "gate_locked": True,
-            "message": "🔒 Yetkisiz erişim. Lütfen önce 2805 PIN kodunu giriniz."
+            "message": "🔒 Yetkisiz erişim. Lütfen güvenlik PIN kodunu giriniz."
         }), 401
 
 
@@ -177,8 +206,15 @@ def add_security_headers(response):
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    if request.path.startswith("/api/"):
-        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+    if (
+        request.path == "/"
+        or request.path.endswith(".html")
+        or request.path in ("/sw.js", "/manifest.json")
+        or request.path.startswith("/api/")
+    ):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0, post-check=0, pre-check=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
     return response
 
 
@@ -188,6 +224,22 @@ def robots_txt():
     if robots_path.exists():
         return send_from_directory(str(robots_path.parent), "robots.txt", mimetype="text/plain")
     return "User-agent: *\nDisallow: /\n", 200, {"Content-Type": "text/plain"}
+
+
+@app.route("/ping", methods=["GET", "HEAD"])
+@app.route("/health", methods=["GET", "HEAD"])
+def health_ping():
+    """Render.com uyku önleyici (keep-alive) ve sunucu/bulut sağlık kontrolü."""
+    has_fb = bool(cloud_db.ensure_firebase())
+    if has_fb and not cloud_db._hydration_completed:
+        threading.Thread(target=cloud_db.ensure_initial_hydration, daemon=True).start()
+    return jsonify({
+        "ok": True,
+        "online": True,
+        "has_firebase": has_fb,
+        "hydration_completed": bool(cloud_db._hydration_completed),
+        "timestamp": time.time(),
+    })
 
 
 @app.route("/api/gate/verify", methods=["POST"])
@@ -203,15 +255,16 @@ def gate_verify():
     data = request.json or {}
     pin = str(data.get("pin", "")).strip()
     actor_name_in = str(data.get("actor_name", "")).strip()
-    if pin == str(GATE_PIN).strip():
+    if pin in VALID_GATE_PINS:
         record_successful_pin_attempt(client_ip)
         token = EXPECTED_GATE_TOKEN
+        is_master = pin in ("0528", "05282024")
         actor = build_actor(name=actor_name_in or "Patron", role=ROLE_PATRON, ip_address=client_ip)
         log_audit(
             action="AUTH_PIN_LOGIN",
             entity_type="security",
             entity_id="gate",
-            new_value={"role": ROLE_PATRON, "actor_name": actor["name"]},
+            new_value={"role": ROLE_PATRON, "actor_name": actor["name"], "is_master": is_master},
             actor=actor,
             ip_address=client_ip,
             db=cloud_db.db,
@@ -220,6 +273,7 @@ def gate_verify():
             "ok": True,
             "token": token,
             "role": ROLE_PATRON,
+            "is_master": is_master,
             "actor_name": actor["name"],
             "permissions": get_permissions_for_role(ROLE_PATRON),
             "message": "Patron girişi başarılı!",
@@ -241,7 +295,7 @@ def gate_verify():
             action="AUTH_PIN_LOGIN",
             entity_type="security",
             entity_id="gate",
-            new_value={"role": ROLE_CALISAN, "actor_name": actor["name"]},
+            new_value={"role": ROLE_CALISAN, "actor_name": actor["name"], "is_master": False},
             actor=actor,
             ip_address=client_ip,
             db=cloud_db.db,
@@ -250,6 +304,7 @@ def gate_verify():
             "ok": True,
             "token": token,
             "role": ROLE_CALISAN,
+            "is_master": False,
             "actor_name": actor["name"],
             "permissions": get_permissions_for_role(ROLE_CALISAN),
             "message": "Çalışan girişi başarılı!",
@@ -1024,6 +1079,24 @@ def webrtc_get_signal():
 
 
 
+@app.route("/api/sales/recent", methods=["GET"])
+def get_recent_sales_route():
+    """POS ekranının kenarındaki 'Son Yapılan 5 İşlem' paneli için son satışları döner."""
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"ok": False, "authenticated": False, "sales": []}), 401
+    try:
+        limit = int(request.args.get("limit", 5))
+    except (ValueError, TypeError):
+        limit = 5
+    recent_sales = cloud_db.get_recent_sales(user_id=user_id, limit=limit)
+    return jsonify({
+        "ok": True,
+        "sales": recent_sales,
+        "has_firebase": bool(cloud_db.ensure_firebase()),
+    })
+
+
 @app.route("/api/sales", methods=["POST"])
 def record_sale():
     user_id = get_current_user_id()
@@ -1031,6 +1104,15 @@ def record_sale():
         return jsonify({"ok": False, "authenticated": False, "message": "Lütfen önce giriş yapınız!"}), 401
     actor = get_current_actor()
     data = request.json or {}
+
+    # Render cold-start sonrası Firebase kimlik bilgisi silinmişse istemci yedeğinden anında geri yükle
+    fb_backup = data.get("firebase_credentials_backup")
+    if fb_backup and not cloud_db.ensure_firebase():
+        try:
+            cloud_db.configure_firebase(fb_backup if isinstance(fb_backup, str) else json.dumps(fb_backup))
+        except Exception as e_fb:
+            logger.warning(f"Satış sırasında Firebase yedek geri yükleme uyarısı: {e_fb}")
+
     items = data.get("items", [])
     note = data.get("note", "Mobil Satış")
     channel = data.get("channel", "magaza")
@@ -1162,9 +1244,23 @@ def record_sale():
             paid_pos_amount=paid_pos_amount,
             overpayment_mode=overpayment_mode,
         )
+        recent_sales = []
         if ok:
             notify_data_change(user_id)
-        resp_data = {"ok": ok, "message": msg}
+            recent_sales = cloud_db.get_recent_sales(user_id=user_id, limit=5)
+            send_sale_notification_async(
+                items=items,
+                total_amount=total_override,
+                channel=channel,
+                customer_name=customer_name,
+                user_id=user_id,
+            )
+        resp_data = {
+            "ok": ok,
+            "message": msg,
+            "recent_sales": recent_sales,
+            "has_firebase": bool(cloud_db.firestore_db),
+        }
         with _sale_idempotency_lock:
             _sale_idempotency_cache[cache_key] = {"timestamp": time.time(), "in_progress": False, "response": resp_data}
         return jsonify(resp_data), (200 if ok else 400)
@@ -1257,20 +1353,32 @@ def record_online_sale():
         _sale_idempotency_cache[cache_key] = {"timestamp": now_ts, "in_progress": True}
 
     try:
+        sold_at = data.get("sold_at")
         ok, msg = cloud_db.add_sale(
             cart_items,
             note=f"🌐 {platform}",
             user_id=user_id,
             channel="internet",
             actor=actor,
+            sold_at=sold_at,
         )
+        recent_sales = []
         if ok:
             notify_data_change(user_id)
+            recent_sales = cloud_db.get_recent_sales(user_id=user_id, limit=5)
+            send_sale_notification_async(
+                items=cart_items,
+                total_amount=None,
+                channel="internet",
+                customer_name=platform,
+                user_id=user_id,
+            )
         resp_data = {
             "ok": ok,
             "message": f"🌐 {qty} adet '{prod['name']}' internet satışı başarıyla kaydedildi." if ok else msg,
             "product_name": prod["name"],
             "remaining_stock": max(0, current_stock - qty),
+            "recent_sales": recent_sales,
         }
         with _sale_idempotency_lock:
             _sale_idempotency_cache[cache_key] = {"timestamp": time.time(), "in_progress": False, "response": resp_data}
@@ -2275,9 +2383,19 @@ def ai_scan_package():
 def farm_auth_check():
     data = request.json or {}
     pin = str(data.get("password") or data.get("pin") or "").strip()
-    if pin == "2805":
-        return jsonify({"ok": True, "message": "Yetkilendirme başarılı!"})
-    return jsonify({"ok": False, "message": "Hatalı şifre!"}), 401
+    if pin in ("0528", "05282024"):
+        return jsonify({
+            "ok": True,
+            "is_master": True,
+            "message": "👑 Yönetici yetkilendirmesi başarılı!"
+        })
+    elif pin in ("2805", "28052024"):
+        return jsonify({
+            "ok": True,
+            "is_master": False,
+            "message": "Personel doğrulaması (Kısıtlı yetki, Çiftlik/Yönetici yetkisi yoktur)."
+        })
+    return jsonify({"ok": False, "is_master": False, "message": "Hatalı şifre!"}), 401
 
 
 @app.route("/api/farm/customers", methods=["GET"])
@@ -2307,6 +2425,33 @@ def api_farm_egg_sales():
         unit_type = data.get("unit_type", "koli")
         piece_count = data.get("piece_count")
         tot_amount = data.get("total_amount")
+        idempotency_key = (data.get("idempotency_key") or "").strip()
+
+        raw_fp = f"farm_egg|{uid}|{cust.lower()}|{boxes}|{unit_type}|{piece_count}|{price}|{tot_amount}|{s_date}|{(note or '').strip()}"
+        payload_hash = hashlib.md5(raw_fp.encode("utf-8")).hexdigest()
+        dedup_keys = [f"fegg_hash:{payload_hash}"]
+        if idempotency_key:
+            dedup_keys.append(f"fegg_key:{uid}:{idempotency_key}")
+
+        with _sale_idempotency_lock:
+            now_ts = time.time()
+            expired = [k for k, v in _sale_idempotency_cache.items() if now_ts - v.get("timestamp", 0) > 8.0]
+            for k in expired:
+                _sale_idempotency_cache.pop(k, None)
+
+            for dk in dedup_keys:
+                if dk in _sale_idempotency_cache:
+                    entry = _sale_idempotency_cache[dk]
+                    if now_ts - entry.get("timestamp", 0) <= 8.0:
+                        if entry.get("in_progress"):
+                            return jsonify({"ok": True, "message": "İşlem kaydediliyor...", "deduplicated": True})
+                        if entry.get("response"):
+                            resp = dict(entry["response"])
+                            resp["deduplicated"] = True
+                            return jsonify(resp)
+
+            for dk in dedup_keys:
+                _sale_idempotency_cache[dk] = {"timestamp": now_ts, "in_progress": True, "response": None}
 
         ok, msg, sale_id = cloud_db.add_farm_egg_sale(
             customer_name=cust,
@@ -2320,8 +2465,19 @@ def api_farm_egg_sales():
             piece_count=piece_count,
             total_amount=tot_amount,
         )
+        with _sale_idempotency_lock:
+            if ok:
+                finish_ts = time.time()
+                resp_payload = {"ok": True, "message": msg, "sale_id": sale_id}
+                for dk in dedup_keys:
+                    _sale_idempotency_cache[dk] = {"timestamp": finish_ts, "in_progress": False, "response": resp_payload}
+            else:
+                for dk in dedup_keys:
+                    _sale_idempotency_cache.pop(dk, None)
+
         if not ok:
             return jsonify({"ok": False, "message": msg}), 400
+        notify_data_change(uid)
         return jsonify({"ok": True, "message": msg, "sale_id": sale_id})
 
     # GET
@@ -2362,6 +2518,8 @@ def api_farm_delete_egg_sale(sale_id: int):
         actor=actor,
         require_reason=True,
     )
+    if ok:
+        notify_data_change(uid)
     return jsonify({"ok": ok, "message": msg}), (200 if ok else 400)
 
 
@@ -2379,6 +2537,29 @@ def api_farm_feed_purchases():
         p_date = data.get("purchase_date")
         supplier = data.get("supplier")
         note = data.get("note")
+        idempotency_key = (data.get("idempotency_key") or "").strip()
+
+        raw_fp = f"farm_feed|{uid}|{bags}|{price}|{total}|{p_date}|{(supplier or '').strip()}|{(note or '').strip()}"
+        payload_hash = hashlib.md5(raw_fp.encode("utf-8")).hexdigest()
+        dedup_keys = [f"ffeed_hash:{payload_hash}"]
+        if idempotency_key:
+            dedup_keys.append(f"ffeed_key:{uid}:{idempotency_key}")
+
+        with _sale_idempotency_lock:
+            now_ts = time.time()
+            for dk in dedup_keys:
+                if dk in _sale_idempotency_cache:
+                    entry = _sale_idempotency_cache[dk]
+                    if now_ts - entry.get("timestamp", 0) <= 8.0:
+                        if entry.get("in_progress"):
+                            return jsonify({"ok": True, "message": "İşlem kaydediliyor...", "deduplicated": True})
+                        if entry.get("response"):
+                            resp = dict(entry["response"])
+                            resp["deduplicated"] = True
+                            return jsonify(resp)
+
+            for dk in dedup_keys:
+                _sale_idempotency_cache[dk] = {"timestamp": now_ts, "in_progress": True, "response": None}
 
         ok, msg, pid = cloud_db.add_farm_feed_purchase(
             bag_count=bags,
@@ -2389,8 +2570,19 @@ def api_farm_feed_purchases():
             note=note,
             user_id=uid,
         )
+        with _sale_idempotency_lock:
+            if ok:
+                finish_ts = time.time()
+                resp_payload = {"ok": True, "message": msg, "purchase_id": pid}
+                for dk in dedup_keys:
+                    _sale_idempotency_cache[dk] = {"timestamp": finish_ts, "in_progress": False, "response": resp_payload}
+            else:
+                for dk in dedup_keys:
+                    _sale_idempotency_cache.pop(dk, None)
+
         if not ok:
             return jsonify({"ok": False, "message": msg}), 400
+        notify_data_change(uid)
         return jsonify({"ok": True, "message": msg, "purchase_id": pid})
 
     # GET
@@ -2428,6 +2620,8 @@ def api_farm_delete_feed_purchase(purchase_id: int):
         actor=actor,
         require_reason=True,
     )
+    if ok:
+        notify_data_change(uid)
     return jsonify({"ok": ok, "message": msg}), (200 if ok else 400)
 
 
@@ -2458,19 +2652,121 @@ def api_farm_analytics():
 
 def _background_sync_loop():
     import time
-    logger.info("Firebase 7/24 Arka Plan Otomatik Senkronizasyon Servisi başlatıldı.")
+    import urllib.request
+    logger.info("Firebase 7/24 Arka Plan Otomatik Senkronizasyon ve Keep-Alive Servisi başlatıldı.")
     # Sunucu ilk açılışında tek seferlik initial hydration (verileri buluttan SQLite'a çekme)
     try:
         cloud_db.ensure_initial_hydration()
     except Exception as exc:
         logger.warning(f"Sunucu açılışı initial hydration uyarısı: {exc}")
 
+    last_self_ping = time.time() - 150
     while True:
         try:
-            time.sleep(60)
+            time.sleep(25)
             cloud_db.push_offline_data_to_firebase()
+
+            # Render ücretsiz sürümde sunucunun uykuya dalmasını önlemek için kendi dış URL'sine 3 dakikada bir ping at
+            now_ts = time.time()
+            target_url = os.environ.get("KEEP_ALIVE_URL") or os.environ.get("RENDER_EXTERNAL_URL") or _detected_external_url
+            if target_url and (now_ts - last_self_ping >= 180):
+                last_self_ping = now_ts
+                try:
+                    ping_url = f"{target_url.rstrip('/')}/ping"
+                    req = urllib.request.Request(
+                        ping_url,
+                        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) KeepAlive/1.0"},
+                    )
+                    with urllib.request.urlopen(req, timeout=10) as _:
+                        pass
+                except Exception as ping_err:
+                    logger.debug(f"Self keep-alive ping uyarısı: {ping_err}")
         except Exception as exc:
             logger.debug(f"Arka plan senkronizasyon uyarısı: {exc}")
+
+
+@app.route("/api/web-orders", methods=["GET"])
+def api_get_web_orders():
+    """Gallus Mama web sitesinden gelen siparişleri, puan durumlarını ve bülten maillerini getirir."""
+    try:
+        data = cloud_db.sync_and_get_web_orders_and_subscribers()
+        return jsonify({
+            "success": True,
+            "orders": data.get("orders", []),
+            "subscribers": data.get("subscribers", []),
+            "subscriberDetails": data.get("subscriberDetails", []),
+            "members": data.get("members", [])
+        })
+    except Exception as exc:
+        logger.error(f"Web siparişleri alınırken hata: {exc}")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/web-orders/approve", methods=["POST"])
+def api_approve_web_order():
+    """Web siparişini onaylar ve müşterinin (%1 * 100) puanını hesabında aktif hale getirir."""
+    try:
+        body = request.get_json(silent=True) or {}
+        order_id = str(body.get("orderId") or body.get("id") or "").strip()
+        ok, msg = cloud_db.approve_web_order_points(order_id)
+        if ok:
+            return jsonify({"success": True, "message": msg})
+        return jsonify({"success": False, "error": msg}), 400
+    except Exception as exc:
+        logger.error(f"Web siparişi onaylama hatası: {exc}")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/newsletter-subscribers", methods=["GET"])
+def api_get_newsletter_subscribers():
+    """Bültene abone olan ve üye olan tüm e-postaları toplu kopyalama için döndürür."""
+    try:
+        data = cloud_db.sync_and_get_web_orders_and_subscribers()
+        return jsonify({
+            "success": True,
+            "subscribers": data.get("subscribers", []),
+            "subscriberDetails": data.get("subscriberDetails", []),
+            "count": len(data.get("subscribers", []))
+        })
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/push/vapid-public-key", methods=["GET"])
+def api_push_vapid_public_key():
+    keys = get_vapid_keys()
+    return jsonify({"ok": True, "public_key": keys["public_key"]})
+
+
+@app.route("/api/push/subscribe", methods=["POST"])
+def api_push_subscribe():
+    user_id = get_current_user_id() or 1
+    data = request.get_json(silent=True) or {}
+    subscription = data.get("subscription") or data
+    device_label = str(data.get("device_label") or request.headers.get("User-Agent") or "")
+    ok, msg = save_subscription(subscription, user_id=user_id, device_label=device_label)
+    return jsonify({"ok": ok, "message": msg}), (200 if ok else 400)
+
+
+@app.route("/api/push/unsubscribe", methods=["POST"])
+def api_push_unsubscribe():
+    data = request.get_json(silent=True) or {}
+    endpoint = str(data.get("endpoint") or "").strip()
+    removed = remove_subscription(endpoint)
+    return jsonify({"ok": True, "removed": removed})
+
+
+@app.route("/api/push/test", methods=["POST"])
+def api_push_test():
+    user_id = get_current_user_id()
+    result = send_push_to_all(
+        title="🔔 Bildirim Testi Başarılı!",
+        body="Artık POS'tan her satış yapıldığında telefonunuza anında bildirim gelecek.",
+        url="/",
+        tag="pos-test",
+        user_id=user_id,
+    )
+    return jsonify({"ok": result["sent"] > 0, **result})
 
 
 _bg_sync_started = False

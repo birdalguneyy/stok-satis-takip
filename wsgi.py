@@ -1,6 +1,12 @@
 import os
+import sys
 import time
 import logging
+
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w", encoding="utf-8")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
 # Türkiye Saat Dilimi Ayarı (UTC+3)
 os.environ["TZ"] = "Europe/Istanbul"

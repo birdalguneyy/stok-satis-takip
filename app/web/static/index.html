@@ -175,7 +175,39 @@
       opacity: 0.85;
     }
 
-    main { padding: 16px; flex: 1; max-width: 600px; margin: 0 auto; width: 100%; }
+    main { padding: 16px; flex: 1; max-width: 600px; margin: 0 auto; width: 100%; transition: max-width 0.25s ease; }
+    main:has(#tab-pos.active), main.pos-wide { max-width: 1080px; }
+
+    .pos-layout-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+    @media (min-width: 860px) {
+      .pos-layout-grid {
+        grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.95fr);
+      }
+      .pos-recent-sidebar {
+        position: sticky;
+        top: 76px;
+      }
+    }
+    .pos-recent-item {
+      background: var(--card-subtle);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      transition: border-color 0.2s ease, transform 0.15s ease;
+    }
+    .pos-recent-item:hover {
+      border-color: var(--accent);
+    }
+    .pos-recent-item.queued-sale {
+      border-color: #f59e0b;
+      background: rgba(245, 158, 11, 0.08);
+    }
 
     /* Nav Tabs Fixed at Bottom */
     nav.bottom-nav {
@@ -209,6 +241,7 @@
       min-width: 0;
       padding: 5px 2px;
       transition: all 0.2s ease;
+      position: relative;
     }
 
     .nav-item * { pointer-events: none; }
@@ -219,6 +252,38 @@
     }
     .nav-item.active span.icon {
       transform: translateY(-1px) scale(1.06);
+    }
+
+    /* ══════════════════════════════════════════════════════════════════ */
+    /* 🔒 ROL & YETKİLENDİRME (PERSONEL: SADECE POS | YÖNETİCİ: TÜMÜ)    */
+    /* ══════════════════════════════════════════════════════════════════ */
+    body:not(.role-admin) .admin-only,
+    body.role-personnel .admin-only,
+    body:not(.role-admin) #nav-btn-stock,
+    body:not(.role-admin) #nav-btn-reports,
+    body:not(.role-admin) #nav-btn-ai,
+    body:not(.role-admin) #nav-btn-web-orders,
+    body:not(.role-admin) #farm-badge,
+    body:not(.role-admin) #ai-header-badge,
+    body.role-personnel #nav-btn-stock,
+    body.role-personnel #nav-btn-reports,
+    body.role-personnel #nav-btn-ai,
+    body.role-personnel #nav-btn-web-orders,
+    body.role-personnel #farm-badge,
+    body.role-personnel #ai-header-badge {
+      display: none !important;
+    }
+
+    body.role-admin #nav-btn-stock,
+    body.role-admin #nav-btn-reports,
+    body.role-admin #nav-btn-ai,
+    body.role-admin #nav-btn-web-orders {
+      display: flex !important;
+    }
+
+    body.role-admin #farm-badge,
+    body.role-admin #ai-header-badge {
+      display: inline-flex !important;
     }
     .nav-item span.icon {
       font-size: 1.25rem;
@@ -602,7 +667,7 @@
       </div>
 
       <h2 style="font-size:1.35rem; font-weight:800; margin:0 0 6px; letter-spacing:-0.3px; color:#ffffff;">Sistem Koruması</h2>
-      <p style="font-size:0.85rem; color:#94a3b8; margin:0 0 20px; line-height:1.4;">Patron veya Çalışan 4 Haneli PIN Kodunu Giriniz</p>
+      <p style="font-size:0.85rem; color:#94a3b8; margin:0 0 20px; line-height:1.4;" id="gate-lock-subtitle">Lütfen Sistem Giriş PIN Kodunu Giriniz</p>
 
       <!-- PIN GÖSTERGE NOKTALARI -->
       <div id="gate-pin-dots" style="display:flex; justify-content:center; gap:16px; margin-bottom:24px;">
@@ -1491,13 +1556,13 @@
     </div>
   </div>
 
-  <!-- ═══ MODAL: ÇİFTLİK 2805 ŞİFRE DOĞRULAMA ═══ -->
+  <!-- ═══ MODAL: ÇİFTLİK & SAYFA ERİŞİMİ ŞİFRE DOĞRULAMA ═══ -->
   <div id="farm-pin-modal-overlay" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(15,23,42,0.92); backdrop-filter:blur(14px); z-index:9999; justify-content:center; align-items:center; padding:16px;">
     <div class="modal-card" style="max-width:360px; text-align:center;">
-      <div style="font-size:2.4rem; margin-bottom:8px;">🚜</div>
-      <h2 style="font-size:1.2rem; font-weight:800; margin-bottom:6px; color:var(--text);">Çiftlik Modülü Girişi</h2>
-      <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;">Lütfen 4 haneli erişim şifresini giriniz:</p>
-      <input type="password" id="farm-pin-input" placeholder="••••" maxlength="4" style="text-align:center; font-size:1.8rem; font-weight:800; letter-spacing:8px; padding:10px; width:160px; margin:0 auto 12px; display:block;">
+      <div style="font-size:2.4rem; margin-bottom:8px;" id="farm-pin-icon">🔐</div>
+      <h2 style="font-size:1.2rem; font-weight:800; margin-bottom:6px; color:var(--text);" id="farm-pin-title">Güvenlik Girişi</h2>
+      <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;" id="farm-pin-desc">Lütfen erişim şifresini giriniz:</p>
+      <input type="password" id="farm-pin-input" placeholder="••••" maxlength="16" style="text-align:center; font-size:1.6rem; font-weight:800; letter-spacing:4px; padding:10px; width:190px; margin:0 auto 12px; display:block;">
       <div id="farm-pin-error" style="color:var(--danger); font-size:0.8rem; min-height:20px; margin-bottom:12px;"></div>
       <div style="display:flex; gap:10px; justify-content:center;">
         <button class="btn btn-secondary" onclick="closeFarmPinModal()" style="width:100px;">İptal</button>
@@ -1531,7 +1596,7 @@
 
       <!-- TAB 1: YUMURTA SATIŞI -->
       <div id="farm-view-egg" style="display:block;">
-        <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:14px;">
+        <div id="farm-egg-form-box" style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:14px;">
           <div style="font-weight:700; font-size:0.95rem; margin-bottom:10px; color:var(--text);">🥚 Yeni Yumurta Satışı Kaydı</div>
           <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; margin-bottom:10px;">
             <div>
@@ -1568,7 +1633,7 @@
             </div>
             <div style="display:flex; align-items:center; gap:12px;">
               <span id="farm-egg-total-preview" style="font-weight:800; font-size:1.1rem; color:#10B981;">Toplam: 0,00 ₺</span>
-              <button class="btn" onclick="saveFarmEggSaleWeb()" style="background:#10B981; padding:8px 16px;">💾 Satışı Kaydet</button>
+              <button id="farm-egg-save-btn" class="btn" onclick="saveFarmEggSaleWeb()" style="background:#10B981; padding:8px 16px;">💾 Satışı Kaydet</button>
             </div>
           </div>
         </div>
@@ -1605,7 +1670,7 @@
 
       <!-- TAB 2: YEM ALIMI (1 Çuval = 50 kg -> Ton) -->
       <div id="farm-view-feed" style="display:none;">
-        <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:14px;">
+        <div id="farm-feed-form-box" style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:14px;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
             <div style="font-weight:700; font-size:0.95rem; color:var(--text);">🌾 Yem Alımı Girişi (1 Çuval = 50 kg)</div>
             <div id="farm-feed-ton-badge" style="font-weight:800; font-size:0.85rem; color:#0284C7; background:rgba(2,132,199,0.12); padding:4px 10px; border-radius:8px;">⚖️ 0 Çuval = 0 kg = 0.00 Ton</div>
@@ -1632,7 +1697,7 @@
             <div style="flex:1; min-width:200px;">
               <input type="text" id="farm-feed-supplier" placeholder="Tedarikçi / Fabrika / Not..." style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--border); background:var(--input-bg); color:var(--text);">
             </div>
-            <button class="btn" onclick="saveFarmFeedPurchaseWeb()" style="background:#0284C7; padding:8px 16px;">💾 Yem Alımını Kaydet</button>
+            <button id="farm-feed-save-btn" class="btn" onclick="saveFarmFeedPurchaseWeb()" style="background:#0284C7; padding:8px 16px;">💾 Yem Alımını Kaydet</button>
           </div>
         </div>
 
@@ -1804,17 +1869,19 @@
     </h1>
     <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
       <div id="role-status-badge" class="status-badge" style="font-weight:800; background:rgba(99,102,241,0.16); color:#818CF8; border-color:rgba(99,102,241,0.35);">👑 Patron</div>
-      <div id="discrepancy-alert-badge" class="status-badge" style="display:none; font-weight:800; background:rgba(239,68,68,0.18); color:#EF4444; border-color:rgba(239,68,68,0.45); cursor:pointer;" onclick="openPatronDiscrepancyPanel()" title="Gün sonu fark uyarılarını gör">🚨 Fark Uyarısı</div>
+      <div id="discrepancy-alert-badge" class="status-badge admin-only" style="display:none; font-weight:800; background:rgba(239,68,68,0.18); color:#EF4444; border-color:rgba(239,68,68,0.45); cursor:pointer;" onclick="openPatronDiscrepancyPanel()" title="Gün sonu fark uyarılarını gör">🚨 Fark Uyarısı</div>
       <div id="credit-header-badge" class="status-badge" style="font-weight:700; background:rgba(245,158,11,0.18); color:#D97706; border-color:rgba(245,158,11,0.35); cursor:pointer;" onclick="openCreditModal()">📒 Veresiye</div>
-      <div id="farm-badge" class="status-badge" style="font-weight:700; background:#059669; color:#fff; cursor:pointer;" onclick="openFarmModal()">🚜 Çiftlik</div>
+      <div id="nav-lock-badge" class="status-badge" style="display:none; font-weight:700; cursor:pointer;" onclick="toggleNavLock()"></div>
+      <div id="farm-badge" class="status-badge admin-only" style="font-weight:700; background:#059669; color:#fff; cursor:pointer;" onclick="openFarmModal()">🚜 Çiftlik</div>
       <div id="p2p-status-badge" class="status-badge" style="font-weight:700;" onclick="openP2PModal()">🔴 PC Bağlı Değil</div>
 
       <div id="sync-status-badge" class="status-badge" style="font-weight:700; cursor:pointer;" onclick="openFirebaseSettingsModal()" title="Firebase Bağlantı Durumu ve Ayarları">🔥 ⏳ Firebase...</div>
-      <div id="user-profile-badge" class="status-badge" onclick="openAuthModal()">🏢 <span id="user-profile-name">Giriş / Profil</span></div>
+      <div id="user-profile-badge" class="status-badge" onclick="handleUserProfileClick()">🏢 <span id="user-profile-name">Giriş / Profil</span></div>
 
       <div id="pwa-install-badge" class="status-badge" style="display:none;" onclick="installPWA()">📲 Yükle</div>
+      <div id="push-notif-badge" class="status-badge" style="font-weight:700; cursor:pointer;" onclick="handlePushNotifBadgeClick()" title="POS Satış Bildirimleri">🔔 Bildirim</div>
       <div class="status-badge" onclick="cycleTheme()" id="theme-toggle-btn" title="Tema Değiştir">☀️ Açık</div>
-      <div class="status-badge" id="ai-key-header-btn" onclick="openAIKeyModal()">🔑 AI</div>
+      <div class="status-badge admin-only" id="ai-header-badge" onclick="openAIKeyModal()">🔑 AI</div>
       <div class="status-badge" onclick="lockAppNow()" id="gate-lock-btn" title="Uygulamayı Kilitle" style="cursor:pointer; background:rgba(239,68,68,0.12); color:#ef4444; border-color:rgba(239,68,68,0.25); font-weight:700;">🔒 Kilitle</div>
     </div>
   </header>
@@ -1822,7 +1889,7 @@
   <div id="toast" onclick="hideToast()" title="Kapatmak için dokunun">✅ Bildirim</div>
 
 
-  <main>
+  <main class="pos-wide" id="main-container">
     <!-- TAB 1: MOBILE POS SALES SCANNER (DEFAULT STARTUP TAB) -->
     <div id="tab-pos" class="tab-content active">
       <!-- CANLI KASA ÖZETİ / GÜN AÇILIŞI ÇUBUĞU -->
@@ -1831,8 +1898,12 @@
         <div id="pos-cash-status-actions" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
       </div>
 
+      <div class="pos-layout-grid">
       <div class="card">
-        <h2>📱 Mobil Satış (POS)</h2>
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+          <h2 style="margin:0;">📱 Mobil Satış (POS)</h2>
+          <span id="pos-conn-status-pill" style="font-size:0.75rem; font-weight:700; padding:4px 10px; border-radius:999px; background:rgba(16,185,129,0.14); color:#10b981; border:1px solid rgba(16,185,129,0.3); cursor:pointer;" onclick="pingServerKeepAlive(true)" title="Sunucu ve Bulut Bağlantısını Kontrol Et">🟢 Sunucu Aktif</span>
+        </div>
 
         <!-- HTML5 Live Camera Video Preview -->
         <div id="pos-video-box" class="video-scanner-box">
@@ -1852,7 +1923,7 @@
         </div>
 
         <!-- ONLINE SALES QUICK ENTRY BUTTON -->
-        <button type="button" class="btn" onclick="openOnlineSaleModal()" style="margin-bottom:14px; background:linear-gradient(135deg, #0284C7, #0369A1); color:#fff; display:flex; align-items:center; justify-content:center; gap:8px; font-weight:700; box-shadow:0 4px 14px rgba(2,132,199,0.35);">
+        <button type="button" class="btn" onclick="openOnlineSaleModal()" style="width:100%; margin-bottom:14px; background:linear-gradient(135deg, #0284C7, #0369A1); color:#fff; display:flex; align-items:center; justify-content:center; gap:8px; font-weight:700; box-shadow:0 4px 14px rgba(2,132,199,0.35);">
           🌐 İnternet Satışı Gir (Adet & Platform)
         </button>
 
@@ -1959,6 +2030,40 @@
         </div>
       </div>
 
+      <!-- SON YAPILAN 5 İŞLEM PANELİ (POS KENAR PANELİ) -->
+      <div class="card pos-recent-sidebar" id="pos-recent-sales-card">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:12px;">
+          <div>
+            <h3 style="margin:0; font-size:1.02rem; font-weight:800; color:var(--text); display:flex; align-items:center; gap:6px;">
+              <span>🕒</span>
+              <span>Son Yapılan 5 İşlem</span>
+            </h3>
+            <div style="font-size:0.73rem; color:var(--text-muted); margin-top:2px;">Anlık satış takibi & çevrimdışı koruma</div>
+          </div>
+          <button type="button" class="btn btn-secondary" style="width:auto; padding:6px 10px; font-size:0.78rem; border-radius:8px;" onclick="loadRecentPOSSales()" title="Son 5 işlemi yenile">
+            🔄 Yenile
+          </button>
+        </div>
+
+        <!-- Çevrimdışı Bekleyen Satış Kuyruğu Uyarısı -->
+        <div id="pos-offline-queue-banner" style="display:none; background:rgba(245,158,11,0.14); border:1.5px solid #f59e0b; border-radius:10px; padding:10px 12px; margin-bottom:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+            <div>
+              <div style="font-size:0.82rem; font-weight:800; color:#f59e0b;">⏳ <span id="pos-offline-queue-count">0</span> Satış Kuyrukta Bekliyor</div>
+              <div style="font-size:0.72rem; color:var(--text-muted);">Sunucu uyanır uyanmaz otomatik kaydedilecek.</div>
+            </div>
+            <button type="button" class="btn" style="width:auto; padding:6px 12px; font-size:0.76rem; font-weight:800; background:#f59e0b; color:#000; border-radius:8px;" onclick="flushPendingSalesQueue(true)">
+              ⚡ Şimdi Gönder
+            </button>
+          </div>
+        </div>
+
+        <div id="pos-recent-sales-list">
+          <div style="text-align:center; color:var(--text-muted); font-size:0.82rem; padding:18px 8px;">Son işlemler yükleniyor...</div>
+        </div>
+      </div>
+      </div>
+
       <!-- ÇALIŞAN İÇİN BUGÜNÜN TEMEL SATIŞ LİSTESİ (SALT OKUNUR) -->
       <div id="staff-today-sales-card" class="card" style="display:none; margin-top:14px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
@@ -2017,21 +2122,21 @@
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
             <div style="font-weight:700; font-size:0.82rem; color:var(--text); display:flex; align-items:center; gap:6px;">
               <span>📅 Hızlı Tarih Seçici:</span>
-              <span id="active-date-range-badge" class="active-date-badge">🌐 Tüm Zamanlar</span>
+              <span id="active-date-range-badge" class="active-date-badge">⚡ Bugün</span>
             </div>
             <button class="btn btn-secondary" style="width:auto; padding:3px 8px; font-size:0.72rem;" onclick="toggleCustomDateDrawer()">✏️ Özel Aralık</button>
           </div>
 
           <!-- Quick Date Pills Row -->
           <div class="date-pills-row">
-            <button class="date-pill" onclick="setDatePreset('today', this)">⚡ Bugün</button>
+            <button class="date-pill active" onclick="setDatePreset('today', this)">⚡ Bugün</button>
             <button class="date-pill" onclick="setDatePreset('yesterday', this)">⏮️ Dün</button>
             <button class="date-pill" onclick="setDatePreset('this_week', this)">📅 Bu Hafta</button>
             <button class="date-pill" onclick="setDatePreset('last_week', this)">⏪ Geçen Hafta</button>
             <button class="date-pill" onclick="setDatePreset('this_month', this)">🗓️ Bu Ay</button>
             <button class="date-pill" onclick="setDatePreset('last_month', this)">⏮️ Geçen Ay</button>
             <button class="date-pill" onclick="setDatePreset('last_30_days', this)">📊 Son 30 Gün</button>
-            <button class="date-pill active" onclick="setDatePreset('all', this)">🌐 Tümü</button>
+            <button class="date-pill" onclick="setDatePreset('all', this)">🌐 Tümü</button>
           </div>
 
           <!-- Collapsible Custom Date Drawer -->
@@ -2525,24 +2630,83 @@
       </div>
     </div>
 
+    <!-- TAB 5: WEB SİPARİŞLERİ & BÜLTEN MAİLLERİ SEKMESİ -->
+    <div id="tab-web-orders" class="tab-content">
+      <div class="card" style="margin-bottom: 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+          <div>
+            <h2 style="margin: 0; display: flex; align-items: center; gap: 8px;">
+              <span>🌐</span> Web Siparişleri, Puan Onayı & Bülten Mailleri
+            </h2>
+            <p style="font-size: 0.85rem; color: var(--text-muted); margin: 4px 0 0 0;">
+              Gallus Mama web sitesinden gelen siparişleri görüntüleyin, müşterilerin kazandığı sadakat puanlarını onaylayın ve abone maillerini toplu kopyalayın.
+            </p>
+          </div>
+          <button class="btn" onclick="loadWebOrdersAndSubscribers(true)" style="width: auto; padding: 10px 18px; display: inline-flex; align-items: center; gap: 6px; font-weight: 700;">
+            🔄 Yenile
+          </button>
+        </div>
+      </div>
+
+      <!-- SECTION 1: NEWSLETTER & SUBSCRIBER EMAILS -->
+      <div class="card" style="margin-bottom: 16px; border: 2px solid rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.05);">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px;">
+          <div>
+            <h3 style="margin: 0; font-size: 1.05rem; font-weight: 800; color: #b45309; display: flex; align-items: center; gap: 6px;">
+              <span>📧</span> Bültene Abone Olan & Üye E-Postaları (<span id="web-emails-count">0</span> Adet)
+            </h3>
+            <p style="margin: 3px 0 0 0; font-size: 0.8rem; color: var(--text-muted);">
+              Web sitesinden bültene abone olan, hızlı üye olan ve sipariş bırakan tüm müşterilerin e-posta havuzu.
+            </p>
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button class="btn" onclick="copyAllWebSubscriberEmails(', ')" style="width: auto; padding: 10px 16px; background: #d97706; color: #fff; font-weight: 800; border-radius: 12px;">
+              📋 Tüm Mailleri Toplu Kopyala (Virgüllü)
+            </button>
+            <button class="btn btn-secondary" onclick="copyAllWebSubscriberEmails('\n')" style="width: auto; padding: 10px 14px; font-weight: 700; border-radius: 12px;">
+              📄 Alt Alta Kopyala
+            </button>
+          </div>
+        </div>
+        <textarea id="web-emails-bulk-textarea" readonly rows="3" style="width: 100%; border-radius: 10px; border: 1px solid var(--border); padding: 10px; font-family: monospace; font-size: 0.82rem; background: var(--bg); color: var(--text);" placeholder="Henüz kayıtlı e-posta bulunmuyor..."></textarea>
+      </div>
+
+      <!-- SECTION 2: INCOMING WEB ORDERS -->
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+          <h3 style="margin: 0; font-size: 1.1rem; font-weight: 800; display: flex; align-items: center; gap: 8px;">
+            <span>📦</span> Gelen Web Siparişleri & Sadakat Puanı Onayı (<span id="web-orders-count">0</span> Sipariş)
+          </h3>
+        </div>
+        <div id="web-orders-list-container" style="display: flex; flex-direction: column; gap: 12px;">
+          <div style="text-align: center; padding: 24px; color: var(--text-muted);">Yükleniyor...</div>
+        </div>
+      </div>
+    </div>
+
   </main>
 
   <nav class="bottom-nav">
-    <button id="nav-pos" class="nav-item active" onclick="switchTab('pos', this)">
+    <button class="nav-item active" id="nav-btn-pos" onclick="switchTab('pos', this)">
       <span class="icon">📱</span>
       <span>Hızlı Satış</span>
     </button>
-    <button id="nav-stock" class="nav-item" onclick="switchTab('stock', this)">
+    <button class="nav-item admin-only" id="nav-btn-stock" onclick="switchTab('stock', this)">
       <span class="icon">📦</span>
       <span>Stok Kataloğu</span>
     </button>
-    <button id="nav-reports" class="nav-item" onclick="switchTab('reports', this)">
+    <button class="nav-item admin-only" id="nav-btn-reports" onclick="switchTab('reports', this)">
       <span class="icon">📊</span>
       <span>Satış Raporları</span>
     </button>
-    <button id="nav-ai" class="nav-item" onclick="switchTab('ai', this)">
+    <button class="nav-item admin-only" id="nav-btn-ai" onclick="switchTab('ai', this)">
       <span class="icon">🤖</span>
       <span>AI Ambalaj Kayıt</span>
+    </button>
+    <button class="nav-item admin-only" id="nav-btn-web-orders" onclick="switchTab('web-orders', this)">
+      <span class="icon">🌐</span>
+      <span>Web Siparişleri</span>
+      <span id="nav-web-orders-pending-pill" style="display:none; background:#ef4444; color:#fff; font-size:0.65rem; padding:1px 5px; border-radius:999px; position:absolute; top:2px; right:6px; font-weight:800;">0</span>
     </button>
   </nav>
 
@@ -2638,12 +2802,109 @@
     document.addEventListener('click', initAudio, { once: true });
     document.addEventListener('touchstart', initAudio, { once: true });
 
-    function switchTab(tabId, btnEl) {
-      if (window.currentUserRole === 'calisan' && (tabId === 'reports' || tabId === 'ai')) {
-        showToast("🚫 Bu ekran sadece Patron yetkisine açıktır.");
-        tabId = 'pos';
-        btnEl = document.getElementById('nav-pos');
+    function setWebRole(role) {
+      const isMaster = (role === 'admin');
+      sessionStorage.setItem('user_role', isMaster ? 'admin' : 'personnel');
+
+      const lockBadge = document.getElementById('nav-lock-badge');
+      const profileName = document.getElementById('user-profile-name');
+
+      if (isMaster) {
+        document.body.classList.remove('role-personnel');
+        document.body.classList.add('role-admin');
+        sessionStorage.setItem('farm_unlocked', 'true');
+
+        if (lockBadge) {
+          lockBadge.style.display = 'inline-flex';
+          lockBadge.style.background = '#d97706';
+          lockBadge.innerText = '🔒 Personel Moduna Geç';
+          lockBadge.title = 'Personel moduna geç ve yönetici kısımlarını gizle';
+        }
+
+        if (profileName) {
+          const cached = localStorage.getItem('stok_user_info');
+          try {
+            const u = cached ? JSON.parse(cached) : null;
+            profileName.innerText = '🏢 ' + (u?.company_name || u?.full_name || 'Yönetici');
+          } catch (e) {
+            profileName.innerText = '🏢 Yönetici';
+          }
+        }
+      } else {
+        document.body.classList.remove('role-admin');
+        document.body.classList.add('role-personnel');
+        sessionStorage.removeItem('farm_unlocked');
+
+        if (lockBadge) {
+          lockBadge.style.display = 'inline-flex';
+          lockBadge.style.background = '#2563EB';
+          lockBadge.innerText = '👑 Yönetici Girişi Yap';
+          lockBadge.title = 'Yönetici moduna geçmek için şifre giriniz';
+        }
+
+        if (profileName) {
+          profileName.innerText = '👤 Personel';
+        }
+
+        executeSwitchTab('pos');
       }
+    }
+
+    function toggleNavLock() {
+      const curRole = sessionStorage.getItem('user_role') || 'personnel';
+      if (curRole === 'admin') {
+        setWebRole('personnel');
+        showToast("🔒 Personel moduna geçildi. Yalnızca Satış (POS) ekranı aktiftir.");
+      } else {
+        requestAuthAction({
+          type: 'role_upgrade',
+          title: '👑 Yönetici Girişi',
+          desc: 'Tüm bölümleri açmak için Yönetici şifresini giriniz:'
+        });
+      }
+    }
+
+    function handleUserProfileClick() {
+      const curRole = sessionStorage.getItem('user_role') || 'personnel';
+      if (curRole !== 'admin') {
+        requestAuthAction({
+          type: 'auth_modal',
+          title: '🏢 Mağaza & Hesap Yönetimi',
+          desc: 'İşletme ayarlarına erişmek için Yönetici şifresini giriniz:'
+        });
+        return;
+      }
+      openAuthModal();
+    }
+
+    function switchTab(tabId, btnEl) {
+      if (tabId === 'pos') {
+        executeSwitchTab(tabId, btnEl);
+        return;
+      }
+
+      if (window.currentUserRole === 'calisan' && (tabId === 'reports' || tabId === 'ai' || tabId === 'web-orders')) {
+        showToast("🚫 Bu ekran sadece Patron yetkisine açıktır.");
+        executeSwitchTab('pos', document.getElementById('nav-btn-pos'));
+        return;
+      }
+
+      const curRole = sessionStorage.getItem('user_role') || 'personnel';
+      if (curRole !== 'admin' && curRole !== 'patron') {
+        requestAuthAction({
+          type: 'tab',
+          tabId: tabId,
+          btnEl: btnEl,
+          title: '👑 Yönetici Girişi',
+          desc: 'Bu sekmeye erişmek için Yönetici şifresini giriniz:'
+        });
+        return;
+      }
+
+      executeSwitchTab(tabId, btnEl);
+    }
+
+    function executeSwitchTab(tabId, btnEl) {
       try {
         stopMobileBarcodeScanner();
       } catch(e) {}
@@ -2653,6 +2914,11 @@
       
       const tabEl = document.getElementById('tab-' + tabId);
       if (tabEl) tabEl.classList.add('active');
+      const mainContainer = document.getElementById('main-container');
+      if (mainContainer) {
+        if (tabId === 'pos') mainContainer.classList.add('pos-wide');
+        else mainContainer.classList.remove('pos-wide');
+      }
 
       if (btnEl) {
         btnEl.classList.add('active');
@@ -2666,11 +2932,16 @@
       try {
         if (tabId === 'pos') {
           loadPOSProductPicker();
+          loadRecentPOSSales();
           if (window.currentUserRole === 'calisan') loadStaffTodaySales();
         }
         if (tabId === 'stock') loadProducts();
         if (tabId === 'reports') {
+          setDatePreset('today', null, false);
           switchReportsSubTab(currentReportsSubTab || 'sales-list');
+        }
+        if (tabId === 'web-orders') {
+          loadWebOrdersAndSubscribers(false);
         }
       } catch(err) {
         console.error('Error during tab switch:', err);
@@ -4166,6 +4437,464 @@
 
     let isCompletingPOSSale = false;
 
+    function setContainerInteractive(containerEl, interactive) {
+      if (!containerEl) return;
+      if (!interactive) {
+        containerEl.style.pointerEvents = 'none';
+        containerEl.style.userSelect = 'none';
+        containerEl.setAttribute('aria-busy', 'true');
+        containerEl.querySelectorAll('input, select, textarea, button').forEach(el => {
+          if (!el.hasAttribute('data-prev-disabled')) {
+            el.setAttribute('data-prev-disabled', el.disabled ? '1' : '0');
+          }
+          el.disabled = true;
+        });
+      } else {
+        containerEl.style.pointerEvents = '';
+        containerEl.style.userSelect = '';
+        containerEl.removeAttribute('aria-busy');
+        containerEl.querySelectorAll('input, select, textarea, button').forEach(el => {
+          const prev = el.getAttribute('data-prev-disabled');
+          if (prev !== null) {
+            el.disabled = (prev === '1');
+            el.removeAttribute('data-prev-disabled');
+          } else {
+            el.disabled = false;
+          }
+        });
+      }
+    }
+
+    function lockScreenDuringTransaction(msg = '⏳ İşlem kaydediliyor, lütfen bekleyiniz...') {
+      let overlay = document.getElementById('global-tx-lock-overlay');
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'global-tx-lock-overlay';
+        overlay.style.cssText = 'position:fixed; inset:0; z-index:999999; background:rgba(15,23,42,0.45); backdrop-filter:blur(2px); display:flex; align-items:center; justify-content:center; pointer-events:all; cursor:wait; user-select:none;';
+        overlay.innerHTML = `
+          <div style="background:var(--card, #1e293b); color:var(--text, #f8fafc); border:1px solid var(--border, #334155); border-radius:14px; padding:18px 26px; box-shadow:0 20px 40px rgba(0,0,0,0.4); display:flex; align-items:center; gap:12px; font-weight:700; font-size:0.95rem;">
+            <svg style="animation: btnSpin 0.7s linear infinite; width:22px; height:22px; color:#10B981; flex-shrink:0;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8">
+              <circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle>
+              <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"></path>
+            </svg>
+            <span id="global-tx-lock-msg"></span>
+          </div>
+        `;
+        ['click', 'dblclick', 'mousedown', 'mouseup', 'touchstart', 'touchend', 'keydown'].forEach(evtName => {
+          overlay.addEventListener(evtName, (ev) => {
+            ev.stopPropagation();
+            ev.preventDefault();
+          }, true);
+        });
+        document.body.appendChild(overlay);
+      }
+      const msgEl = document.getElementById('global-tx-lock-msg');
+      if (msgEl) msgEl.textContent = msg;
+      overlay.style.display = 'flex';
+      document.body.style.pointerEvents = 'none';
+      overlay.style.pointerEvents = 'all';
+    }
+
+    function unlockScreenDuringTransaction() {
+      const overlay = document.getElementById('global-tx-lock-overlay');
+      if (overlay) {
+        overlay.style.display = 'none';
+      }
+      document.body.style.pointerEvents = '';
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // RENDER UYKU ÖNLEYİCİ (KEEP-ALIVE), ÇEVRİMDIŞI SATIŞ KUYRUĞU VE SON 5 İŞLEM
+    // ════════════════════════════════════════════════════════════════════
+    const PENDING_SALES_STORAGE_KEY = 'stok_pending_sales_queue';
+    const RECENT_SALES_CACHE_KEY = 'stok_recent_sales_cache';
+    let _isFlushingPendingSales = false;
+    let _recentPOSSalesCache = [];
+
+    function getLocalSoldAtString() {
+      const d = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+
+    function getPendingSalesQueue() {
+      try {
+        const raw = localStorage.getItem(PENDING_SALES_STORAGE_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function savePendingSalesQueue(queue) {
+      try {
+        localStorage.setItem(PENDING_SALES_STORAGE_KEY, JSON.stringify(queue || []));
+      } catch (e) {}
+      updateOfflineQueueBanner();
+    }
+
+    function updateOfflineQueueBanner() {
+      const banner = document.getElementById('pos-offline-queue-banner');
+      const countEl = document.getElementById('pos-offline-queue-count');
+      const q = getPendingSalesQueue();
+      if (countEl) countEl.textContent = String(q.length);
+      if (banner) banner.style.display = q.length > 0 ? 'block' : 'none';
+    }
+
+    function updatePOSConnectionPill(state, text) {
+      const pill = document.getElementById('pos-conn-status-pill');
+      if (!pill) return;
+      if (state === 'online') {
+        pill.style.background = 'rgba(16,185,129,0.14)';
+        pill.style.color = '#10b981';
+        pill.style.borderColor = 'rgba(16,185,129,0.3)';
+        pill.textContent = text || '🟢 Sunucu Aktif';
+      } else if (state === 'waking') {
+        pill.style.background = 'rgba(245,158,11,0.16)';
+        pill.style.color = '#f59e0b';
+        pill.style.borderColor = 'rgba(245,158,11,0.35)';
+        pill.textContent = text || '🟡 Sunucu Uyandırılıyor...';
+      } else {
+        pill.style.background = 'rgba(239,68,68,0.15)';
+        pill.style.color = '#ef4444';
+        pill.style.borderColor = 'rgba(239,68,68,0.35)';
+        pill.textContent = text || '🔴 Çevrimdışı Kuyruk Modu';
+      }
+    }
+
+    function deductLocalCachedStock(items) {
+      if (!Array.isArray(items)) return;
+      const pools = [allProductsCache, _allProductsCache].filter(Boolean);
+      items.forEach(it => {
+        const pid = Number(it.product_id);
+        const qty = parseFloat(it.quantity) || 0;
+        if (!pid || qty <= 0) return;
+        pools.forEach(pool => {
+          const prod = pool.find(p => Number(p.id) === pid);
+          if (prod && prod.stock_quantity !== undefined) {
+            prod.stock_quantity = Math.max(0, Number(prod.stock_quantity) - qty);
+          }
+        });
+      });
+      try {
+        if (_allProductsCache && _allProductsCache.length > 0) {
+          localStorage.setItem('stok_products_cache', JSON.stringify(_allProductsCache));
+        }
+      } catch (e) {}
+    }
+
+    function enqueueOfflineSale(salePayload) {
+      const queue = getPendingSalesQueue();
+      const key = salePayload.idempotency_key || ('off_' + Date.now());
+      if (!queue.some(item => item.idempotency_key === key)) {
+        queue.push({
+          ...salePayload,
+          idempotency_key: key,
+          sold_at: salePayload.sold_at || getLocalSoldAtString(),
+          queued_at: Date.now()
+        });
+        savePendingSalesQueue(queue);
+      }
+      deductLocalCachedStock(salePayload.items || []);
+      renderRecentPOSSalesList();
+    }
+
+    function removeOfflineQueuedSale(idempotencyKey) {
+      const queue = getPendingSalesQueue().filter(item => item.idempotency_key !== idempotencyKey);
+      savePendingSalesQueue(queue);
+      renderRecentPOSSalesList();
+    }
+
+    async function pingServerKeepAlive(manual = false) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 8000);
+        const res = await fetch('/ping?t=' + Date.now(), { cache: 'no-store', signal: controller.signal });
+        clearTimeout(timer);
+        if (res.ok) {
+          const data = await res.json();
+          updatePOSConnectionPill('online', data.has_firebase ? '🟢 Sunucu & Bulut Aktif' : '🟢 Sunucu Aktif (Yerel)');
+          if (!data.has_firebase) {
+            const backupCred = localStorage.getItem('stok_firebase_cred_backup');
+            if (backupCred && typeof autoRestoreFirebaseCredentials === 'function') {
+              await autoRestoreFirebaseCredentials(backupCred);
+            }
+          }
+          if (getPendingSalesQueue().length > 0) {
+            await flushPendingSalesQueue(manual);
+          } else if (manual) {
+            showToast('🟢 Sunucu bağlantısı aktif ve güncel.');
+            loadRecentPOSSales();
+          }
+          return true;
+        }
+      } catch (e) {
+        updatePOSConnectionPill('offline', '🔴 Çevrimdışı Kuyruk Modu');
+        if (manual) {
+          showToast('🟡 Sunucu uykuda veya internet bağlantısı yok. Satışlarınız güvenli kuyrukta saklanır.');
+        }
+      }
+      return false;
+    }
+
+    async function postSaleWithWakeupAndOfflineFallback(salePayload) {
+      const enrichedPayload = {
+        ...salePayload,
+        sold_at: salePayload.sold_at || getLocalSoldAtString(),
+        idempotency_key: salePayload.idempotency_key || ('sale_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9)),
+      };
+      const fbBackup = localStorage.getItem('stok_firebase_cred_backup');
+      if (fbBackup) {
+        enrichedPayload.firebase_credentials_backup = fbBackup;
+      }
+
+      const attemptPost = async (timeoutMs) => {
+        const controller = new AbortController();
+        const tId = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          const res = await fetchWithAuth('/api/sales', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(enrichedPayload),
+            signal: controller.signal
+          });
+          clearTimeout(tId);
+          return res;
+        } catch (err) {
+          clearTimeout(tId);
+          throw err;
+        }
+      };
+
+      try {
+        let res = await attemptPost(14000);
+        if (res.status === 502 || res.status === 503 || res.status === 504) {
+          throw new Error('Render waking up HTTP ' + res.status);
+        }
+        const json = await res.json();
+        updatePOSConnectionPill('online', json.has_firebase ? '🟢 Sunucu & Bulut Aktif' : '🟢 Sunucu Aktif');
+        return json;
+      } catch (firstErr) {
+        // Render uykudan uyanıyor olabilir: Hızlı uyandırma ping'i atıp 1 kez daha dene
+        updatePOSConnectionPill('waking', '🟡 Sunucu Uyandırılıyor...');
+        lockScreenDuringTransaction('🟡 Sunucu uykudan uyandırılıyor, satışınız güvende...');
+        try {
+          await fetch('/ping?wakeup=' + Date.now(), { cache: 'no-store' });
+          const retryRes = await attemptPost(18000);
+          if (retryRes.ok) {
+            const retryJson = await retryRes.json();
+            updatePOSConnectionPill('online', retryJson.has_firebase ? '🟢 Sunucu & Bulut Aktif' : '🟢 Sunucu Aktif');
+            return retryJson;
+          }
+        } catch (retryErr) {
+          // Hala ulaşılamıyorsa çevrimdışı güvenli kuyruğa kaydet (Satış asla kaybolmaz!)
+        }
+        updatePOSConnectionPill('offline', '🔴 Çevrimdışı Kuyruk Modu');
+        enqueueOfflineSale(enrichedPayload);
+        return {
+          ok: true,
+          queued_offline: true,
+          message: '🛡️ Sunucu çevrimdışı/uykuda olduğu için satış güvenli kuyruğa kaydedildi! Bağlantı gelir gelmez otomatik işlenecek.'
+        };
+      }
+    }
+
+    async function flushPendingSalesQueue(manual = false) {
+      if (_isFlushingPendingSales) return;
+      const queue = getPendingSalesQueue();
+      if (!queue.length) {
+        updateOfflineQueueBanner();
+        return;
+      }
+
+      _isFlushingPendingSales = true;
+      let flushedCount = 0;
+      const fbBackup = localStorage.getItem('stok_firebase_cred_backup');
+
+      try {
+        // Önce sunucuda Firebase yedeği eksikse geri yükle
+        if (fbBackup) {
+          try {
+            const pingRes = await fetch('/ping?t=' + Date.now(), { cache: 'no-store' });
+            if (pingRes.ok) {
+              const pingJson = await pingRes.json();
+              if (!pingJson.has_firebase && typeof autoRestoreFirebaseCredentials === 'function') {
+                await autoRestoreFirebaseCredentials(fbBackup);
+              }
+            }
+          } catch (e) {}
+        }
+
+        const remaining = [];
+        for (const item of queue) {
+          try {
+            const payload = { ...item };
+            if (fbBackup && !payload.firebase_credentials_backup) {
+              payload.firebase_credentials_backup = fbBackup;
+            }
+            const res = await fetchWithAuth('/api/sales', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+            if (res.ok) {
+              const json = await res.json();
+              if (json.ok) {
+                flushedCount++;
+                if (Array.isArray(json.recent_sales)) {
+                  _recentPOSSalesCache = json.recent_sales;
+                }
+                continue;
+              }
+            }
+            remaining.push(item);
+          } catch (e) {
+            remaining.push(item);
+          }
+        }
+
+        savePendingSalesQueue(remaining);
+
+        if (flushedCount > 0) {
+          updatePOSConnectionPill('online', '🟢 Sunucu & Bulut Aktif');
+          showToast(`☁️ Kuyruktaki ${flushedCount} satış başarıyla sisteme ve buluta aktarıldı!`);
+          loadProducts();
+          loadSalesHistory();
+          loadRecentPOSSales();
+        } else if (manual && remaining.length > 0) {
+          showToast('⏳ Sunucu henüz uyanmadı, uyanır uyanmaz otomatik gönderilecek.');
+        }
+      } finally {
+        _isFlushingPendingSales = false;
+      }
+    }
+
+    function renderRecentPOSSalesList() {
+      const listEl = document.getElementById('pos-recent-sales-list');
+      if (!listEl) return;
+
+      updateOfflineQueueBanner();
+      const pendingQueue = getPendingSalesQueue();
+
+      // Kuyruktaki satışları en üstte göster
+      const queuedEntries = pendingQueue.slice().reverse().map((qItem) => ({
+        id: null,
+        is_queued: true,
+        idempotency_key: qItem.idempotency_key,
+        sold_at: qItem.sold_at || getLocalSoldAtString(),
+        channel: qItem.channel || 'magaza',
+        customer_name: qItem.customer_name || null,
+        total_amount: qItem.total_amount || 0,
+        note: qItem.note || 'Kuyrukta Bekleyen Satış',
+        items: qItem.items || [],
+        synced_to_cloud: 0
+      }));
+
+      const combined = [...queuedEntries, ...(_recentPOSSalesCache || [])].slice(0, 5);
+
+      if (combined.length === 0) {
+        listEl.innerHTML = `
+          <div style="text-align:center; padding:22px 10px; color:var(--text-muted); font-size:0.82rem; background:var(--card-subtle); border-radius:10px; border:1px dashed var(--border);">
+            Henüz satış işlemi bulunmuyor.
+          </div>
+        `;
+        return;
+      }
+
+      listEl.innerHTML = combined.map((sale) => {
+        const isQueued = !!sale.is_queued;
+        const isInternet = (sale.channel === 'internet');
+        const rawDt = String(sale.sold_at || '').replace('T', ' ');
+        const datePart = rawDt.length >= 10 ? rawDt.substring(0, 10) : '';
+        const timePart = rawDt.length >= 16 ? rawDt.substring(11, 19) : rawDt;
+
+        const items = Array.isArray(sale.items) ? sale.items : [];
+        const itemsSummary = items.length > 0
+          ? items.map(it => {
+              const isKg = (it.unit === 'kg');
+              const qStr = isKg ? `${Number(it.quantity).toFixed(2)}kg` : `${Number(it.quantity)}x`;
+              return `${qStr} ${it.product_name || 'Ürün'}`;
+            }).join(', ')
+          : (sale.note || `${sale.item_count || 1} ürün`);
+
+        const channelBadge = isInternet
+          ? `<span style="font-size:0.68rem; font-weight:700; padding:2px 6px; border-radius:6px; background:rgba(2,132,199,0.15); color:#38bdf8;">🌐 İnternet</span>`
+          : `<span style="font-size:0.68rem; font-weight:700; padding:2px 6px; border-radius:6px; background:rgba(16,185,129,0.15); color:#10b981;">🏬 Mağaza</span>`;
+
+        const syncBadge = isQueued
+          ? `<span style="font-size:0.68rem; font-weight:800; padding:2px 6px; border-radius:6px; background:rgba(245,158,11,0.2); color:#f59e0b;">⏳ Kuyrukta</span>`
+          : (Number(sale.synced_to_cloud) === 1
+              ? `<span style="font-size:0.68rem; font-weight:700; padding:2px 6px; border-radius:6px; background:rgba(16,185,129,0.14); color:#10b981;" title="Firebase Buluta Kaydedildi">☁️ Bulutta</span>`
+              : `<span style="font-size:0.68rem; font-weight:700; padding:2px 6px; border-radius:6px; background:rgba(59,130,246,0.15); color:#60a5fa;" title="Sunucuya Kaydedildi, Buluta Eşitleniyor">✅ Kaydedildi</span>`);
+
+        const safeSoldAt = rawDt.replace(/'/g, "\\'");
+        const actionBtn = isQueued
+          ? `<button type="button" class="btn btn-secondary" style="width:auto; padding:3px 7px; font-size:0.7rem; color:var(--danger); border-radius:6px;" onclick="removeOfflineQueuedSale('${sale.idempotency_key}')" title="Kuyruktan İptal Et">✖</button>`
+          : `<button type="button" class="btn btn-secondary" style="width:auto; padding:3px 7px; font-size:0.7rem; color:var(--danger); border-radius:6px;" onclick="promptDeleteSale('${sale.id}', '${safeSoldAt}', ${Number(sale.total_amount || 0)})" title="Bu Satışı Sil ve Stoğu Geri Yükle">🗑️</button>`;
+
+        return `
+          <div class="pos-recent-item ${isQueued ? 'queued-sale' : ''}">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; margin-bottom:5px; flex-wrap:wrap;">
+              <div style="display:flex; align-items:center; gap:5px; flex-wrap:wrap;">
+                <span style="font-weight:800; font-size:0.78rem; color:var(--text);">${isQueued ? '⏳ Bekleyen' : '#' + sale.id}</span>
+                ${channelBadge}
+                ${syncBadge}
+              </div>
+              <div style="font-weight:900; font-size:0.95rem; color:var(--accent);">${Number(sale.total_amount || 0).toFixed(2)} ₺</div>
+            </div>
+            <div style="font-size:0.8rem; font-weight:600; color:var(--text); margin-bottom:4px; line-height:1.35; word-break:break-word;">
+              ${itemsSummary}
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; font-size:0.72rem; color:var(--text-muted);">
+              <span>🕒 <b>${timePart || '-'}</b> <span style="opacity:0.8;">(${datePart})</span>${sale.customer_name ? ` • 👤 <b>${sale.customer_name}</b>` : ''}</span>
+              ${actionBtn}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function loadRecentPOSSales(providedSales = null) {
+      if (Array.isArray(providedSales)) {
+        _recentPOSSalesCache = providedSales.slice(0, 5);
+        try {
+          localStorage.setItem(RECENT_SALES_CACHE_KEY, JSON.stringify(_recentPOSSalesCache));
+        } catch (e) {}
+        renderRecentPOSSalesList();
+        return;
+      }
+
+      // Önce yerel önbellekten hızlıca göster
+      if (!_recentPOSSalesCache || _recentPOSSalesCache.length === 0) {
+        try {
+          const cached = localStorage.getItem(RECENT_SALES_CACHE_KEY);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed)) _recentPOSSalesCache = parsed;
+          }
+        } catch (e) {}
+        renderRecentPOSSalesList();
+      }
+
+      try {
+        const res = await fetchWithAuth('/api/sales/recent?limit=5');
+        if (res.ok) {
+          const json = await res.json();
+          if (json.ok && Array.isArray(json.sales)) {
+            _recentPOSSalesCache = json.sales.slice(0, 5);
+            try {
+              localStorage.setItem(RECENT_SALES_CACHE_KEY, JSON.stringify(_recentPOSSalesCache));
+            } catch (e) {}
+            updatePOSConnectionPill('online', json.has_firebase ? '🟢 Sunucu & Bulut Aktif' : '🟢 Sunucu Aktif');
+          }
+        }
+      } catch (e) {
+        // Çevrimdışıysa mevcut önbellek ve kuyruk gösterilmeye devam eder
+      }
+      renderRecentPOSSalesList();
+    }
+
     async function completePOSSale() {
       if (isCompletingPOSSale) {
         return;
@@ -4178,14 +4907,17 @@
       const btn = document.getElementById('pos-complete-sale-btn');
       const dropBtn = document.getElementById('pos-sale-dropdown-btn');
       const cartContainer = document.getElementById('pos-cart-list');
+      const posTab = document.getElementById('tab-pos');
       const custNameInput = document.getElementById('pos-customer-name');
       const customerName = custNameInput ? custNameInput.value.trim() : '';
 
       const calcTotal = Math.round(posCart.reduce((sum, item) => sum + item.subtotal, 0) * 100) / 100;
       const finalTotal = posCustomTotal !== null ? posCustomTotal : calcTotal;
 
-      // 1. Kullanıcının tekrar tekrar basmasını önlemek için anında kilitle
+      // 1. Satış tamamlanana kadar ekranda hiçbir yere tıklanamasın
       isCompletingPOSSale = true;
+      lockScreenDuringTransaction("⏳ Satış tamamlanıyor, lütfen bekleyiniz...");
+      setContainerInteractive(posTab, false);
       if (btn) {
         btn.disabled = true;
         btn.classList.add('btn-loading');
@@ -4210,14 +4942,17 @@
       if (Number(finalTotal) < 0) {
         showToast("❌ Satış tutarı negatif olamaz!");
         isCompletingPOSSale = false;
-        if (btn) { btn.disabled = false; btn.classList.remove('btn-loading'); }
+        setContainerInteractive(posTab, true);
+        unlockScreenDuringTransaction();
+        if (btn) { btn.disabled = false; btn.classList.remove('btn-loading'); btn.innerHTML = 'Satışı Tamamla'; }
         if (dropBtn) dropBtn.disabled = false;
-        if (cartContainer) { cartContainer.style.opacity = '1'; cartContainer.style.pointerEvents = 'auto'; }
         return;
       }
 
-      // Benzersiz işlem anahtarı oluştur (mükerrer istek koruması)
+      // Benzersiz işlem anahtarı ve gerçek satış zamanı oluştur
       const idempotencyKey = 'pos_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+      const soldAtNow = getLocalSoldAtString();
+      const cartSnapshot = posCart.map(it => ({ ...it }));
       const pmRadio = document.querySelector('input[name="pos-payment-method"]:checked');
       const paymentMethod = pmRadio ? pmRadio.value : 'nakit';
       const creditCustSel = document.getElementById('pos-credit-customer-select');
@@ -4236,41 +4971,38 @@
       }
 
       try {
-        const sendSaleReq = async (confirmHigh = false) => {
-          const r = await fetchWithAuth('/api/sales', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              items: posCart,
-              note: 'Mobil POS Satış',
-              total_amount: finalTotal,
-              payment_method: paymentMethod,
-              customer_id: selectedCreditCustId,
-              customer_name: customerName || null,
-              paid_cash_amount: paidCashAmt,
-              paid_pos_amount: paidPosAmt,
-              overpayment_mode: overpayMode,
-              idempotency_key: confirmHigh ? (idempotencyKey + '_confirmed') : idempotencyKey,
-              confirm_high_amount: confirmHigh
-            })
-          });
-          return { res: r, json: await r.json() };
+        const salePayload = {
+          items: cartSnapshot,
+          note: 'Mobil POS Satış',
+          channel: 'magaza',
+          total_amount: finalTotal,
+          payment_method: paymentMethod,
+          customer_id: selectedCreditCustId,
+          customer_name: customerName || null,
+          paid_cash_amount: paidCashAmt,
+          paid_pos_amount: paidPosAmt,
+          overpayment_mode: overpayMode,
+          idempotency_key: idempotencyKey,
+          sold_at: soldAtNow
         };
-
-        let { res, json } = await sendSaleReq(false);
-        if (res.status === 409 && json.day_closed) {
+        let json = await postSaleWithWakeupAndOfflineFallback(salePayload);
+        if (json && json.day_closed) {
           showToast(json.message || "🔒 Gün kapatılmış! Satış girilemez.");
           loadTodayCashSummary();
           return;
         }
-        if (res.status === 409 && json.day_not_open) {
+        if (json && json.day_not_open) {
           showToast(json.message || "⚠️ Önce gün açılışını yapınız!");
           openCashDayModal();
           return;
         }
-        if (res.status === 409 && json.requires_confirmation) {
+        if (json && json.requires_confirmation) {
           if (confirm(json.message || `⚠️ Yüksek tutar (${Number(finalTotal).toFixed(2)} ₺). Satışı onaylıyor musunuz?`)) {
-            ({ res, json } = await sendSaleReq(true));
+            json = await postSaleWithWakeupAndOfflineFallback({
+              ...salePayload,
+              idempotency_key: idempotencyKey + '_confirmed',
+              confirm_high_amount: true
+            });
           } else {
             showToast("Satış iptal edildi.");
             return;
@@ -4279,23 +5011,29 @@
         
         if (json.ok) {
           playBeep();
-          showToast(json.message || "✅ Satış başarıyla tamamlandı!");
+          showToast(json.message || "✅ Satış başarıyla tamamlandı!", json.queued_offline ? 4200 : 2800);
           // Sepeti ve toplamı anında sıfırla
           posCart = [];
           posCustomTotal = null;
           if (custNameInput) custNameInput.value = '';
           renderPOSCart();
-          loadProducts();
-          loadPOSProductPicker();
+          if (Array.isArray(json.recent_sales)) {
+            loadRecentPOSSales(json.recent_sales);
+          } else {
+            loadRecentPOSSales();
+          }
           loadTodayCashSummary();
           if (window.currentUserRole === 'calisan') {
             loadStaffTodaySales();
-          } else {
-            loadSalesHistory();
-            loadSalesAnalytics();
-            loadForecastData();
           }
-          triggerManualSync();
+          if (!json.queued_offline) {
+            loadProducts();
+            if (window.currentUserRole !== 'calisan') {
+              loadSalesHistory();
+            }
+          } else if (typeof rebuildPOSProductPickerFromCache === 'function') {
+            rebuildPOSProductPickerFromCache(_allProductsCache);
+          }
         } else {
           showToast("❌ " + (json.message || "Satış kaydedilemedi!"));
         }
@@ -4305,6 +5043,8 @@
       } finally {
         // Satış bittiğinde veya hata aldığında kilidi aç ve butonu eski haline getir
         isCompletingPOSSale = false;
+        setContainerInteractive(posTab, true);
+        unlockScreenDuringTransaction();
         if (btn) {
           btn.disabled = false;
           btn.classList.remove('btn-loading');
@@ -4451,6 +5191,8 @@
       const orderNoInput = document.getElementById('pos-net-order-no');
       const custNameInput = document.getElementById('pos-net-customer-name');
       const submitBtn = document.getElementById('pos-net-submit-btn');
+      const netModal = document.getElementById('pos-internet-modal-overlay');
+      const posTab = document.getElementById('tab-pos');
 
       const platform = (platformInput ? platformInput.value.trim() : '') || 'İnternet';
       const orderNo = orderNoInput ? orderNoInput.value.trim() : '';
@@ -4465,6 +5207,9 @@
       }
 
       isSubmittingPOSInternetSale = true;
+      lockScreenDuringTransaction("⏳ İnternet satışı tamamlanıyor, lütfen bekleyiniz...");
+      setContainerInteractive(netModal, false);
+      setContainerInteractive(posTab, false);
       if (submitBtn) {
         submitBtn.disabled = true;
         submitBtn.classList.add('btn-loading');
@@ -4480,36 +5225,34 @@
       }
 
       const idempotencyKey = 'netpos_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+      const soldAtNow = getLocalSoldAtString();
+      const cartSnapshot = posCart.map(it => ({ ...it }));
 
       try {
-        const sendNetSale = async (confirmHigh = false) => {
-          const r = await fetchWithAuth('/api/sales', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              items: posCart,
-              note: note,
-              channel: 'internet',
-              total_amount: finalTotal,
-              customer_name: customerName || null,
-              idempotency_key: confirmHigh ? (idempotencyKey + '_confirmed') : idempotencyKey,
-              confirm_high_amount: confirmHigh
-            })
-          });
-          return { res: r, json: await r.json() };
+        const netPayload = {
+          items: cartSnapshot,
+          note: note,
+          channel: 'internet',
+          total_amount: finalTotal,
+          customer_name: customerName || null,
+          idempotency_key: idempotencyKey,
+          sold_at: soldAtNow
         };
-
-        let { res, json } = await sendNetSale(false);
-        if (res.status === 409 && json.requires_confirmation) {
+        let json = await postSaleWithWakeupAndOfflineFallback(netPayload);
+        if (json && json.requires_confirmation) {
           if (confirm(json.message || `⚠️ Yüksek tutar (${Number(finalTotal).toFixed(2)} ₺). Onaylıyor musunuz?`)) {
-            ({ res, json } = await sendNetSale(true));
+            json = await postSaleWithWakeupAndOfflineFallback({
+              ...netPayload,
+              idempotency_key: idempotencyKey + '_confirmed',
+              confirm_high_amount: true
+            });
           } else {
             return;
           }
         }
         if (json.ok) {
           playBeep();
-          showToast(`✅ ${platform} satışı başarıyla tamamlandı!`);
+          showToast(json.queued_offline ? json.message : `✅ ${platform} satışı başarıyla tamamlandı!`, json.queued_offline ? 4200 : 2800);
           closePosInternetModal();
 
           // Sepeti ve toplamı anında sıfırla
@@ -4519,13 +5262,17 @@
           if (posCustInput) posCustInput.value = '';
           renderPOSCart();
 
-          // Verileri güncelle
-          loadProducts();
-          loadPOSProductPicker();
-          loadSalesHistory();
-          loadSalesAnalytics();
-          loadForecastData();
-          triggerManualSync();
+          if (Array.isArray(json.recent_sales)) {
+            loadRecentPOSSales(json.recent_sales);
+          } else {
+            loadRecentPOSSales();
+          }
+          if (!json.queued_offline) {
+            loadProducts();
+            loadSalesHistory();
+          } else if (typeof rebuildPOSProductPickerFromCache === 'function') {
+            rebuildPOSProductPickerFromCache(_allProductsCache);
+          }
         } else {
           showToast("❌ " + (json.message || "Satış kaydedilemedi!"));
         }
@@ -4534,6 +5281,9 @@
         showToast("⚠️ Satış işlenirken bağlantı hatası oluştu!");
       } finally {
         isSubmittingPOSInternetSale = false;
+        setContainerInteractive(netModal, true);
+        setContainerInteractive(posTab, true);
+        unlockScreenDuringTransaction();
         if (submitBtn) {
           submitBtn.disabled = false;
           submitBtn.classList.remove('btn-loading');
@@ -4809,10 +5559,31 @@
         if (!search) {
           _allProductsCache = products;
           allProductsCache = _allProductsCache;
+          try {
+            localStorage.setItem('stok_products_cache', JSON.stringify(products));
+          } catch (e) {}
+          if (typeof rebuildPOSProductPickerFromCache === 'function') {
+            rebuildPOSProductPickerFromCache(_allProductsCache);
+          }
         }
         renderProductList(products);
       } catch (e) {
         console.warn('loadProducts uyarısı:', e);
+        if ((!_allProductsCache || _allProductsCache.length === 0)) {
+          try {
+            const cachedRaw = localStorage.getItem('stok_products_cache');
+            if (cachedRaw) {
+              const cachedList = JSON.parse(cachedRaw);
+              if (Array.isArray(cachedList) && cachedList.length > 0) {
+                _allProductsCache = cachedList;
+                allProductsCache = cachedList;
+                if (typeof rebuildPOSProductPickerFromCache === 'function') {
+                  rebuildPOSProductPickerFromCache(_allProductsCache);
+                }
+              }
+            }
+          } catch (ce) {}
+        }
         if (_allProductsCache && _allProductsCache.length > 0) {
           renderProductList(_allProductsCache);
         } else if (container) {
@@ -5040,40 +5811,49 @@
 
     let allProductsCache = [];
 
+    function rebuildPOSProductPickerFromCache(products) {
+      if (!Array.isArray(products)) return;
+      allProductsCache = products;
+      const select = document.getElementById('pos-product-picker');
+      if (!select) return;
+
+      select.innerHTML = '<option value="">-- Ürün Listesinden Seçin --</option>';
+
+      const grouped = {};
+      allProductsCache.forEach(p => {
+        const cat = p.category_name || 'Genel';
+        if (!grouped[cat]) grouped[cat] = [];
+        grouped[cat].push(p);
+      });
+
+      for (const [catName, prods] of Object.entries(grouped)) {
+        const groupEl = document.createElement('optgroup');
+        groupEl.label = '📁 ' + catName;
+        prods.forEach(p => {
+          const opt = document.createElement('option');
+          opt.value = p.id;
+          const isKg = (p.unit === 'kg');
+          const uStr = isKg ? 'kg' : 'adet';
+          const sStr = isKg ? Number(p.stock_quantity).toFixed(3) : p.stock_quantity;
+          opt.textContent = `${p.name} - ${Number(p.sale_price).toFixed(2)} ₺/${uStr} (Stok: ${sStr} ${uStr})`;
+          groupEl.appendChild(opt);
+        });
+        select.appendChild(groupEl);
+      }
+    }
+
     async function loadPOSProductPicker() {
       try {
+        if (_allProductsCache && _allProductsCache.length > 0) {
+          rebuildPOSProductPickerFromCache(_allProductsCache);
+          return;
+        }
         const res = await fetchWithAuth('/api/products');
         if (!res.ok) return;
         const products = await res.json();
         if (!Array.isArray(products)) return;
-        allProductsCache = products;
-        const select = document.getElementById('pos-product-picker');
-        if (!select) return;
-
-        select.innerHTML = '<option value="">-- Ürün Listesinden Seçin --</option>';
-
-        // Group products by category
-        const grouped = {};
-        allProductsCache.forEach(p => {
-          const cat = p.category_name || 'Genel';
-          if (!grouped[cat]) grouped[cat] = [];
-          grouped[cat].push(p);
-        });
-
-        for (const [catName, prods] of Object.entries(grouped)) {
-          const groupEl = document.createElement('optgroup');
-          groupEl.label = '📁 ' + catName;
-          prods.forEach(p => {
-            const opt = document.createElement('option');
-            opt.value = p.id;
-            const isKg = (p.unit === 'kg');
-            const uStr = isKg ? 'kg' : 'adet';
-            const sStr = isKg ? Number(p.stock_quantity).toFixed(3) : p.stock_quantity;
-            opt.textContent = `${p.name} - ${Number(p.sale_price).toFixed(2)} ₺/${uStr} (Stok: ${sStr} ${uStr})`;
-            groupEl.appendChild(opt);
-          });
-          select.appendChild(groupEl);
-        }
+        _allProductsCache = products;
+        rebuildPOSProductPickerFromCache(products);
       } catch (e) {}
     }
 
@@ -5089,8 +5869,16 @@
       selectEl.value = '';
     }
 
-    let currentStartDate = '';
-    let currentEndDate = '';
+    function getTodayYMDStr() {
+      const d = new Date();
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    let currentStartDate = getTodayYMDStr();
+    let currentEndDate = getTodayYMDStr();
 
     function openAIKeyModal() {
       const modal = document.getElementById('ai-key-modal-overlay');
@@ -5121,7 +5909,7 @@
     }
 
     let currentReportsSubTab = 'sales-list';
-    let currentDatePreset = 'all';
+    let currentDatePreset = 'today';
 
     function switchReportsSubTab(subTabName, btnEl) {
       currentReportsSubTab = subTabName;
@@ -5162,7 +5950,7 @@
       drawer.style.display = (drawer.style.display === 'none' || !drawer.style.display) ? 'flex' : 'none';
     }
 
-    function setDatePreset(preset, btnEl) {
+    function setDatePreset(preset, btnEl, triggerRefresh = true) {
       currentDatePreset = preset;
       document.querySelectorAll('.date-pill').forEach(p => p.classList.remove('active'));
       if (btnEl) {
@@ -5242,8 +6030,9 @@
 
       updateActiveDateRangeBadge();
 
-      // Refresh data (loadSalesHistory internally triggers analytics & expenses)
-      loadSalesHistory();
+      if (triggerRefresh) {
+        loadSalesHistory();
+      }
     }
 
     function updateActiveDateRangeBadge() {
@@ -5586,6 +6375,7 @@
           loadSalesHistory();
           loadSalesAnalytics();
           loadExpenses();
+          loadRecentPOSSales();
           loadProducts();
           loadPOSProductPicker();
           if (typeof loadCashMovements === 'function') loadCashMovements();
@@ -5628,10 +6418,13 @@
                   const tabId = activeTab.id;
                   if (tabId === 'tab-pos') {
                     loadPOSProductPicker();
+                    loadRecentPOSSales();
                   } else if (tabId === 'tab-stock') {
                     loadProducts();
                   } else if (tabId === 'tab-reports') {
                     loadSalesHistory();
+                  } else if (tabId === 'tab-web-orders') {
+                    loadWebOrdersAndSubscribers(false);
                   }
                 }
                 checkSyncStatus();
@@ -6684,6 +7477,7 @@
       const platformSelect = document.getElementById('online-sale-platform');
       const noteInput = document.getElementById('online-sale-note');
       const submitBtn = document.getElementById('online-sale-submit-btn');
+      const onlineModal = document.getElementById('online-sale-modal-overlay');
 
       const productId = select.value;
       if (!productId) {
@@ -6697,6 +7491,8 @@
       const note = noteInput.value.trim();
 
       isSubmittingOnlineSale = true;
+      lockScreenDuringTransaction("⏳ Online satış kaydediliyor, lütfen bekleyiniz...");
+      setContainerInteractive(onlineModal, false);
       if (submitBtn) {
         submitBtn.disabled = true;
         submitBtn.classList.add('btn-loading');
@@ -6712,6 +7508,7 @@
       }
 
       try {
+        const soldAtNow = getLocalSoldAtString();
         const res = await fetchWithAuth('/api/sales/online', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -6720,6 +7517,7 @@
             quantity: qty,
             unit_price: unitPrice,
             platform: platform + (note ? ' - ' + note : ''),
+            sold_at: soldAtNow,
           })
         });
         const json = await res.json();
@@ -6728,19 +7526,49 @@
           playBeep();
           showToast(`✅ ${json.message}`);
           closeOnlineSaleModal();
+          if (Array.isArray(json.recent_sales)) {
+            loadRecentPOSSales(json.recent_sales);
+          } else {
+            loadRecentPOSSales();
+          }
           loadProducts();
-          loadPOSProductPicker();
           loadSalesHistory();
-          loadSalesAnalytics();
-          loadForecastData();
-          triggerManualSync();
         } else {
           showToast(`❌ ${json.message || 'Satış kaydedilemedi!'}`);
         }
       } catch (err) {
-        showToast("⚠️ Sunucu bağlantı hatası!");
+        // Sunucu uykudaysa veya çevrimdışıysa internet satışını da güvenli kuyruğa ekle
+        const pool = (allProductsCache && allProductsCache.length > 0) ? allProductsCache : (_allProductsCache || []);
+        const prod = pool.find(p => Number(p.id) === parseInt(productId));
+        if (prod) {
+          const pUnit = prod.unit || 'adet';
+          const sub = Math.round(unitPrice * qty * 100) / 100;
+          enqueueOfflineSale({
+            items: [{
+              product_id: prod.id,
+              product_name: prod.name,
+              barcode: prod.barcode || '',
+              unit_price: unitPrice,
+              quantity: qty,
+              subtotal: sub,
+              unit: pUnit
+            }],
+            note: '🌐 ' + platform + (note ? ' - ' + note : ''),
+            channel: 'internet',
+            total_amount: sub,
+            sold_at: getLocalSoldAtString(),
+            idempotency_key: 'online_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8)
+          });
+          playBeep();
+          closeOnlineSaleModal();
+          showToast('🛡️ Sunucu çevrimdışı olduğu için internet satışı güvenli kuyruğa alındı!', 4000);
+        } else {
+          showToast("⚠️ Sunucu bağlantı hatası!");
+        }
       } finally {
         isSubmittingOnlineSale = false;
+        setContainerInteractive(onlineModal, true);
+        unlockScreenDuringTransaction();
         if (submitBtn) {
           submitBtn.disabled = false;
           submitBtn.classList.remove('btn-loading');
@@ -7196,9 +8024,14 @@
 
       const badge = document.getElementById('user-profile-badge');
       const nameSpan = document.getElementById('user-profile-name');
+      const curRole = sessionStorage.getItem('user_role') || 'personnel';
       if (badge && nameSpan) {
-        const prefix = isOffline ? '🌐 ' : '🏢 ';
-        nameSpan.innerText = prefix + (user.company_name || user.full_name);
+        if (curRole === 'personnel') {
+          nameSpan.innerText = '👤 Personel';
+        } else {
+          const prefix = isOffline ? '🌐 ' : '🏢 ';
+          nameSpan.innerText = prefix + (user.company_name || user.full_name || 'Yönetici');
+        }
         badge.style.display = 'block';
       }
       if (user) {
@@ -7207,10 +8040,12 @@
       // Reset POS cart to avoid cross-user item mixing
       posCart = [];
       try { renderPOSCart(); } catch(e) {}
-      try { loadPOSProductPicker(); } catch(e) {}
+      try { setDatePreset('today', null, false); } catch(e) {}
       try { loadProducts(); } catch(e) {}
       try { loadSalesHistory(); } catch(e) {}
+      try { loadRecentPOSSales(); } catch(e) {}
       try { checkSyncStatus(); } catch(e) {}
+      try { flushPendingSalesQueue(); } catch(e) {}
       try { triggerManualSync(); } catch(e) {}
     }
 
@@ -7382,13 +8217,26 @@
 
 
     window.addEventListener('online', () => {
-      showToast("📶 İnternet bağlantısı sağlandı. Firebase eşitleniyor...");
+      showToast("📶 İnternet bağlantısı sağlandı. Kuyruk ve Firebase eşitleniyor...");
+      flushPendingSalesQueue();
       triggerManualSync();
     });
 
     window.addEventListener('offline', () => {
-      showToast("🌐 Çevrimdışı moda geçildi. Kayıtlar yerel olarak saklanacak.");
+      updatePOSConnectionPill('offline', '🔴 Çevrimdışı Kuyruk Modu');
+      showToast("🌐 Çevrimdışı moda geçildi. Satışlarınız güvenli kuyrukta saklanacak.");
       checkSyncStatus();
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && _appInitialized) {
+        pingServerKeepAlive();
+      }
+    });
+    window.addEventListener('focus', () => {
+      if (_appInitialized) {
+        pingServerKeepAlive();
+      }
     });
 
     let _appInitialized = false;
@@ -8586,19 +9434,27 @@
     }
 
     function initAppAfterGateUnlock() {
+      const savedRole = sessionStorage.getItem('user_role') || 'personnel';
+      setWebRole(savedRole);
       if (_appInitialized) {
         syncCurrentRole();
         return;
       }
       _appInitialized = true;
       initIndexedDB();
+      updateOfflineQueueBanner();
+      loadRecentPOSSales();
       checkAIStatus();
       checkSavedAuthSession();
       checkSyncStatus();
+      pingServerKeepAlive();
       startRealtimeListener();
       setInterval(checkSyncStatus, 45000);
+      setInterval(() => pingServerKeepAlive(false), 180000);
       setTheme(localStorage.getItem('app-theme') || 'light');
       syncCurrentRole();
+      startIdleRedirectMonitor();
+      syncPushNotificationStatus();
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -8608,6 +9464,8 @@
 
     function checkGateLock() {
       const isUnlocked = sessionStorage.getItem('gate_unlocked') === 'true';
+      const savedRole = sessionStorage.getItem('user_role') || 'personnel';
+      setWebRole(savedRole);
       if (isUnlocked) {
         hideGateLockModal();
         initAppAfterGateUnlock();
@@ -8638,10 +9496,13 @@
     }
 
     function lockAppNow() {
+      stopIdleRedirectMonitor();
       sessionStorage.removeItem('gate_unlocked');
-      sessionStorage.removeItem('stok_gate_token');
       sessionStorage.removeItem('user_role');
+      sessionStorage.removeItem('farm_unlocked');
+      sessionStorage.removeItem('stok_gate_token');
       document.cookie = 'stok_gate_token=; Max-Age=0; path=/';
+      setWebRole('personnel');
       showGateLockModal();
       showToast("🔒 Sistem kilitlendi.");
     }
@@ -8729,21 +9590,26 @@
         const json = await res.json();
         if (res.ok && json.ok) {
           sessionStorage.setItem('gate_unlocked', 'true');
-          const role = json.role || 'patron';
-          window.currentUserRole = role;
-          sessionStorage.setItem('user_role', role);
-          if (role === 'patron') {
-            sessionStorage.setItem('farm_unlocked', 'true');
-          } else {
-            sessionStorage.removeItem('farm_unlocked');
-          }
+          const apiRole = json.role || 'patron';
+          window.currentUserRole = apiRole;
           if (json.token) {
             sessionStorage.setItem('stok_gate_token', json.token);
+          }
+          if (json.is_master) {
+            setWebRole('admin');
+            sessionStorage.setItem('farm_unlocked', 'true');
+            showToast("👑 Yönetici Girişi Başarılı. Tüm bölümler tam yetkiyle açıldı.");
+          } else if (apiRole === 'calisan') {
+            setWebRole('personnel');
+            sessionStorage.removeItem('farm_unlocked');
+            showToast("👤 Çalışan Girişi Başarılı. Yalnızca Satış (POS) ve günlük kasa aktiftir.");
+          } else {
+            setWebRole('personnel');
+            showToast("👤 Personel Girişi Başarılı. Yalnızca Satış (POS) ekranı aktiftir.");
           }
           hideGateLockModal();
           initAppAfterGateUnlock();
           applyRoleUI();
-          showToast(role === 'calisan' ? "👤 Çalışan girişi başarılı!" : "👑 Patron girişi başarılı. Hoş geldiniz!");
         } else {
           showGateError(json.message || "❌ Hatalı PIN kodu!");
         }
@@ -8846,34 +9712,88 @@
       }
     }
 
+    let pendingAuthAction = null;
+
+    function requestAuthAction(action) {
+      pendingAuthAction = action;
+      const titleEl = document.getElementById('farm-pin-title');
+      const descEl = document.getElementById('farm-pin-desc');
+      const inputEl = document.getElementById('farm-pin-input');
+      const errEl = document.getElementById('farm-pin-error');
+      const iconEl = document.getElementById('farm-pin-icon');
+
+      if (iconEl) iconEl.innerText = action.type === 'farm' ? '🚜' : '🔐';
+      if (titleEl) titleEl.innerText = action.title || 'Güvenlik Girişi';
+      if (descEl) descEl.innerText = action.desc || 'Lütfen erişim şifresini giriniz:';
+      if (errEl) errEl.innerText = '';
+      if (inputEl) inputEl.value = '';
+
+      document.getElementById('farm-pin-modal-overlay').style.display = 'flex';
+      setTimeout(() => {
+        if (inputEl) inputEl.focus();
+      }, 100);
+    }
+
     function openFarmModal() {
-      if (sessionStorage.getItem('farm_unlocked') === 'true') {
-        document.getElementById('farm-modal-overlay').style.display = 'flex';
-        initFarmData();
-      } else {
-        document.getElementById('farm-pin-input').value = '';
-        document.getElementById('farm-pin-error').innerText = '';
-        document.getElementById('farm-pin-modal-overlay').style.display = 'flex';
-        setTimeout(() => document.getElementById('farm-pin-input').focus(), 100);
+      const curRole = sessionStorage.getItem('user_role') || 'personnel';
+      if (curRole !== 'admin') {
+        requestAuthAction({
+          type: 'farm',
+          title: '🚜 Çiftlik Modülü Girişi',
+          desc: 'Çiftlik modülüne erişmek için Yönetici şifresini giriniz:'
+        });
+        return;
       }
+      document.getElementById('farm-modal-overlay').style.display = 'flex';
+      initFarmData();
     }
 
     function closeFarmPinModal() {
+      pendingAuthAction = null;
       document.getElementById('farm-pin-modal-overlay').style.display = 'none';
     }
 
     function verifyFarmPin() {
       const pin = document.getElementById('farm-pin-input').value.trim();
-      if (pin === '2805') {
-        sessionStorage.setItem('farm_unlocked', 'true');
+      const masterPins = ['0528', '05282024'];
+      const normalPins = ['2805', '28052024'];
+
+      if (masterPins.includes(pin)) {
+        setWebRole('admin');
         closeFarmPinModal();
+        showToast("👑 Yönetici Modu Açıldı. Tüm bölümlere erişim sağlandı.");
+        executePendingAuthAction();
+      } else if (normalPins.includes(pin)) {
+        // 2805 personel şifresidir. Yönetici yetkisi gerektiren yerleri ASLA açmaz!
+        const errEl = document.getElementById('farm-pin-error');
+        if (errEl) errEl.innerText = '⚠️ Personel şifresi girildi. Bu alana erişim için Yönetici şifresi gereklidir.';
+        const inp = document.getElementById('farm-pin-input');
+        if (inp) {
+          inp.value = '';
+          inp.focus();
+        }
+      } else {
+        const errEl = document.getElementById('farm-pin-error');
+        if (errEl) errEl.innerText = '❌ Hatalı şifre! Tekrar deneyiniz.';
+        const inp = document.getElementById('farm-pin-input');
+        if (inp) {
+          inp.value = '';
+          inp.focus();
+        }
+      }
+    }
+
+    function executePendingAuthAction() {
+      if (!pendingAuthAction) return;
+      const action = pendingAuthAction;
+      pendingAuthAction = null;
+      if (action.type === 'tab') {
+        executeSwitchTab(action.tabId, action.btnEl);
+      } else if (action.type === 'farm') {
         document.getElementById('farm-modal-overlay').style.display = 'flex';
         initFarmData();
-        showToast("🚜 Çiftlik Modülüne giriş yapıldı.");
-      } else {
-        document.getElementById('farm-pin-error').innerText = '❌ Hatalı şifre! Tekrar deneyiniz.';
-        document.getElementById('farm-pin-input').value = '';
-        document.getElementById('farm-pin-input').focus();
+      } else if (action.type === 'auth_modal') {
+        openAuthModal();
       }
     }
 
@@ -8977,7 +9897,11 @@
       }
     }
 
+    let isSavingFarmEggSale = false;
+
     async function saveFarmEggSaleWeb() {
+      if (isSavingFarmEggSale) return;
+
       const cust = document.getElementById('farm-egg-cust').value.trim();
       const unitType = document.getElementById('farm-egg-unit')?.value || 'koli';
       const bInput = parseFloat(document.getElementById('farm-egg-boxes').value);
@@ -9006,6 +9930,23 @@
 
       const totAmount = (!isNaN(t) && t > 0) ? t : (bInput * p);
 
+      const saveBtn = document.getElementById('farm-egg-save-btn');
+      const farmModal = document.getElementById('farm-modal-overlay');
+      const eggView = document.getElementById('farm-view-egg');
+
+      // Veri kaydedilene kadar veri giriş ekranında hiçbir işlem yapılmasın
+      isSavingFarmEggSale = true;
+      lockScreenDuringTransaction("⏳ Yumurta satışı kaydediliyor, lütfen bekleyiniz...");
+      setContainerInteractive(farmModal, false);
+      setContainerInteractive(eggView, false);
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.classList.add('btn-loading');
+        saveBtn.innerHTML = '⏳ Kaydediliyor...';
+      }
+
+      const idempotencyKey = 'fegg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+
       try {
         const res = await apiFetch('/api/farm/egg-sales', {
           method: 'POST',
@@ -9020,6 +9961,7 @@
             unit_type: unitType,
             piece_count: pieceCount,
             total_amount: totAmount,
+            idempotency_key: idempotencyKey,
           })
         });
         const json = await res.json();
@@ -9031,15 +9973,26 @@
           if (tEl) tEl.value = '';
           document.getElementById('farm-egg-note').value = '';
           calcFarmEggTotal('price');
-          loadFarmCustomersWeb();
-          loadFarmEggSalesWeb();
-          triggerManualSync();
+          await Promise.all([
+            loadFarmCustomersWeb(),
+            loadFarmEggSalesWeb()
+          ]);
         } else {
           showToast("❌ " + (json.message || "Kayıt başarısız!"), "danger");
         }
       } catch (e) {
         console.error("Yumurta satışı kaydetme hatası:", e);
         showToast("Sunucu iletişim hatası: " + (e.message || e), "danger");
+      } finally {
+        isSavingFarmEggSale = false;
+        setContainerInteractive(eggView, true);
+        setContainerInteractive(farmModal, true);
+        unlockScreenDuringTransaction();
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.classList.remove('btn-loading');
+          saveBtn.innerHTML = '💾 Satışı Kaydet';
+        }
       }
     }
 
@@ -9104,7 +10057,11 @@
       }
     }
 
+    let isSavingFarmFeedPurchase = false;
+
     async function saveFarmFeedPurchaseWeb() {
+      if (isSavingFarmFeedPurchase) return;
+
       const b = parseFloat(document.getElementById('farm-feed-bags').value);
       const p = parseFloat(document.getElementById('farm-feed-price').value) || 0;
       const t = parseFloat(document.getElementById('farm-feed-total').value) || 0;
@@ -9112,6 +10069,22 @@
       const supp = document.getElementById('farm-feed-supplier').value.trim();
 
       if (!b || b <= 0) { showToast("Lütfen çuval adedi giriniz!", "warning"); return; }
+
+      const saveBtn = document.getElementById('farm-feed-save-btn');
+      const farmModal = document.getElementById('farm-modal-overlay');
+      const feedView = document.getElementById('farm-view-feed');
+
+      isSavingFarmFeedPurchase = true;
+      lockScreenDuringTransaction("⏳ Yem alımı kaydediliyor, lütfen bekleyiniz...");
+      setContainerInteractive(farmModal, false);
+      setContainerInteractive(feedView, false);
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.classList.add('btn-loading');
+        saveBtn.innerHTML = '⏳ Kaydediliyor...';
+      }
+
+      const idempotencyKey = 'ffeed_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
 
       try {
         const res = await apiFetch('/api/farm/feed-purchases', {
@@ -9123,6 +10096,7 @@
             total_amount: t,
             purchase_date: d,
             supplier: supp,
+            idempotency_key: idempotencyKey,
           })
         });
         const json = await res.json();
@@ -9133,12 +10107,22 @@
           document.getElementById('farm-feed-total').value = '';
           document.getElementById('farm-feed-supplier').value = '';
           calcFarmFeedTon();
-          loadFarmFeedPurchasesWeb();
+          await loadFarmFeedPurchasesWeb();
         } else {
           showToast("❌ " + json.message, "danger");
         }
       } catch (e) {
         showToast("Sunucu hatası!", "danger");
+      } finally {
+        isSavingFarmFeedPurchase = false;
+        setContainerInteractive(feedView, true);
+        setContainerInteractive(farmModal, true);
+        unlockScreenDuringTransaction();
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.classList.remove('btn-loading');
+          saveBtn.innerHTML = '💾 Yem Alımını Kaydet';
+        }
       }
     }
 
@@ -9409,7 +10393,355 @@
       }
     }
 
+    // =========================================================================
+    // GALLUS MAMA WEB SİPARİŞLERİ, PUAN ONAYI (%1 x 100) VE BÜLTEN MAİLLERİ
+    // =========================================================================
+    let cachedWebSubscribers = [];
+    let cachedWebOrders = [];
+
+    function openWebOrdersAndMailsModal() {
+      const btn = document.getElementById('nav-btn-web-orders');
+      switchTab('web-orders', btn);
+    }
+
+    async function copyAllWebSubscriberEmails(sep = ', ') {
+      if (!cachedWebSubscribers || cachedWebSubscribers.length === 0) {
+        showToast('⚠️ Henüz kopyalanacak e-posta adresi bulunmuyor.');
+        return;
+      }
+      const text = cachedWebSubscribers.join(sep);
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast(`✅ Toplam ${cachedWebSubscribers.length} adet e-posta panoya toplu kopyalandı!`);
+      } catch (e) {
+        const ta = document.getElementById('web-emails-bulk-textarea');
+        if (ta) {
+          ta.value = text;
+          ta.select();
+          document.execCommand('copy');
+          showToast(`✅ Toplam ${cachedWebSubscribers.length} adet e-posta kopyalandı!`);
+        }
+      }
+    }
+
+    async function approveWebOrderPoints(orderId) {
+      try {
+        const fetchFn = typeof fetchWithAuth === 'function' ? fetchWithAuth : fetch;
+        const res = await fetchFn('/api/web-orders/approve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orderId })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          showToast(`✅ ${data.message}`);
+          loadWebOrdersAndSubscribers(false);
+        } else {
+          showToast(`❌ Hata: ${data.error || 'Onaylanamadı'}`);
+        }
+      } catch (e) {
+        showToast('❌ Sunucu bağlantı hatası.');
+      }
+    }
+
+    async function loadWebOrdersAndSubscribers(showRefreshToast = false) {
+      try {
+        const fetchFn = typeof fetchWithAuth === 'function' ? fetchWithAuth : fetch;
+        const res = await fetchFn('/api/web-orders');
+        const data = await res.json();
+        if (!res.ok || !data.success) return;
+
+        cachedWebSubscribers = data.subscribers || [];
+        cachedWebOrders = data.orders || [];
+
+        const pendingCount = cachedWebOrders.filter(o => !o.pointsApproved && o.status !== 'Onaylandı').length;
+        const navPill = document.getElementById('nav-web-orders-pending-pill');
+        if (navPill) {
+          if (pendingCount > 0) {
+            navPill.style.display = 'inline-block';
+            navPill.innerText = pendingCount;
+          } else {
+            navPill.style.display = 'none';
+          }
+        }
+
+        const emCountEl = document.getElementById('web-emails-count');
+        const emTa = document.getElementById('web-emails-bulk-textarea');
+        if (emCountEl) emCountEl.innerText = cachedWebSubscribers.length;
+        if (emTa) emTa.value = cachedWebSubscribers.join(', ');
+
+        const ordCountEl = document.getElementById('web-orders-count');
+        const ordContainer = document.getElementById('web-orders-list-container');
+        if (ordCountEl) ordCountEl.innerText = cachedWebOrders.length;
+
+        if (ordContainer) {
+          if (cachedWebOrders.length === 0) {
+            ordContainer.innerHTML = '<div style="padding:24px; text-align:center; color:var(--text-muted); border:1px dashed var(--border); border-radius:12px;">Henüz web sitesinden gelen bir sipariş bulunmuyor.</div>';
+          } else {
+            ordContainer.innerHTML = cachedWebOrders.map(o => {
+              const c = o.customer || {};
+              const isApp = Boolean(o.pointsApproved || o.status === 'Onaylandı');
+              const pts = o.earnedPoints !== undefined ? o.earnedPoints : Math.round(((o.totalNumeric || 0) * 0.01) * 100);
+              const itemsText = (o.items || []).map(i => `${i.qty}x ${i.name}`).join(' • ');
+              const fullAddr = `${c.address || ''} (${c.city || ''})`;
+              return `
+                <div style="border:2px solid ${isApp ? 'rgba(16,185,129,0.35)' : 'rgba(245,158,11,0.5)'}; background:${isApp ? 'rgba(16,185,129,0.04)' : 'rgba(245,158,11,0.06)'}; border-radius:16px; padding:14px 16px; display:flex; flex-direction:column; gap:8px;">
+                  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-bottom:1px solid rgba(148,163,184,0.2); padding-bottom:8px;">
+                    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                      <span style="font-weight:900; font-size:1rem; color:#047857;">#${o.id}</span>
+                      <span style="font-weight:800;">👤 ${c.fullname || '-'}</span>
+                      <span style="font-size:0.82rem; color:var(--text-muted);">📞 ${c.phone || '-'}</span>
+                      <span style="font-size:0.82rem; color:#0284c7; font-weight:700;">✉️ ${c.email || o.email || '-'}</span>
+                      <span style="font-size:0.75rem; padding:2px 8px; border-radius:6px; background:rgba(2,132,199,0.12); color:#0284c7; font-weight:800;">💳 ${o.paymentMethod || 'Havale / EFT'}</span>
+                      <span style="font-size:0.75rem; color:var(--text-muted);">🕒 ${o.date || ''}</span>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                      <span style="font-weight:900; font-size:1.05rem;">${o.total || ''}</span>
+                      <span style="padding:4px 10px; border-radius:999px; background:#fef3c7; color:#92400e; font-weight:800; font-size:0.78rem;">🎁 +${pts} Puan (%1×100)</span>
+                      ${isApp ? `
+                        <span style="padding:6px 12px; border-radius:10px; background:#10b981; color:#fff; font-weight:800; font-size:0.8rem;">✅ Sipariş & Puan Onaylandı</span>
+                      ` : `
+                        <button class="btn" onclick="approveWebOrderPoints('${o.id}')" style="width:auto; padding:8px 14px; background:#10b981; color:#fff; font-weight:800; font-size:0.82rem; border-radius:10px; box-shadow:0 4px 10px rgba(16,185,129,0.3);">
+                          ✅ Siparişi & +${pts} Puanı Onayla
+                        </button>
+                      `}
+                    </div>
+                  </div>
+                  <div style="font-size:0.84rem; line-height:1.4;">
+                    <div><strong>📍 Teslimat Adresi:</strong> ${fullAddr} ${c.note ? `| <strong>📝 Not:</strong> ${c.note}` : ''}</div>
+                    <div style="margin-top:4px;"><strong>🛒 Ürünler:</strong> ${itemsText}</div>
+                  </div>
+                </div>
+              `;
+            }).join('');
+          }
+        }
+
+        if (showRefreshToast) {
+          showToast(`✅ Web siparişleri (${cachedWebOrders.length}) ve mailler (${cachedWebSubscribers.length}) güncellendi.`);
+        }
+      } catch (e) {
+        console.warn('Web orders load warning:', e);
+      }
+    }
+
+    setTimeout(() => { loadWebOrdersAndSubscribers(false); }, 1800);
+
+    // ════════════════════════════════════════════════════════════════════
+    // ⏱️ 5 DAKİKA HAREKETSİZLİKTEN SONRAKİ İLK TIKLAMADA GALLUSMAMA.COM YÖNLENDİRMESİ
+    // ════════════════════════════════════════════════════════════════════
+    const IDLE_REDIRECT_MS = 5 * 60 * 1000;
+    const IDLE_REDIRECT_URL = 'https://gallusmama.com';
+    let _lastUserClickAt = Date.now();
+    let _idleListenersAttached = false;
+    let _idleRedirecting = false;
+
+    function _handleUserInteractionForIdle(e) {
+      if (_idleRedirecting) return;
+      if (sessionStorage.getItem('gate_unlocked') !== 'true') {
+        _lastUserClickAt = Date.now();
+        return;
+      }
+      if (Date.now() - _lastUserClickAt >= IDLE_REDIRECT_MS) {
+        _idleRedirecting = true;
+        if (e && typeof e.preventDefault === 'function') e.preventDefault();
+        if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+        window.location.href = IDLE_REDIRECT_URL;
+        return;
+      }
+      _lastUserClickAt = Date.now();
+    }
+
+    function startIdleRedirectMonitor() {
+      _lastUserClickAt = Date.now();
+      _idleRedirecting = false;
+      if (!_idleListenersAttached) {
+        _idleListenersAttached = true;
+        ['pointerdown', 'click', 'touchstart', 'keydown'].forEach((evt) => {
+          document.addEventListener(evt, _handleUserInteractionForIdle, { capture: true });
+        });
+      }
+    }
+
+    function stopIdleRedirectMonitor() {
+      _lastUserClickAt = Date.now();
+      _idleRedirecting = false;
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // 🔔 TELEFONA ARKA PLAN POS SATIŞ BİLDİRİMLERİ (WEB PUSH)
+    // ════════════════════════════════════════════════════════════════════
+    function _urlBase64ToUint8Array(base64String) {
+      const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+      const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+      const rawData = window.atob(base64);
+      const outputArray = new Uint8Array(rawData.length);
+      for (let i = 0; i < rawData.length; ++i) {
+        outputArray[i] = rawData.charCodeAt(i);
+      }
+      return outputArray;
+    }
+
+    function _updatePushBadgeUI(isSubscribed) {
+      const badge = document.getElementById('push-notif-badge');
+      if (!badge) return;
+      if (isSubscribed) {
+        badge.innerHTML = '🔔 Bildirim Açık';
+        badge.style.background = 'rgba(16,185,129,0.16)';
+        badge.style.color = '#10b981';
+        badge.style.borderColor = 'rgba(16,185,129,0.35)';
+      } else {
+        badge.innerHTML = '🔕 Bildirim Aç';
+        badge.style.background = '';
+        badge.style.color = '';
+        badge.style.borderColor = '';
+      }
+    }
+
+    async function syncPushNotificationStatus() {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        _updatePushBadgeUI(false);
+        return;
+      }
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        const isActive = Boolean(sub) && Notification.permission === 'granted';
+        _updatePushBadgeUI(isActive);
+        if (isActive && sub) {
+          fetchWithAuth('/api/push/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ subscription: sub.toJSON() })
+          }).catch(() => {});
+        }
+      } catch (e) {
+        _updatePushBadgeUI(false);
+      }
+    }
+
+    async function subscribeToPushNotifications() {
+      if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+        showToast('❌ Bu tarayıcı arka plan bildirimlerini desteklemiyor. iPhone kullanıyorsanız Paylaş → Ana Ekrana Ekle ile açın.');
+        return;
+      }
+      try {
+        const perm = await Notification.requestPermission();
+        if (perm !== 'granted') {
+          showToast('⚠️ Bildirim izni verilmedi. Tarayıcı ayarlarından izin veriniz.');
+          return;
+        }
+        const keyRes = await fetchWithAuth('/api/push/vapid-public-key');
+        const keyJson = await keyRes.json();
+        if (!keyJson.ok || !keyJson.public_key) {
+          showToast('❌ Bildirim anahtarı sunucudan alınamadı.');
+          return;
+        }
+        const reg = await navigator.serviceWorker.ready;
+        let sub = await reg.pushManager.getSubscription();
+        if (!sub) {
+          sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: _urlBase64ToUint8Array(keyJson.public_key)
+          });
+        }
+        const saveRes = await fetchWithAuth('/api/push/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ subscription: sub.toJSON() })
+        });
+        const saveJson = await saveRes.json();
+        if (saveJson.ok) {
+          _updatePushBadgeUI(true);
+          showToast('✅ Satış bildirimleri aktif! Test bildirimi gönderiliyor...');
+          fetchWithAuth('/api/push/test', { method: 'POST' }).catch(() => {});
+        } else {
+          showToast('❌ Bildirim kaydı başarısız: ' + (saveJson.message || ''));
+        }
+      } catch (err) {
+        console.error('Push subscribe error:', err);
+        showToast('❌ Bildirim kurulurken hata oluştu: ' + err.message);
+      }
+    }
+
+    async function unsubscribeFromPushNotifications() {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) {
+          await fetchWithAuth('/api/push/unsubscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint: sub.endpoint })
+          }).catch(() => {});
+          await sub.unsubscribe();
+        }
+        _updatePushBadgeUI(false);
+        closePushNotifModal();
+        showToast('🔕 Bu cihazda satış bildirimleri kapatıldı.');
+      } catch (err) {
+        showToast('❌ Bildirim kapatılamadı.');
+      }
+    }
+
+    async function sendTestPushNotification() {
+      try {
+        const res = await fetchWithAuth('/api/push/test', { method: 'POST' });
+        const json = await res.json();
+        if (json.ok) {
+          showToast(`🔔 Test bildirimi ${json.sent} cihaza gönderildi!`);
+        } else {
+          showToast('⚠️ Test bildirimi gönderilemedi: ' + (json.last_error || 'kayıtlı cihaz yok veya hata.'));
+        }
+      } catch (err) {
+        showToast('❌ Test bildirimi hatası.');
+      }
+    }
+
+    async function handlePushNotifBadgeClick() {
+      if ('serviceWorker' in navigator && 'PushManager' in window) {
+        try {
+          const reg = await navigator.serviceWorker.ready;
+          const sub = await reg.pushManager.getSubscription();
+          if (sub && Notification.permission === 'granted') {
+            openPushNotifModal();
+            return;
+          }
+        } catch (_) {}
+      }
+      await subscribeToPushNotifications();
+    }
+
+    function openPushNotifModal() {
+      const m = document.getElementById('push-notif-modal');
+      if (m) m.style.display = 'flex';
+    }
+
+    function closePushNotifModal() {
+      const m = document.getElementById('push-notif-modal');
+      if (m) m.style.display = 'none';
+    }
+
   </script>
+
+  <!-- PUSH NOTIFICATION SETTINGS MODAL -->
+  <div id="push-notif-modal" class="modal-overlay" style="display:none; z-index:99999;" onclick="if(event.target===this) closePushNotifModal()">
+    <div class="modal-card" style="max-width:400px; text-align:center;">
+      <button type="button" style="position:absolute; top:12px; right:14px; background:none; border:none; color:var(--text-muted); font-size:1.5rem; cursor:pointer;" onclick="closePushNotifModal()">&times;</button>
+      <div style="font-size:2.4rem; margin-bottom:8px;">🔔</div>
+      <h3 style="margin:0 0 8px;">Telefon Satış Bildirimleri Aktif</h3>
+      <p style="font-size:0.86rem; color:var(--text-muted); margin:0 0 18px; line-height:1.45;">
+        POS'tan her satış yapıldığında, site kapalı olsa bile bu cihaza anlık bildirim gönderilir.
+      </p>
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        <button type="button" class="btn" onclick="sendTestPushNotification()">🧪 Test Bildirimi Gönder</button>
+        <button type="button" class="btn btn-danger" onclick="unsubscribeFromPushNotifications()">🔕 Bu Cihazda Bildirimleri Kapat</button>
+      </div>
+      <p style="font-size:0.75rem; color:var(--text-muted); margin:14px 0 0; line-height:1.4;">
+        💡 iPhone kullanıcıları: Site kapalıyken bildirim almak için Safari'de <b>Paylaş → Ana Ekrana Ekle</b> ile uygulamayı ana ekrana eklemelidir.
+      </p>
+    </div>
+  </div>
 
 </body>
 </html>

@@ -29,9 +29,11 @@ class SaleRepository:
         now = sold_at.strip() if sold_at and str(sold_at).strip() else get_turkey_now_str()
 
         with self.db.get_connection() as conn:
+            uid_row = conn.execute("SELECT id FROM users ORDER BY id ASC LIMIT 1").fetchone()
+            uid = int(uid_row["id"]) if uid_row and uid_row["id"] is not None else 1
             cursor = conn.execute(
-                "INSERT INTO sales (total_amount, item_count, sold_at, note, channel, customer_name) VALUES (?, ?, ?, ?, ?, ?)",
-                (total_amount, item_count, now, note, ch, cust_name),
+                "INSERT INTO sales (user_id, total_amount, item_count, sold_at, note, channel, customer_name, synced_to_cloud) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
+                (uid, total_amount, item_count, now, note, ch, cust_name),
             )
             sale_id = cursor.lastrowid
 
@@ -57,7 +59,8 @@ class SaleRepository:
                     """
                     UPDATE products
                     SET stock_quantity = stock_quantity - ?,
-                        updated_at = datetime('now', 'localtime')
+                        updated_at = datetime('now', 'localtime'),
+                        synced_to_cloud = 0
                     WHERE id = ? AND stock_quantity >= ?
                     """,
                     (item.quantity, item.product_id, item.quantity),
@@ -120,12 +123,40 @@ class SaleRepository:
         except Exception:
             pass
 
-        # Satışı Firebase Firestore'a anında eşitle
+        # Satışı Firebase Firestore'a arka planda anında eşitle
         try:
+            import threading
             from app.database.cloud_db import CloudDatabase
-            cloud_db = CloudDatabase()
-            if cloud_db.ensure_firebase():
-                cloud_db.sync_offline_data_with_firebase()
+            def _bg_push():
+                try:
+                    cdb = CloudDatabase()
+                    if cdb.ensure_firebase():
+                        cdb.push_offline_data_to_firebase()
+                except Exception:
+                    pass
+            threading.Thread(target=_bg_push, daemon=True).start()
+        except Exception:
+            pass
+
+        # Telefonlara arka plan Web Push bildirimi gönder
+        try:
+            from app.services.push_service import send_sale_notification_async
+
+            push_items = [
+                {
+                    "product_id": it.product_id,
+                    "product_name": it.product_name,
+                    "quantity": it.quantity,
+                    "unit_price": it.unit_price,
+                }
+                for it in items
+            ]
+            send_sale_notification_async(
+                items=push_items,
+                total_amount=total_amount,
+                channel=channel,
+                customer_name=customer_name,
+            )
         except Exception:
             pass
 

@@ -9,7 +9,16 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
+
+# gRPC / Firestore HTTP/2 bağlantı kopmalarını (Render, NAT, Wi-Fi uyku) önlemek için
+# firebase_admin / grpc ilk kez yüklenmeden önce keepalive ayarlarını yapılandır.
+os.environ.setdefault("GRPC_KEEPALIVE_TIME_MS", "30000")
+os.environ.setdefault("GRPC_KEEPALIVE_TIMEOUT_MS", "10000")
+os.environ.setdefault("GRPC_KEEPALIVE_PERMIT_WITHOUT_CALLS", "1")
+os.environ.setdefault("GRPC_HTTP2_MAX_PINGS_WITHOUT_DATA", "0")
+os.environ.setdefault("GRPC_ENABLE_FORK_SUPPORT", "1")
+os.environ.setdefault("GRPC_POLL_STRATEGY", "poll")
 
 from app.config import DATA_DIR, DB_PATH, TURKEY_TZ, get_turkey_now, get_turkey_now_str
 from app.database.connection import Database
@@ -114,6 +123,12 @@ class CloudDatabase:
         self.firebase_last_error = None
         self.firebase_cred_source = None
         self.firebase_project_id = None
+        self._firebase_lock = threading.RLock()
+        self._firebase_last_ok_ts = 0.0
+        self._firebase_last_health_check_ts = 0.0
+        self._firebase_consecutive_errors = 0
+        self._firebase_last_reconnect_ts = 0.0
+        self._firebase_quota_blocked_until = 0.0
         # Clean orphan rows from older single-user versions by attaching them to primary user 1
         try:
             with self.db.get_connection() as conn:
@@ -191,148 +206,298 @@ class CloudDatabase:
         return None
 
     def _init_firebase_optional(self, force: bool = False) -> None:
-        """Firebase Admin / Firestore bağlantısını dondurmadan arka planda dener."""
-        try:
-            import firebase_admin
-            from firebase_admin import credentials, firestore
+        """Firebase Admin / Firestore bağlantısını thread-safe şekilde başlatır veya yeniler."""
+        with self._firebase_lock:
+            try:
+                import firebase_admin
+                from firebase_admin import credentials, firestore
 
-            if force and firebase_admin._apps:
-                for app_name in list(firebase_admin._apps.keys()):
+                if force and self.firestore_db is not None:
                     try:
-                        firebase_admin.delete_app(firebase_admin._apps[app_name])
+                        close_fn = getattr(self.firestore_db, "close", None)
+                        if callable(close_fn):
+                            close_fn()
                     except Exception:
                         pass
-                self.firestore_db = None
+                    self.firestore_db = None
 
-            if not force and firebase_admin._apps and self.firestore_db is not None:
-                return
-
-            if not force and firebase_admin._apps and self.firestore_db is None:
-                try:
-                    self.firestore_db = firestore.client()
-                    self.firebase_last_error = None
-                    logger.info("Firebase Firestore mevcut uygulamadan bağlandı.")
-                    return
-                except Exception as e:
-                    logger.warning(f"Firebase Firestore istemci alma hatası: {e}")
-                    self.firebase_last_error = str(e)
-
-            cred = None
-            source_name = None
-            detected_project_id = None
-
-            # 1. Ortam Değişkenleri Kontrolü (Render, Cloud veya Yerel)
-            env_var_names = [
-                "FIREBASE_CREDENTIALS_JSON",
-                "FIREBASE_CREDENTIALS",
-                "GOOGLE_APPLICATION_CREDENTIALS",
-                "FIREBASE_SERVICE_ACCOUNT",
-                "FIREBASE_SERVICE_ACCOUNT_KEY",
-                "FIREBASE_KEY",
-                "FIREBASE_CONFIG",
-                "FIREBASE_ADMIN_CREDENTIALS",
-                "FIREBASE_CREDENTIALS_PATH",
-            ]
-            for var_name in env_var_names:
-                val = os.environ.get(var_name)
-                if not val or not val.strip():
-                    continue
-                val = val.strip()
-                # Değer bir dosya yolu mu?
-                try:
-                    p = Path(val)
-                    if p.exists() and p.is_file():
+                if force and firebase_admin._apps:
+                    for app_name in list(firebase_admin._apps.keys()):
                         try:
-                            file_dict = self._parse_cred_dict(p.read_text(encoding="utf-8"))
-                            if file_dict:
-                                cred = credentials.Certificate(file_dict)
-                                detected_project_id = file_dict.get("project_id")
-                            else:
-                                cred = credentials.Certificate(str(p))
-                            source_name = f"Ortam Değişkeni Dosya Yolu ({var_name}={p.name})"
-                            logger.info(f"Firebase kimlik bilgileri {source_name} üzerinden yüklendi.")
-                            break
-                        except Exception as e_path:
-                            logger.warning(f"{var_name} dosyasından sertifika alma uyarısı: {e_path}")
-                except Exception:
-                    pass
+                            firebase_admin.delete_app(firebase_admin._apps[app_name])
+                        except Exception:
+                            pass
+                    self.firestore_db = None
 
-                # Değer doğrudan JSON / Base64 içeriği mi?
-                c_dict = self._parse_cred_dict(val)
-                if c_dict:
+                if not force and firebase_admin._apps and self.firestore_db is not None:
+                    return
+
+                if not force and firebase_admin._apps and self.firestore_db is None:
                     try:
-                        cred = credentials.Certificate(c_dict)
-                        detected_project_id = c_dict.get("project_id")
-                        source_name = f"Ortam Değişkeni JSON ({var_name})"
-                        logger.info(f"Firebase kimlik bilgileri {source_name} üzerinden yüklendi.")
-                        break
-                    except Exception as e_cert:
-                        logger.warning(f"{var_name} JSON sertifika alma uyarısı: {e_cert}")
+                        self.firestore_db = firestore.client()
+                        self.firebase_last_error = None
+                        self._firebase_consecutive_errors = 0
+                        self._firebase_last_ok_ts = time.time()
+                        logger.info("Firebase Firestore mevcut uygulamadan bağlandı.")
+                        return
+                    except Exception as e:
+                        logger.warning(f"Firebase Firestore istemci alma hatası: {e}")
+                        self.firebase_last_error = str(e)
 
-            # 2. Disk Üzerindeki Aday Dosyalar Kontrolü
-            if not cred:
-                candidate_paths = [
-                    DATA_DIR / "firebase_credentials.json",
-                    DATA_DIR / "firebase_key.json",
-                    DATA_DIR.parent / "firebase_credentials.json",
-                    DATA_DIR.parent / "firebase_key.json",
-                    Path(__file__).resolve().parent.parent.parent / "firebase_credentials.json",
-                    Path(__file__).resolve().parent.parent.parent / "firebase-credentials.json",
-                    Path(__file__).resolve().parent.parent.parent / "serviceAccountKey.json",
-                    Path(__file__).resolve().parent.parent.parent / "firebase-key.json",
-                    Path.cwd() / "firebase_credentials.json",
-                    Path.cwd() / "firebase-credentials.json",
-                    Path.cwd() / "serviceAccountKey.json",
-                    Path.cwd() / "firebase-key.json",
-                    Path("/etc/secrets/firebase_credentials.json"),
-                    Path("/etc/secrets/firebase-credentials.json"),
-                    Path("/etc/secrets/serviceAccountKey.json"),
-                    Path("/etc/secrets/firebase-key.json"),
-                    Path("/etc/secrets/service_account.json"),
-                    Path("/etc/secrets/google-services.json"),
+                cred = None
+                source_name = None
+                detected_project_id = None
+
+                # 1. Ortam Değişkenleri Kontrolü (Render, Cloud veya Yerel)
+                env_var_names = [
+                    "FIREBASE_CREDENTIALS_JSON",
+                    "FIREBASE_CREDENTIALS",
+                    "GOOGLE_APPLICATION_CREDENTIALS",
+                    "FIREBASE_SERVICE_ACCOUNT",
+                    "FIREBASE_SERVICE_ACCOUNT_KEY",
+                    "FIREBASE_KEY",
+                    "FIREBASE_CONFIG",
+                    "FIREBASE_ADMIN_CREDENTIALS",
+                    "FIREBASE_CREDENTIALS_PATH",
                 ]
-                for p in candidate_paths:
+                for var_name in env_var_names:
+                    val = os.environ.get(var_name)
+                    if not val or not val.strip():
+                        continue
+                    val = val.strip()
+                    # Değer bir dosya yolu mu?
                     try:
+                        p = Path(val)
                         if p.exists() and p.is_file():
-                            c_dict = self._parse_cred_dict(p.read_text(encoding="utf-8"))
-                            if c_dict:
-                                cred = credentials.Certificate(c_dict)
-                                detected_project_id = c_dict.get("project_id")
-                            else:
-                                cred = credentials.Certificate(str(p))
-                            source_name = f"Yerel Dosya ({p})"
+                            try:
+                                file_dict = self._parse_cred_dict(p.read_text(encoding="utf-8"))
+                                if file_dict:
+                                    cred = credentials.Certificate(file_dict)
+                                    detected_project_id = file_dict.get("project_id")
+                                else:
+                                    cred = credentials.Certificate(str(p))
+                                source_name = f"Ortam Değişkeni Dosya Yolu ({var_name}={p.name})"
+                                logger.info(f"Firebase kimlik bilgileri {source_name} üzerinden yüklendi.")
+                                break
+                            except Exception as e_path:
+                                logger.warning(f"{var_name} dosyasından sertifika alma uyarısı: {e_path}")
+                    except Exception:
+                        pass
+
+                    # Değer doğrudan JSON / Base64 içeriği mi?
+                    c_dict = self._parse_cred_dict(val)
+                    if c_dict:
+                        try:
+                            cred = credentials.Certificate(c_dict)
+                            detected_project_id = c_dict.get("project_id")
+                            source_name = f"Ortam Değişkeni JSON ({var_name})"
                             logger.info(f"Firebase kimlik bilgileri {source_name} üzerinden yüklendi.")
                             break
-                    except Exception as e_cand:
-                        logger.warning(f"Aday dosya ({p}) okuma uyarısı: {e_cand}")
+                        except Exception as e_cert:
+                            logger.warning(f"{var_name} JSON sertifika alma uyarısı: {e_cert}")
 
-            # 3. Google Application Default Credentials Fallback
-            if not cred and any(k in os.environ for k in ("GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_CLOUD_PROJECT", "GCP_PROJECT")):
-                try:
-                    cred = credentials.ApplicationDefault()
-                    source_name = "Application Default Credentials"
-                except Exception:
-                    pass
+                # 2. Disk Üzerindeki Aday Dosyalar Kontrolü
+                if not cred:
+                    candidate_paths = [
+                        DATA_DIR / "firebase_credentials.json",
+                        DATA_DIR / "firebase_key.json",
+                        DATA_DIR.parent / "firebase_credentials.json",
+                        DATA_DIR.parent / "firebase_key.json",
+                        Path(__file__).resolve().parent.parent.parent / "firebase_credentials.json",
+                        Path(__file__).resolve().parent.parent.parent / "firebase-credentials.json",
+                        Path(__file__).resolve().parent.parent.parent / "serviceAccountKey.json",
+                        Path(__file__).resolve().parent.parent.parent / "firebase-key.json",
+                        Path.cwd() / "firebase_credentials.json",
+                        Path.cwd() / "firebase-credentials.json",
+                        Path.cwd() / "serviceAccountKey.json",
+                        Path.cwd() / "firebase-key.json",
+                        Path("/etc/secrets/firebase_credentials.json"),
+                        Path("/etc/secrets/firebase-credentials.json"),
+                        Path("/etc/secrets/serviceAccountKey.json"),
+                        Path("/etc/secrets/firebase-key.json"),
+                        Path("/etc/secrets/service_account.json"),
+                        Path("/etc/secrets/google-services.json"),
+                    ]
+                    for p in candidate_paths:
+                        try:
+                            if p.exists() and p.is_file():
+                                c_dict = self._parse_cred_dict(p.read_text(encoding="utf-8"))
+                                if c_dict:
+                                    cred = credentials.Certificate(c_dict)
+                                    detected_project_id = c_dict.get("project_id")
+                                else:
+                                    cred = credentials.Certificate(str(p))
+                                source_name = f"Yerel Dosya ({p})"
+                                logger.info(f"Firebase kimlik bilgileri {source_name} üzerinden yüklendi.")
+                                break
+                        except Exception as e_cand:
+                            logger.warning(f"Aday dosya ({p}) okuma uyarısı: {e_cand}")
 
-            if cred:
-                try:
-                    firebase_admin.initialize_app(cred)
-                except ValueError:
-                    pass
-                self.firestore_db = firestore.client()
-                self.firebase_cred_source = source_name
-                self.firebase_project_id = detected_project_id or getattr(cred, "project_id", None)
-                self.firebase_last_error = None
-                logger.info(f"Firebase Firestore başarıyla aktifleştirildi ({source_name}). Proje: {self.firebase_project_id}")
-            else:
+                # 3. Google Application Default Credentials Fallback
+                if not cred and any(k in os.environ for k in ("GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_CLOUD_PROJECT", "GCP_PROJECT")):
+                    try:
+                        cred = credentials.ApplicationDefault()
+                        source_name = "Application Default Credentials"
+                    except Exception:
+                        pass
+
+                if cred:
+                    try:
+                        firebase_admin.initialize_app(cred)
+                    except ValueError:
+                        pass
+                    self.firestore_db = firestore.client()
+                    self.firebase_cred_source = source_name
+                    self.firebase_project_id = detected_project_id or getattr(cred, "project_id", None)
+                    self.firebase_last_error = None
+                    self._firebase_consecutive_errors = 0
+                    self._firebase_last_ok_ts = time.time()
+                    self._firebase_last_reconnect_ts = time.time()
+                    logger.info(f"Firebase Firestore başarıyla aktifleştirildi ({source_name}). Proje: {self.firebase_project_id}")
+                else:
+                    self.firestore_db = None
+                    self.firebase_cred_source = None
+                    self.firebase_last_error = "Firebase kimlik bilgisi (Service Account JSON) bulunamadı. Lütfen Firebase ayarlarını yapılandırınız."
+                    logger.info("Firebase kimlik bilgileri bulunamadı, SQLite yerel mod aktif.")
+            except Exception as exc:
                 self.firestore_db = None
-                self.firebase_cred_source = None
-                self.firebase_last_error = "Firebase kimlik bilgisi (Service Account JSON) bulunamadı. Lütfen Firebase ayarlarını yapılandırınız."
-                logger.info("Firebase kimlik bilgileri bulunamadı, SQLite yerel mod aktif.")
-        except Exception as exc:
-            self.firestore_db = None
-            self.firebase_last_error = f"Firebase istemci başlatma hatası: {exc}"
-            logger.warning(f"Firebase Firestore istemcisi çevrimdışı modda başlatıldı: {exc}")
+                self.firebase_last_error = f"Firebase istemci başlatma hatası: {exc}"
+                logger.warning(f"Firebase Firestore istemcisi çevrimdışı modda başlatıldı: {exc}")
+
+    def configure_firebase(self, cred_input: Union[str, dict]) -> tuple[bool, str]:
+        """save_firebase_credentials için geriye dönük uyumlu takma ad."""
+        return self.save_firebase_credentials(cred_input)
+
+    @staticmethod
+    def _is_quota_error(exc: Exception) -> bool:
+        msg = f"{type(exc).__name__}: {exc}".lower()
+        return any(k in msg for k in ("quota exceeded", "resourceexhausted", "resource_exhausted", "429"))
+
+    @staticmethod
+    def _is_transient_firebase_error(exc: Exception) -> bool:
+        """gRPC kanal kopması, zaman aşımı, DNS/ağ kesintisi veya token yenileme hatası mı?"""
+        if CloudDatabase._is_quota_error(exc):
+            return False
+        msg = f"{type(exc).__name__}: {exc}".lower()
+        transient_markers = (
+            "unavailable",
+            "deadlineexceeded",
+            "deadline exceeded",
+            "503",
+            "504",
+            "goaway",
+            "rst_stream",
+            "broken pipe",
+            "connection reset",
+            "connection aborted",
+            "connection refused",
+            "failed to connect",
+            "socket closed",
+            "transport closed",
+            "inactiverpcerror",
+            "internalservererror",
+            "serviceunavailable",
+            "aborted",
+            "eof",
+            "ssl",
+            "tls",
+            "dns",
+            "timed out",
+            "timeout",
+            "refresherror",
+            "transport",
+            "channel",
+            "stream removed",
+        )
+        return any(m in msg for m in transient_markers)
+
+    def _reset_firebase_client(self, reason: str = "") -> bool:
+        """Bozulmuş/kopmuş gRPC kanalını güvenle kapatıp taze Firestore istemcisi açar."""
+        with self._firebase_lock:
+            now_ts = time.time()
+            # Çok sık yeniden başlatmayı önle (en az 3 sn ara)
+            if self.firestore_db is not None and (now_ts - self._firebase_last_reconnect_ts) < 3.0:
+                return self.firestore_db is not None
+            logger.warning(f"Firebase gRPC istemcisi yeniden başlatılıyor ({reason or 'bağlantı kopması'})...")
+            self._init_firebase_optional(force=True)
+            return self.firestore_db is not None
+
+    def _firestore_call_with_retry(
+        self,
+        fn: Callable[[Any], Any],
+        op_name: str = "firestore_op",
+        max_retries: int = 3,
+    ) -> Any:
+        """Firestore çağrısını geçici bağlantı kopmalarında otomatik yeniden bağlanarak çalıştırır."""
+        if time.time() < self._firebase_quota_blocked_until:
+            raise RuntimeError("Firestore günlük kota sınırı bekleme süresinde.")
+
+        last_exc: Optional[Exception] = None
+        for attempt in range(max_retries):
+            if not self.ensure_firebase():
+                raise RuntimeError(self.firebase_last_error or "Firebase istemcisi hazır değil.")
+            client = self.firestore_db
+            try:
+                res = fn(client)
+                self._firebase_last_ok_ts = time.time()
+                self._firebase_consecutive_errors = 0
+                if self.firebase_last_error and "kimlik" not in str(self.firebase_last_error).lower():
+                    self.firebase_last_error = None
+                return res
+            except Exception as exc:
+                last_exc = exc
+                self._firebase_consecutive_errors += 1
+                if self._is_quota_error(exc):
+                    self.firebase_last_error = "Firestore günlük kota sınırı aşıldı."
+                    self._firebase_quota_blocked_until = time.time() + 300.0
+                    logger.warning(f"[{op_name}] Firestore kota uyarısı (5 dk bekleme): {exc}")
+                    raise
+                if not self._is_transient_firebase_error(exc) or attempt >= (max_retries - 1):
+                    self.firebase_last_error = f"{op_name} hatası: {exc}"
+                    raise
+                backoff = min(0.5 * (2 ** attempt), 3.0)
+                logger.warning(
+                    f"[{op_name}] Geçici Firebase bağlantı hatası (deneme {attempt + 1}/{max_retries}): {exc} "
+                    f"-> {backoff:.1f}sn sonra yeniden bağlanılıyor..."
+                )
+                self._reset_firebase_client(reason=f"{op_name}: {type(exc).__name__}")
+                time.sleep(backoff)
+
+        if last_exc:
+            raise last_exc
+        return None
+
+    def check_firebase_health(self, force: bool = False) -> bool:
+        """Firebase bağlantısının sağlıklı olduğundan emin olur; kopmuşsa veya ardışık hata varsa otomatik yeniler.
+        Sağlıklı bağlantıda gereksiz Firestore READ harcamaz.
+        """
+        now_ts = time.time()
+        if not self.ensure_firebase():
+            return False
+
+        # Son 2 dakika içinde başarılı bir işlem olduysa ve hata yoksa ekstra okuma yapma (0 READ)
+        if not force and self._firebase_consecutive_errors == 0 and (now_ts - self._firebase_last_ok_ts) < 120.0:
+            return True
+
+        # Sağlık kontrolünü en fazla 60 saniyede bir çalıştır (force değilse)
+        if not force and (now_ts - self._firebase_last_health_check_ts) < 60.0:
+            return self.firestore_db is not None
+
+        self._firebase_last_health_check_ts = now_ts
+        if self._firebase_consecutive_errors >= 2:
+            return self._reset_firebase_client(reason="ardışık bağlantı hatası")
+
+        return self.firestore_db is not None
+
+    def get_firebase_health_info(self) -> Dict[str, Any]:
+        """API durum endpointleri için Firebase bağlantı sağlık özetini döndürür."""
+        return {
+            "connected": bool(self.firestore_db is not None),
+            "healthy": bool(self.firestore_db is not None and self._firebase_consecutive_errors < 3),
+            "consecutive_errors": int(self._firebase_consecutive_errors),
+            "last_ok_ts": float(self._firebase_last_ok_ts),
+            "quota_blocked": bool(time.time() < self._firebase_quota_blocked_until),
+        }
 
     def save_firebase_credentials(self, cred_input: Union[str, dict]) -> tuple[bool, str]:
         """Arayüzden veya API'den gelen Firebase Service Account JSON kimlik bilgilerini doğrular,
@@ -380,11 +545,14 @@ class CloudDatabase:
             return False, f"Kimlik kaydetme hatası: {exc}"
 
     def ensure_firebase(self) -> bool:
-        """Firebase bağlantısının hazır olduğunu doğrular; kopmuşsa yeniden bağlanmayı dener."""
+        """Firebase bağlantısının hazır olduğunu doğrular; kopmuşsa thread-safe şekilde yeniden bağlanmayı dener."""
         if self.firestore_db is not None:
             return True
-        self._init_firebase_optional()
-        return self.firestore_db is not None
+        with self._firebase_lock:
+            if self.firestore_db is not None:
+                return True
+            self._init_firebase_optional()
+            return self.firestore_db is not None
 
     def ensure_initial_hydration(self, force: bool = False) -> bool:
         """Render konteyneri yeni dağıtıldığında veya SQLite sıfırlandığında,
@@ -1113,12 +1281,10 @@ class CloudDatabase:
     def sync_offline_data_with_firebase(self, user_id: Optional[int] = None, allow_pull: bool = False) -> Dict[str, Any]:
         """Yerel SQLite veritabanında henüz buluta gönderilmemiş (synced_to_cloud = 0) kayıtları
         Firebase Firestore'a aktarır (PUSH).
+        SQLite bağlantısı ağ çağrıları sırasında kilitli tutulmaz; geçici kopmalarda otomatik yeniden bağlanır.
         allow_pull True ve 60sn cooldown dolmuşsa buluttan güncellemeleri de çeker (PULL).
         """
-        if not self.firestore_db:
-            self._init_firebase_optional()
-
-        if not self.firestore_db:
+        if not self.ensure_firebase():
             err_msg = self.firebase_last_error or "Kimlik bilgisi bulunamadı."
             return {
                 "synced": False,
@@ -1127,11 +1293,21 @@ class CloudDatabase:
                 "pulled": 0,
             }
 
+        if time.time() < self._firebase_quota_blocked_until:
+            return {
+                "synced": False,
+                "reason": "Firestore günlük kota sınırı nedeniyle bekleme modunda. Veriler yerel SQLite'ta güvende.",
+                "pushed": 0,
+                "pulled": 0,
+            }
+
         pushed_count = 0
+        failed_count = 0
 
         try:
+            # 0. Önce SQLite'tan gönderilmemiş kayıtları hızlıca oku ve SQLite kilidini hemen bırak
+            to_push: List[tuple[str, str, str, int, Dict[str, Any]]] = []
             with self.db.get_connection() as conn:
-                # 0. Hızlı kontrol: Gönderilecek veri yoksa ve allow_pull False ise Firestore'u hiç yorma!
                 unsynced_exists = False
                 for tbl in ["users", "categories", "products", "sales", "expenses", "farm_customers", "farm_egg_sales", "farm_feed_purchases"]:
                     try:
@@ -1155,178 +1331,150 @@ class CloudDatabase:
                         "pulled": 0,
                     }
 
-                # 1. PUSH UN-SYNCED USERS
-                un_users = conn.execute("SELECT * FROM users WHERE synced_to_cloud = 0").fetchall()
-                for u in un_users:
+                # 1. USERS
+                for u in conn.execute("SELECT * FROM users WHERE synced_to_cloud = 0").fetchall():
                     u_dict = dict(u)
                     u_id = u_dict["id"]
                     u_dict["synced_to_cloud"] = 1
-                    try:
-                        self.firestore_db.collection("users").document(str(u_id)).set(u_dict)
-                        conn.execute("UPDATE users SET synced_to_cloud = 1 WHERE id = ?", (u_id,))
-                        pushed_count += 1
-                    except Exception as e:
-                        logger.warning(f"Kullanıcı {u_id} bulut senkronizasyon hatası: {e}")
+                    to_push.append(("users", "users", str(u_id), u_id, u_dict))
 
-                # 2. PUSH UN-SYNCED CATEGORIES (User Scoped Doc ID: u{uid}_c{cid})
+                # 2. CATEGORIES
                 cat_query = "SELECT * FROM categories WHERE synced_to_cloud = 0"
-                cat_params = []
+                cat_params = [user_id] if user_id is not None else []
                 if user_id is not None:
                     cat_query += " AND user_id = ?"
-                    cat_params.append(user_id)
-                un_cats = conn.execute(cat_query, cat_params).fetchall()
-                for c in un_cats:
+                for c in conn.execute(cat_query, cat_params).fetchall():
                     c_dict = dict(c)
                     c_id = c_dict["id"]
                     c_uid = c_dict.get("user_id") or 1
                     c_dict["synced_to_cloud"] = 1
-                    doc_id = f"u{c_uid}_c{c_id}"
-                    try:
-                        self.firestore_db.collection("categories").document(doc_id).set(c_dict)
-                        conn.execute("UPDATE categories SET synced_to_cloud = 1 WHERE id = ?", (c_id,))
-                        pushed_count += 1
-                    except Exception as e:
-                        logger.warning(f"Kategori {c_id} bulut senkronizasyon hatası: {e}")
+                    to_push.append(("categories", "categories", f"u{c_uid}_c{c_id}", c_id, c_dict))
 
-                # 3. PUSH UN-SYNCED PRODUCTS (User Scoped Doc ID: u{uid}_p{pid})
+                # 3. PRODUCTS
                 prod_query = """
-                    SELECT p.*, c.name as category_name 
-                    FROM products p 
-                    LEFT JOIN categories c ON p.category_id = c.id 
+                    SELECT p.*, c.name as category_name
+                    FROM products p
+                    LEFT JOIN categories c ON p.category_id = c.id
                     WHERE p.synced_to_cloud = 0
                 """
-                prod_params = []
+                prod_params = [user_id] if user_id is not None else []
                 if user_id is not None:
                     prod_query += " AND p.user_id = ?"
-                    prod_params.append(user_id)
-                un_prods = conn.execute(prod_query, prod_params).fetchall()
-                for p in un_prods:
+                for p in conn.execute(prod_query, prod_params).fetchall():
                     p_dict = dict(p)
                     p_id = p_dict["id"]
                     p_uid = p_dict.get("user_id") or 1
                     p_dict["synced_to_cloud"] = 1
-                    doc_id = f"u{p_uid}_p{p_id}"
-                    try:
-                        self.firestore_db.collection("products").document(doc_id).set(p_dict)
-                        conn.execute("UPDATE products SET synced_to_cloud = 1 WHERE id = ?", (p_id,))
-                        pushed_count += 1
-                    except Exception as e:
-                        logger.warning(f"Ürün {p_id} bulut senkronizasyon hatası: {e}")
+                    to_push.append(("products", "products", f"u{p_uid}_p{p_id}", p_id, p_dict))
 
-                # 4. PUSH UN-SYNCED SALES (User Scoped Doc ID: u{uid}_s{sid})
+                # 4. SALES
                 sales_query = "SELECT * FROM sales WHERE synced_to_cloud = 0"
-                sales_params = []
+                sales_params = [user_id] if user_id is not None else []
                 if user_id is not None:
                     sales_query += " AND user_id = ?"
-                    sales_params.append(user_id)
-                un_sales = conn.execute(sales_query, sales_params).fetchall()
-                for s in un_sales:
+                for s in conn.execute(sales_query, sales_params).fetchall():
                     s_dict = dict(s)
                     s_id = s_dict["id"]
                     s_uid = s_dict.get("user_id") or 1
                     items_rows = conn.execute("SELECT * FROM sale_items WHERE sale_id = ?", (s_id,)).fetchall()
                     s_dict["items"] = [dict(i) for i in items_rows]
                     s_dict["synced_to_cloud"] = 1
-                    doc_id = f"u{s_uid}_s{s_id}"
-                    try:
-                        self.firestore_db.collection("sales").document(doc_id).set(s_dict)
-                        conn.execute("UPDATE sales SET synced_to_cloud = 1 WHERE id = ?", (s_id,))
-                        pushed_count += 1
-                    except Exception as e:
-                        logger.warning(f"Satış {s_id} bulut senkronizasyon hatası: {e}")
+                    to_push.append(("sales", "sales", f"u{s_uid}_s{s_id}", s_id, s_dict))
 
-                # 5. PUSH UN-SYNCED EXPENSES (User Scoped Doc ID: u{uid}_e{eid})
+                # 5. EXPENSES
                 exp_query = "SELECT * FROM expenses WHERE synced_to_cloud = 0"
-                exp_params = []
+                exp_params = [user_id] if user_id is not None else []
                 if user_id is not None:
                     exp_query += " AND user_id = ?"
-                    exp_params.append(user_id)
-                un_exp = conn.execute(exp_query, exp_params).fetchall()
-                for e in un_exp:
+                for e in conn.execute(exp_query, exp_params).fetchall():
                     e_dict = dict(e)
                     e_id = e_dict["id"]
                     e_uid = e_dict.get("user_id") or 1
                     e_dict["synced_to_cloud"] = 1
-                    doc_id = f"u{e_uid}_e{e_id}"
-                    try:
-                        self.firestore_db.collection("expenses").document(doc_id).set(e_dict)
-                        conn.execute("UPDATE expenses SET synced_to_cloud = 1 WHERE id = ?", (e_id,))
-                        pushed_count += 1
-                    except Exception as ex:
-                        logger.warning(f"Gider {e_id} bulut senkronizasyon hatası: {ex}")
+                    to_push.append(("expenses", "expenses", f"u{e_uid}_e{e_id}", e_id, e_dict))
 
-                # 5.1 PUSH UN-SYNCED FARM CUSTOMERS
+                # 5.1 FARM CUSTOMERS
                 fc_query = "SELECT * FROM farm_customers WHERE synced_to_cloud = 0"
-                fc_params = []
+                fc_params = [user_id] if user_id is not None else []
                 if user_id is not None:
                     fc_query += " AND user_id = ?"
-                    fc_params.append(user_id)
-                un_fcs = conn.execute(fc_query, fc_params).fetchall()
-                for fc in un_fcs:
+                for fc in conn.execute(fc_query, fc_params).fetchall():
                     fc_dict = dict(fc)
                     fc_id = fc_dict["id"]
                     fc_uid = fc_dict.get("user_id") or 1
                     fc_dict["synced_to_cloud"] = 1
-                    doc_id = f"u{fc_uid}_fc{fc_id}"
-                    try:
-                        self.firestore_db.collection("farm_customers").document(doc_id).set(fc_dict)
-                        conn.execute("UPDATE farm_customers SET synced_to_cloud = 1 WHERE id = ?", (fc_id,))
-                        pushed_count += 1
-                    except Exception as ex:
-                        logger.warning(f"Çiftlik müşteri {fc_id} senkronizasyon hatası: {ex}")
+                    to_push.append(("farm_customers", "farm_customers", f"u{fc_uid}_fc{fc_id}", fc_id, fc_dict))
 
-                # 5.2 PUSH UN-SYNCED FARM EGG SALES
+                # 5.2 FARM EGG SALES
                 es_query = "SELECT * FROM farm_egg_sales WHERE synced_to_cloud = 0"
-                es_params = []
+                es_params = [user_id] if user_id is not None else []
                 if user_id is not None:
                     es_query += " AND user_id = ?"
-                    es_params.append(user_id)
-                un_ess = conn.execute(es_query, es_params).fetchall()
-                for es in un_ess:
+                for es in conn.execute(es_query, es_params).fetchall():
                     es_dict = dict(es)
                     es_id = es_dict["id"]
                     es_uid = es_dict.get("user_id") or 1
                     es_dict["synced_to_cloud"] = 1
-                    doc_id = f"u{es_uid}_es{es_id}"
-                    try:
-                        self.firestore_db.collection("farm_egg_sales").document(doc_id).set(es_dict)
-                        conn.execute("UPDATE farm_egg_sales SET synced_to_cloud = 1 WHERE id = ?", (es_id,))
-                        pushed_count += 1
-                    except Exception as ex:
-                        logger.warning(f"Çiftlik yumurta satış {es_id} senkronizasyon hatası: {ex}")
+                    to_push.append(("farm_egg_sales", "farm_egg_sales", f"u{es_uid}_es{es_id}", es_id, es_dict))
 
-                # 5.3 PUSH UN-SYNCED FARM FEED PURCHASES
+                # 5.3 FARM FEED PURCHASES
                 fp_query = "SELECT * FROM farm_feed_purchases WHERE synced_to_cloud = 0"
-                fp_params = []
+                fp_params = [user_id] if user_id is not None else []
                 if user_id is not None:
                     fp_query += " AND user_id = ?"
-                    fp_params.append(user_id)
-                un_fps = conn.execute(fp_query, fp_params).fetchall()
-                for fp in un_fps:
+                for fp in conn.execute(fp_query, fp_params).fetchall():
                     fp_dict = dict(fp)
                     fp_id = fp_dict["id"]
                     fp_uid = fp_dict.get("user_id") or 1
                     fp_dict["synced_to_cloud"] = 1
-                    doc_id = f"u{fp_uid}_fp{fp_id}"
-                    try:
-                        self.firestore_db.collection("farm_feed_purchases").document(doc_id).set(fp_dict)
-                        conn.execute("UPDATE farm_feed_purchases SET synced_to_cloud = 1 WHERE id = ?", (fp_id,))
-                        pushed_count += 1
-                    except Exception as ex:
-                        logger.warning(f"Çiftlik yem alım {fp_id} senkronizasyon hatası: {ex}")
+                    to_push.append(("farm_feed_purchases", "farm_feed_purchases", f"u{fp_uid}_fp{fp_id}", fp_id, fp_dict))
 
-                # 6. PUSH GEMINI API KEY IF LOCAL EXISTS AND RECORDS CHANGED
-                key_file = DATA_DIR / "gemini_key.txt"
-                if unsynced_exists and key_file.exists():
-                    try:
-                        k = key_file.read_text(encoding="utf-8").strip()
-                        if k:
-                            self.firestore_db.collection("system_settings").document("gemini").set({
-                                "api_key": k,
-                                "updated_at": get_turkey_now_str()
-                            }, merge=True)
-                    except Exception as ex:
-                        logger.warning(f"Gemini API key Firestore aktarma uyarısı: {ex}")
+            # Ağ çağrıları SQLite kilidi dışında yapılır, her yazma otomatik retry + reconnect korumalıdır
+            synced_rows: List[tuple[str, int]] = []
+            for table_name, collection_name, doc_id, row_id, payload in to_push:
+                try:
+                    def _do_set(db, _col=collection_name, _doc=doc_id, _pay=payload):
+                        doc_ref = db.collection(_col).document(_doc)
+                        try:
+                            return doc_ref.set(_pay, timeout=15.0)
+                        except TypeError:
+                            return doc_ref.set(_pay)
+
+                    self._firestore_call_with_retry(
+                        _do_set,
+                        op_name=f"sync_{collection_name}_{doc_id}",
+                        max_retries=3,
+                    )
+                    synced_rows.append((table_name, row_id))
+                    pushed_count += 1
+                except Exception as ex:
+                    failed_count += 1
+                    logger.warning(f"{collection_name} ({doc_id}) bulut senkronizasyon hatası: {ex}")
+                    if self._is_quota_error(ex):
+                        break
+
+            # Başarılı kayıtları tek bir hızlı SQLite işleminde işaretle
+            if synced_rows:
+                with self.db.get_connection() as conn:
+                    for table_name, row_id in synced_rows:
+                        conn.execute(f"UPDATE {table_name} SET synced_to_cloud = 1 WHERE id = ?", (row_id,))
+
+            # 6. PUSH GEMINI API KEY IF LOCAL EXISTS AND RECORDS CHANGED
+            key_file = DATA_DIR / "gemini_key.txt"
+            if unsynced_exists and key_file.exists() and failed_count == 0:
+                try:
+                    k = key_file.read_text(encoding="utf-8").strip()
+                    if k:
+                        self._firestore_call_with_retry(
+                            lambda db: db.collection("system_settings").document("gemini").set(
+                                {"api_key": k, "updated_at": get_turkey_now_str()},
+                                merge=True,
+                            ),
+                            op_name="sync_gemini_key",
+                            max_retries=2,
+                        )
+                except Exception as ex:
+                    logger.warning(f"Gemini API key Firestore aktarma uyarısı: {ex}")
 
             # 7. PULL REMOTE CHANGES (Sadece allow_pull True ise ve 60sn cooldown dolmuşsa)
             pulled_count = 0
@@ -1348,10 +1496,11 @@ class CloudDatabase:
                 reason = f"☁️ Firebase eşitlendi: {pulled_count} veri buluttan indirildi."
 
             return {
-                "synced": True,
-                "reason": reason,
+                "synced": failed_count == 0,
+                "reason": reason if failed_count == 0 else f"⚠️ {pushed_count} kayıt aktarıldı, {failed_count} kayıt yeniden denenecek.",
                 "pushed": pushed_count,
                 "pulled": pulled_count,
+                "failed": failed_count,
             }
         except Exception as exc:
             logger.error(f"Senkronizasyon hatası: {exc}")
@@ -3725,19 +3874,256 @@ class CloudDatabase:
                 new_value={
                     "id": day_id,
                     "business_date": b_date,
+                    "field": "Sabah Kasa",
                     "opening_amount": clean_amt,
+                    "amount": clean_amt,
                     "opened_at": now,
                     "opened_by": opened_by,
                     "opened_by_role": opened_by_role,
                     "opening_note": clean_note,
                 },
-                reason=clean_note or f"{b_date} gün açılışı",
+                reason=clean_note or f"{b_date} sabah kasa açılışı",
                 actor=act,
                 user_id=uid,
                 conn=conn,
             )
 
-        return True, f"Gün açıldı! Açılış kasası: {clean_amt:.2f} ₺", day_dict
+        return True, f"Gün açıldı! Sabah kasa: {clean_amt:.2f} ₺", day_dict
+
+    def update_cash_day_values(
+        self,
+        *,
+        business_date: Optional[str] = None,
+        opening_amount: Optional[float] = None,
+        counted_cash: Optional[float] = None,
+        entered_pos_total: Optional[float] = None,
+        new_expenses: Optional[List[Dict[str, Any]]] = None,
+        reason: str = "",
+        user_id: Optional[int] = None,
+        actor: Optional[Dict[str, Any]] = None,
+    ) -> tuple[bool, str, Optional[Dict[str, Any]]]:
+        """Sabah kasa, akşam kasa (sayılan nakit) ve POS değerlerini günceller; her değişikliği saat + eski/yeni tutar ile audit_logs'a yazar."""
+        uid = self._resolve_user_id(user_id)
+        b_date = (business_date or get_turkey_now_str("%Y-%m-%d")).strip()[:10]
+        act = actor or {"name": "Patron", "role": "patron", "user_id": uid}
+        clean_reason = str(reason or "").strip()
+
+        day = self.get_cash_day(business_date=b_date, user_id=uid)
+        if day and str(day.get("status") or "").lower() == "closed":
+            return False, f"🔒 {b_date} günü kapatılmıştır! Değişiklik için Patron günü yeniden açmalıdır.", None
+
+        if not day:
+            # Henüz gün açılmadıysa sabah kasası ile aç
+            init_open = float(opening_amount) if opening_amount is not None else 0.0
+            if init_open < 0:
+                return False, "Sabah kasa tutarı negatif olamaz!", None
+            ok_o, msg_o, day = self.open_cash_day(
+                opening_amount=init_open,
+                business_date=b_date,
+                opening_note=clean_reason,
+                user_id=uid,
+                actor=act,
+            )
+            if not ok_o:
+                return False, msg_o, None
+            opening_amount = None  # zaten ilk giriş olarak loglandı
+
+        # Yeni gider kalemlerini kaydet (varsa)
+        for item in (new_expenses or []):
+            t = str(item.get("title") or item.get("description") or "").strip()
+            try:
+                amt = float(item.get("amount") or 0.0)
+            except (ValueError, TypeError):
+                return False, "Gider tutarı geçersiz!", None
+            if not t or amt <= 0:
+                return False, "Her gider kalemi için geçerli açıklama ve tutar zorunludur!", None
+            pm = str(item.get("payment_method") or "nakit").strip().lower()
+            if pm not in ("nakit", "kart"):
+                pm = "nakit"
+            ok_e, msg_e, _ = self.add_expense(
+                title=t,
+                amount=round(amt, 2),
+                category=str(item.get("category") or "Gün İçi Gider"),
+                expense_date=b_date,
+                note="POS / Gün Sonu gideri",
+                user_id=uid,
+                actor=act,
+                payment_method=pm,
+            )
+            if not ok_e:
+                return False, msg_e, None
+
+        changes_made = 0
+        now = get_turkey_now_str()
+
+        with self.db.get_connection() as conn:
+            fresh = conn.execute("SELECT * FROM cash_days WHERE id = ?", (day["id"],)).fetchone()
+            if not fresh:
+                return False, "Kasa günü bulunamadı!", None
+
+            # 1. Sabah kasa değişikliği
+            if opening_amount is not None:
+                new_open = round(float(opening_amount), 2)
+                if new_open < 0:
+                    return False, "Sabah kasa tutarı negatif olamaz!", None
+                old_open = round(float(fresh["opening_amount"] or 0.0), 2)
+                if abs(new_open - old_open) >= 0.005:
+                    conn.execute("UPDATE cash_days SET opening_amount = ? WHERE id = ?", (new_open, day["id"]))
+                    log_audit(
+                        action="MORNING_CASH_UPDATE",
+                        entity_type="cash_day",
+                        entity_id=day["id"],
+                        old_value={"business_date": b_date, "field": "Sabah Kasa", "amount": old_open},
+                        new_value={"business_date": b_date, "field": "Sabah Kasa", "amount": new_open, "updated_at": now},
+                        reason=clean_reason or f"Sabah kasa güncellendi ({old_open:.2f} ₺ → {new_open:.2f} ₺)",
+                        actor=act,
+                        user_id=uid,
+                        conn=conn,
+                    )
+                    changes_made += 1
+
+            # 2. Akşam kasa (sayılan nakit) girişi / değişikliği
+            if counted_cash is not None:
+                new_cc = round(float(counted_cash), 2)
+                if new_cc < 0:
+                    return False, "Akşam kasa (sayılan nakit) tutarı negatif olamaz!", None
+                old_cc_raw = fresh["counted_cash"]
+                old_cc = round(float(old_cc_raw), 2) if old_cc_raw is not None else None
+                if old_cc is None or abs(new_cc - old_cc) >= 0.005:
+                    conn.execute("UPDATE cash_days SET counted_cash = ?, closing_amount = ? WHERE id = ?", (new_cc, new_cc, day["id"]))
+                    act_code = "EVENING_CASH_SET" if old_cc is None else "EVENING_CASH_UPDATE"
+                    log_audit(
+                        action=act_code,
+                        entity_type="cash_day",
+                        entity_id=day["id"],
+                        old_value={"business_date": b_date, "field": "Akşam Kasa", "amount": old_cc} if old_cc is not None else None,
+                        new_value={"business_date": b_date, "field": "Akşam Kasa", "amount": new_cc, "updated_at": now},
+                        reason=clean_reason or (
+                            f"Akşam kasa ilk girişi: {new_cc:.2f} ₺"
+                            if old_cc is None
+                            else f"Akşam kasa güncellendi ({old_cc:.2f} ₺ → {new_cc:.2f} ₺)"
+                        ),
+                        actor=act,
+                        user_id=uid,
+                        conn=conn,
+                    )
+                    changes_made += 1
+
+            # 3. Akşam POS toplamı girişi / değişikliği
+            if entered_pos_total is not None:
+                new_pos = round(float(entered_pos_total), 2)
+                if new_pos < 0:
+                    return False, "POS tutarı negatif olamaz!", None
+                old_pos_raw = fresh["entered_pos_total"]
+                old_pos = round(float(old_pos_raw), 2) if old_pos_raw is not None else None
+                if old_pos is None or abs(new_pos - old_pos) >= 0.005:
+                    conn.execute("UPDATE cash_days SET entered_pos_total = ? WHERE id = ?", (new_pos, day["id"]))
+                    act_code = "EVENING_POS_SET" if old_pos is None else "EVENING_POS_UPDATE"
+                    log_audit(
+                        action=act_code,
+                        entity_type="cash_day",
+                        entity_id=day["id"],
+                        old_value={"business_date": b_date, "field": "Akşam POS", "amount": old_pos} if old_pos is not None else None,
+                        new_value={"business_date": b_date, "field": "Akşam POS", "amount": new_pos, "updated_at": now},
+                        reason=clean_reason or (
+                            f"Akşam POS ilk girişi: {new_pos:.2f} ₺"
+                            if old_pos is None
+                            else f"Akşam POS güncellendi ({old_pos:.2f} ₺ → {new_pos:.2f} ₺)"
+                        ),
+                        actor=act,
+                        user_id=uid,
+                        conn=conn,
+                    )
+                    changes_made += 1
+
+        summary = self.get_cash_summary(business_date=b_date, user_id=uid)
+        msg = "Kasa değerleri kaydedildi ve saatli geçmişe işlendi." if (changes_made > 0 or new_expenses) else "Değişiklik yapılmadı."
+        return True, msg, summary
+
+    def get_cash_day_value_history(
+        self,
+        business_date: Optional[str] = None,
+        user_id: Optional[Union[int, str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Belirtilen gün için sabah kasa, akşam kasa ve POS tutarlarının saatli değişiklik geçmişini döner."""
+        uid = self._resolve_user_id(user_id)
+        b_date = (business_date or get_turkey_now_str("%Y-%m-%d")).strip()[:10]
+        day = self.get_cash_day(business_date=b_date, user_id=uid)
+        if not day:
+            return []
+
+        target_actions = (
+            "CASH_DAY_OPEN",
+            "MORNING_CASH_UPDATE",
+            "EVENING_CASH_SET",
+            "EVENING_CASH_UPDATE",
+            "EVENING_POS_SET",
+            "EVENING_POS_UPDATE",
+            "CASH_DAY_CLOSE",
+            "DAY_REOPEN",
+        )
+        placeholders = ",".join("?" for _ in target_actions)
+        with self.db.get_connection() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT * FROM audit_logs
+                WHERE entity_type = 'cash_day'
+                  AND entity_id = ?
+                  AND action IN ({placeholders})
+                ORDER BY id ASC
+                """,
+                (str(day["id"]), *target_actions),
+            ).fetchall()
+
+        history: List[Dict[str, Any]] = []
+        field_labels = {
+            "CASH_DAY_OPEN": "Sabah Kasa (Açılış)",
+            "MORNING_CASH_UPDATE": "Sabah Kasa (Değişiklik)",
+            "EVENING_CASH_SET": "Akşam Kasa (İlk Giriş)",
+            "EVENING_CASH_UPDATE": "Akşam Kasa (Değişiklik)",
+            "EVENING_POS_SET": "Akşam POS (İlk Giriş)",
+            "EVENING_POS_UPDATE": "Akşam POS (Değişiklik)",
+            "CASH_DAY_CLOSE": "Gün Sonu Kapanış",
+            "DAY_REOPEN": "Gün Yeniden Açıldı",
+        }
+        for r in rows:
+            old_v = None
+            new_v = None
+            try:
+                old_v = json.loads(r["old_value"]) if r["old_value"] else None
+            except Exception:
+                old_v = None
+            try:
+                new_v = json.loads(r["new_value"]) if r["new_value"] else None
+            except Exception:
+                new_v = None
+
+            old_amt = None
+            new_amt = None
+            if isinstance(old_v, dict):
+                old_amt = old_v.get("amount") if old_v.get("amount") is not None else old_v.get("opening_amount")
+            if isinstance(new_v, dict):
+                if r["action"] == "CASH_DAY_CLOSE":
+                    new_amt = new_v.get("counted_cash")
+                else:
+                    new_amt = new_v.get("amount") if new_v.get("amount") is not None else new_v.get("opening_amount")
+
+            created = str(r["created_at"] or "")
+            time_str = created.split(" ")[1][:8] if " " in created else created
+            history.append({
+                "id": r["id"],
+                "action": r["action"],
+                "field_label": field_labels.get(r["action"], r["action"]),
+                "old_amount": round(float(old_amt), 2) if old_amt is not None else None,
+                "new_amount": round(float(new_amt), 2) if new_amt is not None else None,
+                "actor_name": r["actor_name"],
+                "actor_role": r["actor_role"],
+                "reason": r["reason"] or "",
+                "created_at": created,
+                "time": time_str,
+            })
+
+        return history
 
     def is_cash_day_closed(
         self,
@@ -3755,6 +4141,7 @@ class CloudDatabase:
         entered_pos_total: Optional[float] = None,
         entered_expenses_total: Optional[float] = None,
         pending_expenses: Optional[List[Dict[str, Any]]] = None,
+        opening_amount_override: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Kasa özeti ve gün sonu mutabakat hesabı (genişletilebilir formül motoruyla)."""
         uid = self._resolve_user_id(user_id)
@@ -3762,7 +4149,10 @@ class CloudDatabase:
         day = self.get_cash_day(business_date=b_date, user_id=uid)
         is_open = bool(day and day.get("status") == "open")
         is_closed = bool(day and day.get("status") == "closed")
-        opening_amount = round(float(day["opening_amount"]), 2) if day else 0.0
+        if opening_amount_override is not None and not is_closed:
+            opening_amount = round(float(opening_amount_override), 2)
+        else:
+            opening_amount = round(float(day["opening_amount"]), 2) if day else 0.0
 
         start_ts = f"{b_date} 00:00:00"
         end_ts = f"{b_date} 23:59:59"
@@ -3789,8 +4179,11 @@ class CloudDatabase:
             cash_sales_count = 0
             pos_sales = 0.0
             pos_sales_count = 0
+            credit_sales = 0.0
+            credit_sales_count = 0
             internet_sales = 0.0
             internet_sales_count = 0
+            total_sales_count = len(sales_rows)
             for sr in sales_rows:
                 amt = float(sr["total_amount"] or 0.0)
                 pm = str(sr["payment_method"] or "nakit").lower()
@@ -3801,8 +4194,9 @@ class CloudDatabase:
                     internet_sales += amt
                     internet_sales_count += 1
                 elif pm == "veresiye":
-                    # Tamamı veresiye: kasaya veya POS'a girmez
-                    continue
+                    # Tamamı veresiye: kasaya veya POS'a girmez, cari hesaba borç yazılır
+                    credit_sales += amt
+                    credit_sales_count += 1
                 elif pm == "karma" or p_cash > 0 or p_pos > 0:
                     if p_cash > 0:
                         cash_sales += p_cash
@@ -3810,6 +4204,10 @@ class CloudDatabase:
                     if p_pos > 0:
                         pos_sales += p_pos
                         pos_sales_count += 1
+                    rem_credit = round(amt - (p_cash + p_pos), 2)
+                    if rem_credit > 0.005:
+                        credit_sales += rem_credit
+                        credit_sales_count += 1
                 elif pm == "nakit":
                     cash_sales += amt
                     cash_sales_count += 1
@@ -3914,8 +4312,8 @@ class CloudDatabase:
                 else:
                     card_expenses += p_amt
 
-        eff_counted = counted_cash if counted_cash is not None else (day.get("counted_cash") if is_closed and day else None)
-        eff_pos = entered_pos_total if entered_pos_total is not None else (day.get("entered_pos_total") if is_closed and day else None)
+        eff_counted = counted_cash if counted_cash is not None else (day.get("counted_cash") if day else None)
+        eff_pos = entered_pos_total if entered_pos_total is not None else (day.get("entered_pos_total") if day else None)
         eff_exp = entered_expenses_total if entered_expenses_total is not None else (day.get("entered_expenses_total") if is_closed and day else None)
 
         rec = calculate_day_reconciliation(
@@ -3938,6 +4336,8 @@ class CloudDatabase:
         cash_in = round(other_cash_in + credit_collections_cash, 2)
         cash_out = round(patron_withdrawals + other_cash_out, 2)
         card_sales = round(pos_sales + internet_sales, 2)
+        credit_sales_r = round(credit_sales, 2)
+        total_revenue = round(rec["cash_sales"] + rec["pos_sales"] + credit_sales_r + rec["internet_sales"], 2)
 
         return {
             "business_date": b_date,
@@ -3949,8 +4349,12 @@ class CloudDatabase:
             "cash_sales_count": cash_sales_count,
             "pos_sales": rec["pos_sales"],
             "pos_sales_count": pos_sales_count,
+            "credit_sales": credit_sales_r,
+            "credit_sales_count": credit_sales_count,
             "internet_sales": rec["internet_sales"],
             "internet_sales_count": internet_sales_count,
+            "total_revenue": total_revenue,
+            "total_sales_count": total_sales_count,
             "card_sales": card_sales,
             "card_sales_count": pos_sales_count + internet_sales_count,
             "cash_expenses": rec["cash_expenses"],
@@ -3971,6 +4375,7 @@ class CloudDatabase:
             "has_difference": rec["has_difference"],
             "movements": movements,
             "expenses": expenses,
+            "value_history": self.get_cash_day_value_history(business_date=b_date, user_id=uid),
         }
 
     def close_cash_day(

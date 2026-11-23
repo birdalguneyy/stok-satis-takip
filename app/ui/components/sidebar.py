@@ -123,6 +123,8 @@ class Sidebar(ctk.CTkFrame):
             btn.pack_forget()
 
         for key, _label in NAV_ITEMS:
+            if key not in self._buttons:
+                continue
             if role == "personnel":
                 if key == "sales":
                     self._buttons[key].pack(fill="x", pady=2)

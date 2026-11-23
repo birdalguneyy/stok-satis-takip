@@ -688,10 +688,14 @@ def sync_status():
     src = cloud_db.firebase_cred_source or ""
     is_perm = bool(src and ("Ortam Değişkeni" in src or "secrets" in src))
     is_ephem = bool(src and "Yerel Dosya" in src)
+    health = cloud_db.get_firebase_health_info()
 
     return jsonify({
         "ok": True,
         "has_firebase": has_firebase,
+        "healthy": health["healthy"],
+        "consecutive_errors": health["consecutive_errors"],
+        "quota_blocked": health["quota_blocked"],
         "authenticated": bool(user_id is not None),
         "project_id": cloud_db.firebase_project_id,
         "cred_source": cloud_db.firebase_cred_source,
@@ -1109,7 +1113,7 @@ def record_sale():
     fb_backup = data.get("firebase_credentials_backup")
     if fb_backup and not cloud_db.ensure_firebase():
         try:
-            cloud_db.configure_firebase(fb_backup if isinstance(fb_backup, str) else json.dumps(fb_backup))
+            cloud_db.save_firebase_credentials(fb_backup if isinstance(fb_backup, str) else json.dumps(fb_backup))
         except Exception as e_fb:
             logger.warning(f"Satış sırasında Firebase yedek geri yükleme uyarısı: {e_fb}")
 
@@ -1783,6 +1787,101 @@ def open_cash_day_route():
     return jsonify({"ok": ok, "message": msg, "day": day_rec}), (200 if ok else 400)
 
 
+@app.route("/api/cash-day/update-values", methods=["POST"])
+def update_cash_day_values_route():
+    """Sabah kasa, akşam kasa, POS toplamı ve gün içi giderleri kaydeder; tüm tutar değişikliklerini saat + eski/yeni değer ile loglar."""
+    denied = enforce_permission("cash_day:open", "CASH_DAY_UPDATE_VALUES")
+    if denied:
+        return denied
+    user_id = get_current_user_id()
+    actor = get_current_actor()
+    data = request.json or {}
+    today_str = get_turkey_now_str("%Y-%m-%d")
+    b_date = str(data.get("business_date") or data.get("date") or today_str).strip()[:10]
+
+    if b_date != today_str and not has_permission(actor["role"], "day:reopen"):
+        log_unauthorized_attempt(
+            action="PAST_CASH_DAY_UPDATE",
+            resource="POST /api/cash-day/update-values",
+            actor=actor,
+            user_id=user_id,
+            ip_address=actor.get("ip_address"),
+            details={"requested_date": b_date},
+            db=cloud_db.db,
+        )
+        return jsonify({"ok": False, "forbidden": True, "message": "🚫 Çalışan sadece bugünün kasa değerlerini güncelleyebilir."}), 403
+
+    confirm_high = bool(data.get("confirm_high_amount", False))
+    parsed: Dict[str, Optional[float]] = {"opening_amount": None, "counted_cash": None, "entered_pos_total": None}
+    labels = {
+        "opening_amount": "Sabah kasa",
+        "counted_cash": "Akşam kasa",
+        "entered_pos_total": "POS toplamı",
+    }
+    for key, label in labels.items():
+        raw = data.get(key)
+        if raw is not None and str(raw).strip() != "":
+            chk = validate_monetary_amount(raw, field_label=label, allow_zero=True, confirm_high_amount=confirm_high)
+            if not chk["ok"]:
+                return jsonify({
+                    "ok": False,
+                    "message": chk["message"],
+                    "requires_confirmation": chk["requires_confirmation"],
+                }), (409 if chk["requires_confirmation"] else 400)
+            parsed[key] = chk["value"]
+
+    for exp_item in (data.get("new_expenses") or []):
+        exp_chk = validate_monetary_amount(
+            exp_item.get("amount"),
+            field_label="Gider tutarı",
+            allow_zero=False,
+            confirm_high_amount=confirm_high,
+        )
+        if not exp_chk["ok"]:
+            return jsonify({
+                "ok": False,
+                "message": exp_chk["message"],
+                "requires_confirmation": exp_chk["requires_confirmation"],
+            }), (409 if exp_chk["requires_confirmation"] else 400)
+
+    ok, msg, summary = cloud_db.update_cash_day_values(
+        business_date=b_date,
+        opening_amount=parsed["opening_amount"],
+        counted_cash=parsed["counted_cash"],
+        entered_pos_total=parsed["entered_pos_total"],
+        new_expenses=data.get("new_expenses") or [],
+        reason=str(data.get("reason") or "").strip(),
+        user_id=user_id,
+        actor=actor,
+    )
+    if ok:
+        notify_data_change(user_id)
+    return jsonify({"ok": ok, "message": msg, "summary": summary}), (200 if ok else 400)
+
+
+@app.route("/api/cash-day/history", methods=["GET"])
+def get_cash_day_history_route():
+    """Sabah kasa / akşam kasa / POS değişiklik geçmişini (saat kaçta kaç yazıldı -> sonra kaç yazıldı) döner."""
+    user_id = get_current_user_id()
+    actor = get_current_actor()
+    today_str = get_turkey_now_str("%Y-%m-%d")
+    req_date = (request.args.get("date") or today_str).strip()[:10]
+    if req_date != today_str and not has_permission(actor["role"], "cash:view"):
+        log_unauthorized_attempt(
+            action="PAST_CASH_HISTORY_ACCESS",
+            resource="GET /api/cash-day/history",
+            actor=actor,
+            user_id=user_id,
+            ip_address=actor.get("ip_address"),
+            details={"requested_date": req_date},
+            db=cloud_db.db,
+        )
+        return jsonify({"ok": False, "forbidden": True, "message": "🚫 Geçmiş gün kasa değişiklik geçmişi için Patron yetkisi gerekir."}), 403
+
+    history = cloud_db.get_cash_day_value_history(business_date=req_date, user_id=user_id)
+    return jsonify({"ok": True, "business_date": req_date, "history": history})
+
+
 @app.route("/api/cash-day/summary", methods=["GET"])
 def get_cash_day_summary_route():
     user_id = get_current_user_id()
@@ -2008,12 +2107,14 @@ def cash_day_reconciliation_route():
     if request.method == "POST":
         data = request.json or {}
         req_date = str(data.get("business_date") or data.get("date") or today_str).strip()[:10]
+        opening_amount_raw = data.get("opening_amount")
         counted_cash = data.get("counted_cash")
         entered_pos_total = data.get("entered_pos_total")
         entered_expenses_total = data.get("entered_expenses_total")
         pending_expenses = data.get("new_expenses") or data.get("pending_expenses") or []
     else:
         req_date = (request.args.get("date") or today_str).strip()[:10]
+        opening_amount_raw = request.args.get("opening_amount", type=float)
         counted_cash = request.args.get("counted_cash", type=float)
         entered_pos_total = request.args.get("entered_pos_total", type=float)
         entered_expenses_total = request.args.get("entered_expenses_total", type=float)
@@ -2032,6 +2133,7 @@ def cash_day_reconciliation_route():
         return jsonify({"ok": False, "forbidden": True, "message": "🚫 Geçmiş gün mutabakatını sadece Patron görüntüleyebilir."}), 403
 
     try:
+        o_amt = float(opening_amount_raw) if opening_amount_raw is not None and str(opening_amount_raw).strip() != "" else None
         c_cash = float(counted_cash) if counted_cash is not None and str(counted_cash).strip() != "" else None
         e_pos = float(entered_pos_total) if entered_pos_total is not None and str(entered_pos_total).strip() != "" else None
         e_exp = float(entered_expenses_total) if entered_expenses_total is not None and str(entered_expenses_total).strip() != "" else None
@@ -2045,6 +2147,7 @@ def cash_day_reconciliation_route():
         entered_pos_total=e_pos,
         entered_expenses_total=e_exp,
         pending_expenses=pending_expenses,
+        opening_amount_override=o_amt,
     )
     return jsonify({"ok": True, "reconciliation": summary, "role": actor["role"]})
 
@@ -2116,6 +2219,24 @@ def close_cash_day_route():
                 "requires_confirmation": exp_chk["requires_confirmation"],
             }), (409 if exp_chk["requires_confirmation"] else 400)
         ent_exp_val = exp_chk["value"]
+
+    # Kapanışta sabah kasa da düzenlendiyse önce saatli değişiklik kaydını işle
+    raw_open = data.get("opening_amount")
+    if raw_open is not None and str(raw_open).strip() != "":
+        open_chk = validate_monetary_amount(raw_open, field_label="Sabah kasa", allow_zero=True, confirm_high_amount=confirm_high)
+        if not open_chk["ok"]:
+            return jsonify({
+                "ok": False,
+                "message": open_chk["message"],
+                "requires_confirmation": open_chk["requires_confirmation"],
+            }), (409 if open_chk["requires_confirmation"] else 400)
+        cloud_db.update_cash_day_values(
+            business_date=b_date,
+            opening_amount=open_chk["value"],
+            reason=str(data.get("closing_note") or "Gün sonu sabah kasa düzeltmesi").strip(),
+            user_id=user_id,
+            actor=actor,
+        )
 
     ok, msg, summary = cloud_db.close_cash_day(
         counted_cash=cash_val["value"],
@@ -2664,6 +2785,8 @@ def _background_sync_loop():
     while True:
         try:
             time.sleep(25)
+            # Kopmuş veya ardışık hata veren Firebase gRPC bağlantısını otomatik iyileştir
+            cloud_db.check_firebase_health()
             cloud_db.push_offline_data_to_firebase()
 
             # Render ücretsiz sürümde sunucunun uykuya dalmasını önlemek için kendi dış URL'sine 3 dakikada bir ping at

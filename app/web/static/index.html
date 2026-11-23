@@ -1014,52 +1014,108 @@
     </div>
   </div>
 
+  <!-- POS HIZLI GÜN İÇİ GİDER YAZMA MODALI -->
+  <div id="pos-quick-expense-modal-overlay" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.92); backdrop-filter:blur(10px); z-index:9998; justify-content:center; align-items:center; padding:16px;">
+    <div class="card" style="width:100%; max-width:460px; max-height:90vh; overflow-y:auto; border:1px solid #F59E0B; box-shadow:0 18px 48px rgba(0,0,0,0.5);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:1px solid var(--border); padding-bottom:8px;">
+        <h3 style="margin:0; font-size:1.08rem; color:#F59E0B;">🧾 Gün İçi Gider Yaz</h3>
+        <button type="button" style="background:none; border:none; color:var(--text-muted); font-size:1.5rem; cursor:pointer;" onclick="closeQuickPosExpenseModal()">&times;</button>
+      </div>
+      <p style="font-size:0.78rem; color:var(--text-muted); margin:0 0 12px; line-height:1.45;">
+        Nakit seçilen giderler kasadaki beklenen nakitten anında düşülür; kart seçilenler kart gideri olarak kaydedilir.
+      </p>
+      <form onsubmit="submitQuickPosExpense(event)" style="display:flex; flex-direction:column; gap:10px;">
+        <div>
+          <label for="pos-qexp-title" style="display:block; font-size:0.78rem; font-weight:700; margin-bottom:4px;">Gider Açıklaması *</label>
+          <input type="text" id="pos-qexp-title" required placeholder="Örn: Su, Poşet, Yemek, Kargo..." style="width:100%; padding:9px 10px; font-size:0.9rem;">
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <div>
+            <label for="pos-qexp-amount" style="display:block; font-size:0.78rem; font-weight:700; margin-bottom:4px;">Tutar (₺) *</label>
+            <input type="number" id="pos-qexp-amount" step="0.01" min="0.01" required placeholder="0.00" style="width:100%; padding:9px 10px; font-size:0.95rem; font-weight:800;">
+          </div>
+          <div>
+            <label for="pos-qexp-pm" style="display:block; font-size:0.78rem; font-weight:700; margin-bottom:4px;">Ödeme Şekli *</label>
+            <select id="pos-qexp-pm" style="width:100%; padding:9px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); font-size:0.86rem; font-weight:700;">
+              <option value="nakit">💵 Kasadan Nakit</option>
+              <option value="kart">💳 Kart / POS</option>
+            </select>
+          </div>
+        </div>
+        <div style="display:flex; gap:8px; margin-top:4px;">
+          <button type="button" class="btn btn-secondary" style="flex:0.8;" onclick="closeQuickPosExpenseModal()">Kapat</button>
+          <button type="submit" id="btn-submit-qexp" class="btn" style="flex:1.4; background:linear-gradient(135deg, #F59E0B, #D97706); color:#fff; font-weight:800;">💾 Gideri Kaydet</button>
+        </div>
+      </form>
+      <div style="margin-top:14px; border-top:1px dashed var(--border); padding-top:10px;">
+        <div style="font-size:0.78rem; font-weight:800; margin-bottom:6px;">📋 Bugün Yazılan Giderler</div>
+        <div id="pos-qexp-today-list" style="font-size:0.78rem; color:var(--text-muted); max-height:170px; overflow-y:auto;"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- GÜN SONU KAPANIŞ & MUTABAKAT MODALI -->
   <div id="day-close-modal-overlay" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.92); backdrop-filter:blur(10px); z-index:9997; justify-content:center; align-items:center; padding:16px;">
-    <div class="card" style="width:100%; max-width:620px; max-height:92vh; overflow-y:auto; border:1px solid #6366F1; box-shadow:0 18px 48px rgba(0,0,0,0.5);">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid var(--border); padding-bottom:8px;">
-        <h3 style="margin:0; font-size:1.1rem;">🔒 Gün Sonu Kapanış & Mutabakat</h3>
-        <button type="button" style="background:none; border:none; color:var(--text-muted); font-size:1.5rem; cursor:pointer;" onclick="closeDayCloseModal()">&times;</button>
+    <div class="card" style="width:100%; max-width:650px; max-height:92vh; overflow-y:auto; border:1px solid #6366F1; box-shadow:0 18px 48px rgba(0,0,0,0.5);">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:12px; border-bottom:1px solid var(--border); padding-bottom:8px;">
+        <h3 style="margin:0; font-size:1.08rem;">📊 Gün Sonu Al — Otomatik Kasa & POS Kontrolü</h3>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <input type="date" id="dc-date-picker" onchange="onDayCloseDateChange(this.value)" title="Patron Gün Seçimi" style="display:none; padding:5px 8px; border-radius:8px; border:1px solid var(--border); background:var(--card-subtle); color:var(--text); font-size:0.78rem; font-weight:700;">
+          <button type="button" style="background:none; border:none; color:var(--text-muted); font-size:1.5rem; cursor:pointer;" onclick="closeDayCloseModal()">&times;</button>
+        </div>
       </div>
 
       <!-- AÇILIŞ -> KAPANIŞ ÖZET BANNER -->
-      <div id="dc-summary-banner" style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:12px;">
+      <div id="dc-summary-banner" style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:10px;">
         Yükleniyor...
       </div>
 
+      <!-- TEK BAKIŞTA GÜNÜN ÖZET ŞERİDİ -->
+      <div id="dc-quick-metrics-strip" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(115px, 1fr)); gap:6px; margin-bottom:12px;"></div>
+
       <!-- GÜN SONU GİRİŞLERİ (Sadece gün açıkken düzenlenebilir) -->
       <div id="dc-inputs-section" style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:12px;">
-        <div style="font-weight:700; font-size:0.86rem; margin-bottom:8px;">1️⃣ Gün Sonu Girişleri</div>
-        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px; margin-bottom:12px;">
+        <div style="font-weight:800; font-size:0.86rem; margin-bottom:8px;">1️⃣ Gün Sonu Sayım Girişleri</div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(175px, 1fr)); gap:10px; margin-bottom:12px;">
           <div>
-            <label for="dc-counted-cash" style="display:block; font-size:0.78rem; font-weight:700; margin-bottom:4px;">💵 Sayılan Nakit (Kasada Fiilen Olan ₺) *</label>
-            <input type="number" id="dc-counted-cash" step="0.01" min="0" placeholder="Örn: 170" oninput="refreshDayClosePreview()" style="width:100%; padding:9px; font-size:1rem; font-weight:800;">
+            <label for="dc-counted-cash" style="display:block; font-size:0.78rem; font-weight:800; color:#10B981; margin-bottom:3px;">💵 Kasadaki Toplam Nakit (Sabah Kasa Dahil) *</label>
+            <input type="number" id="dc-counted-cash" step="0.01" min="0" placeholder="Sabah kasa dahil tüm nakit" oninput="refreshDayClosePreview()" style="width:100%; padding:9px; font-size:1.05rem; font-weight:800; border-color:#10B981;">
+            <div style="font-size:0.68rem; color:var(--text-muted); margin-top:2px;">Çekmecedeki sabah kasa dahil tüm parayı sayıp yazın.</div>
           </div>
           <div>
-            <label for="dc-pos-total" style="display:block; font-size:0.78rem; font-weight:700; margin-bottom:4px;">💳 POS Gün Sonu Raporu Toplamı (₺) *</label>
-            <input type="number" id="dc-pos-total" step="0.01" min="0" placeholder="Örn: 450" oninput="refreshDayClosePreview()" style="width:100%; padding:9px; font-size:1rem; font-weight:800;">
+            <label for="dc-pos-total" style="display:block; font-size:0.78rem; font-weight:800; color:#3B82F6; margin-bottom:3px;">💳 POS Gün Sonu Toplamı (₺) *</label>
+            <input type="number" id="dc-pos-total" step="0.01" min="0" placeholder="POS Z raporu toplamı" oninput="refreshDayClosePreview()" style="width:100%; padding:9px; font-size:1.05rem; font-weight:800; border-color:#3B82F6;">
+            <div style="font-size:0.68rem; color:var(--text-muted); margin-top:2px;">POS cihazından aldığınız gün sonu toplamını yazın.</div>
+          </div>
+          <div>
+            <label for="dc-opening-cash" style="display:block; font-size:0.78rem; font-weight:700; margin-bottom:3px;">🌅 Sabah Kasa (₺)</label>
+            <input type="number" id="dc-opening-cash" step="0.01" min="0" placeholder="Örn: 250" oninput="refreshDayClosePreview()" style="width:100%; padding:9px; font-size:0.98rem; font-weight:700;">
+            <div style="font-size:0.68rem; color:var(--text-muted); margin-top:2px;">Değiştirilirse saatiyle eski → yeni kaydedilir.</div>
           </div>
         </div>
 
         <!-- KALEM KALEM GİDER EKLEME -->
         <div style="border-top:1px dashed var(--border); padding-top:10px;">
-          <div style="font-weight:700; font-size:0.8rem; margin-bottom:6px;">🧾 Giderler (Kalem Kalem — Nakit / Kart)</div>
+          <div style="font-weight:700; font-size:0.8rem; margin-bottom:6px;">🧾 Gün İçi Gider Ekle (Nakit gider kasadan otomatik düşülür)</div>
           <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">
-            <input type="text" id="dc-exp-title" placeholder="Gider açıklaması" style="flex:1.5; min-width:130px; padding:7px 9px; font-size:0.82rem;">
+            <input type="text" id="dc-exp-title" placeholder="Gider açıklaması (örn: Su, Kargo)" style="flex:1.5; min-width:130px; padding:7px 9px; font-size:0.82rem;">
             <input type="number" id="dc-exp-amount" step="0.01" min="0.01" placeholder="Tutar ₺" style="flex:0.7; min-width:85px; padding:7px 9px; font-size:0.82rem;">
             <select id="dc-exp-pm" style="flex:0.7; min-width:95px; padding:7px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); font-size:0.82rem;">
               <option value="nakit">💵 Nakit</option>
               <option value="kart">💳 Kart</option>
             </select>
-            <button type="button" class="btn btn-secondary" style="width:auto; padding:7px 12px; font-size:0.8rem;" onclick="addPendingDayCloseExpense()">➕ Ekle</button>
+            <button type="button" class="btn btn-secondary" style="width:auto; padding:7px 12px; font-size:0.8rem; font-weight:700;" onclick="addPendingDayCloseExpense()">➕ Gider Ekle</button>
           </div>
           <div id="dc-expenses-list" style="font-size:0.78rem; color:var(--text-muted);"></div>
         </div>
       </div>
 
+      <!-- CANLI OTO-KONTROL SONUÇ KARTI (AÇIK / FAZLALIK / TUTUYOR) -->
+      <div id="dc-autocheck-verdict" style="margin-bottom:12px;"></div>
+
       <!-- KARŞILAŞTIRMA TABLOSU: SİSTEM | GİRİLEN | FARK -->
       <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:12px;">
-        <div style="font-weight:700; font-size:0.86rem; margin-bottom:8px;">2️⃣ Karşılaştırma (Sistem | Girilen | Fark)</div>
+        <div style="font-weight:700; font-size:0.86rem; margin-bottom:8px;">2️⃣ Otomatik Karşılaştırma (Olması Gereken | Yazılan | Açık / Fazla)</div>
         <div id="dc-comparison-table"></div>
       </div>
 
@@ -1069,15 +1125,22 @@
         <div id="dc-breakdown-list" style="font-size:0.8rem;"></div>
       </div>
 
+      <!-- SABAH / AKŞAM KASA DEĞİŞİKLİK GEÇMİŞİ (SAAT KAÇTA KAÇ YAZILDI) -->
+      <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:12px;">
+        <div style="font-weight:700; font-size:0.86rem; margin-bottom:6px;">🕒 Sabah / Akşam Kasa Değişiklik Geçmişi</div>
+        <div id="dc-value-history-list" style="font-size:0.76rem; color:var(--text-muted); max-height:160px; overflow-y:auto;"></div>
+      </div>
+
       <!-- KAPANIŞ AÇIKLAMA NOTU & AKSİYONLAR -->
       <div id="dc-close-footer">
         <div style="margin-bottom:10px;">
-          <label for="dc-closing-note" id="dc-closing-note-label" style="display:block; font-size:0.8rem; font-weight:700; margin-bottom:4px;">Kapanış Açıklama Notu (Fark varsa zorunludur)</label>
-          <textarea id="dc-closing-note" rows="2" placeholder="Fark nedeni veya gün sonu notu..." style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--border); background:var(--card-subtle); color:var(--text); font-size:0.84rem;"></textarea>
+          <label for="dc-closing-note" id="dc-closing-note-label" style="display:block; font-size:0.8rem; font-weight:700; margin-bottom:4px;">Açıklama / Değişiklik Notu (Fark varsa zorunludur)</label>
+          <textarea id="dc-closing-note" rows="2" placeholder="Fark nedeni veya tutar değişiklik açıklaması..." style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--border); background:var(--card-subtle); color:var(--text); font-size:0.84rem;"></textarea>
         </div>
-        <div style="display:flex; gap:10px;">
-          <button type="button" class="btn btn-secondary" style="flex:1;" onclick="closeDayCloseModal()">Kapat</button>
-          <button type="button" id="btn-confirm-day-close" class="btn" style="flex:1.5; background:linear-gradient(135deg, #4F46E5, #6366F1); color:#fff; font-weight:800;" onclick="submitCloseCashDay()">🔒 Günü Kapat & Kilitle</button>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button type="button" class="btn btn-secondary" style="flex:0.8; min-width:85px;" onclick="closeDayCloseModal()">Kapat</button>
+          <button type="button" id="btn-save-cash-values" class="btn" style="flex:1.2; min-width:140px; background:#0EA5E9; color:#fff; font-weight:700;" onclick="saveCashDayValuesOnly()">💾 Değerleri Kaydet</button>
+          <button type="button" id="btn-confirm-day-close" class="btn" style="flex:1.4; min-width:155px; background:linear-gradient(135deg, #4F46E5, #6366F1); color:#fff; font-weight:800;" onclick="submitCloseCashDay()">🔒 Gün Sonu Al & Kapat</button>
         </div>
       </div>
     </div>
@@ -1981,10 +2044,14 @@
             <!-- VERESİYE / KARMA / FAZLA ÖDEME SEÇENEKLERİ -->
             <div id="pos-credit-options-box" style="display:none; margin-top:8px; padding:10px; border-radius:10px; background:var(--card-subtle); border:1px solid var(--border); font-size:0.8rem;">
               <div style="margin-bottom:6px;">
-                <label style="display:block; font-size:0.74rem; font-weight:700; margin-bottom:3px;">📒 Cari Müşteri (Seç veya yukarıya yeni ad yaz)</label>
-                <select id="pos-credit-customer-select" style="width:100%; padding:6px 8px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); font-size:0.8rem;">
+                <label style="display:block; font-size:0.74rem; font-weight:700; margin-bottom:3px;">📒 Kayıtlı Cari Müşteri Seçin</label>
+                <select id="pos-credit-customer-select" onchange="if(this.value){ const inp=document.getElementById('pos-inline-credit-name'); if(inp) inp.value=''; }" style="width:100%; padding:6px 8px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--text); font-size:0.8rem;">
                   <option value="">— Kayıtlı cari müşteri seçiniz —</option>
                 </select>
+              </div>
+              <div style="margin-bottom:6px;">
+                <label style="display:block; font-size:0.72rem; color:var(--text-muted); margin-bottom:3px;">veya Yeni Müşteri Adı Yazın (otomatik cari hesap açılır)</label>
+                <input type="text" id="pos-inline-credit-name" placeholder="Örn: Ahmet Yılmaz" style="width:100%; padding:6px 8px; font-size:0.82rem;">
               </div>
               <div id="pos-karma-inputs" style="display:none; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:6px;">
                 <div>
@@ -4957,6 +5024,9 @@
       const paymentMethod = pmRadio ? pmRadio.value : 'nakit';
       const creditCustSel = document.getElementById('pos-credit-customer-select');
       const selectedCreditCustId = (creditCustSel && creditCustSel.value) ? parseInt(creditCustSel.value) : null;
+      const inlineCreditInput = document.getElementById('pos-inline-credit-name');
+      const inlineCreditName = (inlineCreditInput?.value || '').trim();
+      const effectiveCustomerName = customerName || inlineCreditName;
       let paidCashAmt = null;
       let paidPosAmt = null;
       let overpayMode = null;
@@ -4970,6 +5040,25 @@
         }
       }
 
+      const needsCreditCustomer = (
+        paymentMethod === 'veresiye' ||
+        (paymentMethod === 'karma' && (
+          ((paidCashAmt + paidPosAmt) < (finalTotal - 0.005)) ||
+          (((paidCashAmt + paidPosAmt) > (finalTotal + 0.005)) && overpayMode !== 'change')
+        ))
+      );
+      if (needsCreditCustomer && !selectedCreditCustId && !effectiveCustomerName) {
+        showToast("⚠️ Veresiye satış için lütfen listeden cari müşteri seçin veya müşteri adı yazın!");
+        isCompletingPOSSale = false;
+        setContainerInteractive(posTab, true);
+        unlockScreenDuringTransaction();
+        if (btn) { btn.disabled = false; btn.classList.remove('btn-loading'); btn.innerHTML = 'Satışı Tamamla'; }
+        if (dropBtn) dropBtn.disabled = false;
+        if (cartContainer) { cartContainer.style.opacity = '1'; cartContainer.style.pointerEvents = 'auto'; }
+        setTimeout(() => inlineCreditInput?.focus(), 100);
+        return;
+      }
+
       try {
         const salePayload = {
           items: cartSnapshot,
@@ -4978,7 +5067,7 @@
           total_amount: finalTotal,
           payment_method: paymentMethod,
           customer_id: selectedCreditCustId,
-          customer_name: customerName || null,
+          customer_name: effectiveCustomerName || null,
           paid_cash_amount: paidCashAmt,
           paid_pos_amount: paidPosAmt,
           overpayment_mode: overpayMode,
@@ -5012,10 +5101,19 @@
         if (json.ok) {
           playBeep();
           showToast(json.message || "✅ Satış başarıyla tamamlandı!", json.queued_offline ? 4200 : 2800);
-          // Sepeti ve toplamı anında sıfırla
+          // Sepeti, toplamı ve ödeme tipini bir sonraki müşteri için Nakit'e sıfırla
           posCart = [];
           posCustomTotal = null;
           if (custNameInput) custNameInput.value = '';
+          if (inlineCreditInput) inlineCreditInput.value = '';
+          if (creditCustSel) creditCustSel.value = '';
+          const paidCashEl = document.getElementById('pos-paid-cash');
+          const paidPosEl = document.getElementById('pos-paid-pos');
+          if (paidCashEl) paidCashEl.value = '0';
+          if (paidPosEl) paidPosEl.value = '0';
+          const nakitRadio = document.querySelector('input[name="pos-payment-method"][value="nakit"]');
+          if (nakitRadio) nakitRadio.checked = true;
+          onPosPaymentModeChange();
           renderPOSCart();
           if (Array.isArray(json.recent_sales)) {
             loadRecentPOSSales(json.recent_sales);
@@ -7609,10 +7707,10 @@
 
     let isSyncingProcess = false;
     let _isAutoRestoringFirebase = false;
-    let _firebaseAutoRestoreFailed = false;
+    let _firebaseAutoRestoreRetryAfter = 0;
 
     async function autoRestoreFirebaseCredentials(backupCred) {
-      if (_isAutoRestoringFirebase || _firebaseAutoRestoreFailed) return;
+      if (_isAutoRestoringFirebase || Date.now() < _firebaseAutoRestoreRetryAfter) return;
       _isAutoRestoringFirebase = true;
       try {
         const res = await fetchWithAuth('/api/firebase/config', {
@@ -7622,6 +7720,7 @@
         });
         const json = await res.json();
         if (json.ok) {
+          _firebaseAutoRestoreRetryAfter = 0;
           showToast("🔄 Firebase bağlantısı tarayıcı önbelleğinden otomatik yenilendi.");
           await checkSyncStatus();
           try { await loadProducts(); } catch(e) {}
@@ -7631,10 +7730,11 @@
           try { if (typeof loadFarmFeedPurchasesWeb === 'function') await loadFarmFeedPurchasesWeb(); } catch(e) {}
           try { if (typeof loadExpenses === 'function') await loadExpenses(); } catch(e) {}
         } else {
-          _firebaseAutoRestoreFailed = true;
+          // Kalıcı vazgeçme yerine 30 saniye sonra tekrar dene
+          _firebaseAutoRestoreRetryAfter = Date.now() + 30000;
         }
       } catch (err) {
-        _firebaseAutoRestoreFailed = true;
+        _firebaseAutoRestoreRetryAfter = Date.now() + 20000;
       } finally {
         _isAutoRestoringFirebase = false;
       }
@@ -7649,15 +7749,16 @@
         if (json.ok) {
           if (!json.has_firebase) {
             const backupCred = localStorage.getItem('stok_firebase_cred_backup');
-            if (backupCred && !_isAutoRestoringFirebase && !_firebaseAutoRestoreFailed) {
+            if (json.authenticated && backupCred && !_isAutoRestoringFirebase && Date.now() >= _firebaseAutoRestoreRetryAfter) {
               autoRestoreFirebaseCredentials(backupCred);
             }
-            const shortReason = json.last_error && json.last_error.includes('bulunamadı') ? 'Yapılandırılmadı' : 'Bağlantı Yok';
+            const shortReason = json.last_error && json.last_error.includes('bulunamadı') ? 'Yapılandırılmadı' : 'Yeniden Bağlanıyor';
             badge.innerText = `🔥 🔴 Firebase (${shortReason})`;
             badge.style.background = 'rgba(239, 68, 68, 0.2)';
             badge.style.color = '#EF4444';
             badge.title = json.last_error || 'Firebase bağlantısı kurulamadı. Tıklayarak ayarlayınız.';
           } else {
+            _firebaseAutoRestoreRetryAfter = 0;
             // Sunucuda Firebase bağlıysa ve yerel yedek henüz yoksa, arka planda güvenle yedek al
             if (!localStorage.getItem('stok_firebase_cred_backup')) {
               fetchWithAuth('/api/firebase/export-config')
@@ -8392,30 +8493,39 @@
         } else if (!s.is_open) {
           bar.style.borderColor = '#F59E0B';
           bar.style.background = 'rgba(245, 158, 11, 0.1)';
-          txt.innerHTML = `<b style="color:#D97706;">🔒 Gün Açılışı Yapılmadı (${s.business_date})</b><div style="font-size:0.76rem; color:var(--text-muted); margin-top:2px;">Satış girişi yapabilmek için önce açılış kasasını girerek günü açınız.</div>`;
-          acts.innerHTML = `<button type="button" class="btn" style="width:auto; padding:7px 14px; font-size:0.8rem; background:linear-gradient(135deg, #10B981, #059669); color:#fff;" onclick="openCashDayModal()">🔓 Günü Aç (Açılış Kasası)</button>`;
+          txt.innerHTML = `<b style="color:#D97706;">🌅 Gün Açılışı Bekleniyor (${s.business_date})</b><div style="font-size:0.76rem; color:var(--text-muted); margin-top:2px;">Satışlara başlamak için önce sabah açılış kasasını giriniz.</div>`;
+          acts.innerHTML = `<button type="button" class="btn" style="width:auto; padding:7px 14px; font-size:0.8rem; background:linear-gradient(135deg, #10B981, #059669); color:#fff; font-weight:800;" onclick="openCashDayModal()">🌅 Sabah Kasasını Gir & Günü Aç</button>`;
+          if (!window._autoPromptedCashDayOpen && sessionStorage.getItem('gate_unlocked') === 'true') {
+            window._autoPromptedCashDayOpen = true;
+            setTimeout(() => openCashDayModal(), 250);
+          }
         } else {
           bar.style.borderColor = 'rgba(16, 185, 129, 0.45)';
           bar.style.background = 'var(--card)';
           const openTime = (s.day?.opened_at || '').split(' ')[1]?.slice(0, 5) || '';
           const openBy = s.day?.opened_by || 'Patron';
+          const eveningSavedTxt = (s.day?.counted_cash != null)
+            ? ` · 🌙 Akşam Kasa: <b style="color:#6366F1;">${Number(s.day.counted_cash).toFixed(2)} ₺</b>`
+            : '';
           txt.innerHTML = `
             <div style="font-size:0.9rem; font-weight:800; color:var(--text);">
-              💰 Açılış: <span style="color:var(--accent);">${Number(s.opening_amount).toFixed(2)} ₺</span>
+              🌅 Sabah Kasa: <span style="color:var(--accent);">${Number(s.opening_amount).toFixed(2)} ₺</span>
               <span style="margin:0 6px; color:var(--text-muted);">→</span>
-              Şu anki beklenen nakit: <span style="color:#10B981;">${Number(s.expected_cash).toFixed(2)} ₺</span>
+              Kasada Olması Gereken (Sabah Dahil): <span style="color:#10B981;">${Number(s.expected_cash).toFixed(2)} ₺</span>${eveningSavedTxt}
             </div>
             <div style="font-size:0.73rem; color:var(--text-muted); margin-top:3px; display:flex; gap:10px; flex-wrap:wrap;">
-              <span>+ Nakit Satış: <b>${Number(s.cash_sales).toFixed(2)} ₺</b> (${s.cash_sales_count})</span>
-              <span>− Nakit Gider: <b style="color:var(--danger);">${Number(s.cash_expenses || 0).toFixed(2)} ₺</b></span>
-              <span>+ Giriş: <b>${Number(s.cash_in).toFixed(2)} ₺</b></span>
-              <span>− Çıkış: <b style="color:var(--danger);">${Number(s.cash_out).toFixed(2)} ₺</b></span>
+              <span>💵 Nakit Satış: <b>+${Number(s.cash_sales).toFixed(2)} ₺</b> (${s.cash_sales_count})</span>
+              <span>💳 POS Satış: <b style="color:#3B82F6;">+${Number(s.pos_sales || 0).toFixed(2)} ₺</b> (${s.pos_sales_count || 0})</span>
+              ${(s.credit_sales || 0) > 0 ? `<span>📒 Veresiye: <b style="color:#D97706;">${Number(s.credit_sales).toFixed(2)} ₺</b> (${s.credit_sales_count || 0})</span>` : ''}
+              <span>🧾 Nakit Gider: <b style="color:var(--danger);">−${Number(s.cash_expenses || 0).toFixed(2)} ₺</b></span>
               <span>• Açan: ${openBy} (${openTime})</span>
             </div>
           `;
           acts.innerHTML = `
-            <button type="button" class="btn btn-secondary" style="width:auto; padding:6px 12px; font-size:0.78rem; font-weight:700;" onclick="openCashDrawerModal()">💰 Kasa & Hareketler</button>
-            <button type="button" class="btn" style="width:auto; padding:6px 12px; font-size:0.78rem; font-weight:700; background:#4F46E5; color:#fff;" onclick="openDayCloseModal()">🔒 Gün Sonu Kapanış</button>
+            <button type="button" class="btn btn-secondary" style="width:auto; padding:6px 10px; font-size:0.76rem; font-weight:700;" onclick="openCreditModal()">📒 Veresiye</button>
+            <button type="button" class="btn btn-secondary" style="width:auto; padding:6px 10px; font-size:0.76rem; font-weight:700; border-color:#F59E0B; color:#D97706;" onclick="openQuickPosExpenseModal()">🧾 Gider Yaz</button>
+            <button type="button" class="btn btn-secondary" style="width:auto; padding:6px 10px; font-size:0.76rem; font-weight:700;" onclick="openCashDrawerModal()">💰 Kasa</button>
+            <button type="button" class="btn" style="width:auto; padding:6px 12px; font-size:0.78rem; font-weight:800; background:linear-gradient(135deg, #4F46E5, #6366F1); color:#fff;" onclick="openDayCloseModal(false)">📊 Gün Sonu Al</button>
           `;
         }
 
@@ -8550,22 +8660,153 @@
     }
 
     // ════════════════════════════════════════════════════════════════════
+    // 🧾 POS HIZLI GÜN İÇİ GİDER YAZMA
+    // ════════════════════════════════════════════════════════════════════
+    function renderQuickPosExpenseTodayList() {
+      const box = document.getElementById('pos-qexp-today-list');
+      if (!box) return;
+      const exps = (window._todayCashSummary?.expenses || []).filter(e => e.status !== 'cancelled');
+      if (!exps.length) {
+        box.innerHTML = '<div style="padding:6px 0;">Bugün henüz gider yazılmadı.</div>';
+        return;
+      }
+      box.innerHTML = exps.map(e => `
+        <div style="display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px dashed var(--border);">
+          <span><b>${e.title}</b> <span style="font-size:0.72rem;">(${e.payment_method === 'kart' ? '💳 Kart' : '💵 Nakit'})</span></span>
+          <b style="color:var(--danger);">−${Number(e.amount || 0).toFixed(2)} ₺</b>
+        </div>
+      `).join('');
+    }
+
+    function openQuickPosExpenseModal() {
+      const s = window._todayCashSummary;
+      if (s && s.is_closed) {
+        showToast("🔒 Gün kapatılmış! Kapanan güne gider eklenemez.");
+        return;
+      }
+      if (s && !s.is_open) {
+        showToast("⚠️ Önce sabah kasasını girerek günü açınız!");
+        openCashDayModal();
+        return;
+      }
+      const m = document.getElementById('pos-quick-expense-modal-overlay');
+      if (m) m.style.display = 'flex';
+      renderQuickPosExpenseTodayList();
+      setTimeout(() => document.getElementById('pos-qexp-title')?.focus(), 100);
+    }
+
+    function closeQuickPosExpenseModal() {
+      const m = document.getElementById('pos-quick-expense-modal-overlay');
+      if (m) m.style.display = 'none';
+    }
+
+    async function submitQuickPosExpense(e) {
+      e.preventDefault();
+      const titleEl = document.getElementById('pos-qexp-title');
+      const amtEl = document.getElementById('pos-qexp-amount');
+      const pmEl = document.getElementById('pos-qexp-pm');
+      const title = (titleEl?.value || '').trim();
+      const amount = parseFloat(amtEl?.value || '0');
+      const payment_method = pmEl ? pmEl.value : 'nakit';
+
+      if (!title) {
+        showToast("⚠️ Gider açıklaması boş olamaz!");
+        return;
+      }
+      if (isNaN(amount) || amount <= 0) {
+        showToast("⚠️ Gider tutarı 0'dan büyük olmalıdır!");
+        return;
+      }
+
+      const sendExp = async (confirmHigh = false) => {
+        const r = await fetchWithAuth('/api/cash-day/update-values', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            new_expenses: [{ title, amount: Number(amount.toFixed(2)), payment_method }],
+            reason: `Gün içi gider: ${title}`,
+            confirm_high_amount: confirmHigh
+          })
+        });
+        return { res: r, json: await r.json() };
+      };
+
+      try {
+        let { res, json } = await sendExp(false);
+        if (res.status === 409 && json.requires_confirmation) {
+          if (!confirm(json.message)) return;
+          ({ res, json } = await sendExp(true));
+        }
+        if (json.ok) {
+          showToast(`✅ Gider kaydedildi: ${title} (${Number(amount).toFixed(2)} ₺)`);
+          if (titleEl) titleEl.value = '';
+          if (amtEl) amtEl.value = '';
+          if (json.summary) window._todayCashSummary = json.summary;
+          await loadTodayCashSummary();
+          renderQuickPosExpenseTodayList();
+          if (typeof loadExpenses === 'function' && window.currentUserRole !== 'calisan') loadExpenses();
+        } else {
+          showToast("⚠️ " + (json.message || "Gider kaydedilemedi!"));
+        }
+      } catch (err) {
+        showToast("⚠️ Gider kaydedilirken bağlantı hatası oluştu.");
+      }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
     // 🔒 GÜN SONU KAPANIŞ & MUTABAKAT İŞ MANTIĞI
     // ════════════════════════════════════════════════════════════════════
     let _dcPendingExpenses = [];
     let _dcLastReconciliation = null;
+    let _dcSelectedDate = null;
 
-    function openDayCloseModal() {
+    function openDayCloseModal(focusExpense = false, customDate = null) {
       _dcPendingExpenses = [];
       const m = document.getElementById('day-close-modal-overlay');
       if (m) m.style.display = 'flex';
+      const s = window._todayCashSummary;
+      const todayDate = s?.business_date || new Date().toISOString().slice(0, 10);
+      _dcSelectedDate = customDate || todayDate;
+
+      const datePicker = document.getElementById('dc-date-picker');
+      if (datePicker) {
+        datePicker.style.display = (window.currentUserRole !== 'calisan') ? 'inline-block' : 'none';
+        datePicker.value = _dcSelectedDate;
+      }
+
       const noteEl = document.getElementById('dc-closing-note');
       if (noteEl) noteEl.value = '';
+      const openEl = document.getElementById('dc-opening-cash');
       const cashEl = document.getElementById('dc-counted-cash');
       const posEl = document.getElementById('dc-pos-total');
+      if (_dcSelectedDate === todayDate && s) {
+        if (openEl) openEl.value = (s.opening_amount != null) ? Number(s.opening_amount) : '';
+        if (cashEl) cashEl.value = (s.day && s.day.counted_cash != null) ? Number(s.day.counted_cash) : '';
+        if (posEl) posEl.value = (s.day && s.day.entered_pos_total != null) ? Number(s.day.entered_pos_total) : '';
+      } else {
+        if (openEl) openEl.value = '';
+        if (cashEl) cashEl.value = '';
+        if (posEl) posEl.value = '';
+      }
+      refreshDayClosePreview(true);
+      if (focusExpense) {
+        setTimeout(() => { document.getElementById('dc-exp-title')?.focus(); }, 150);
+      } else {
+        setTimeout(() => { document.getElementById('dc-counted-cash')?.focus(); }, 150);
+      }
+    }
+
+    async function onDayCloseDateChange(newDate) {
+      if (!newDate) return;
+      _dcSelectedDate = newDate;
+      _dcPendingExpenses = [];
+      const openEl = document.getElementById('dc-opening-cash');
+      const cashEl = document.getElementById('dc-counted-cash');
+      const posEl = document.getElementById('dc-pos-total');
+      if (openEl) openEl.value = '';
       if (cashEl) cashEl.value = '';
       if (posEl) posEl.value = '';
-      refreshDayClosePreview();
+      await refreshDayClosePreview(true);
     }
 
     function closeDayCloseModal() {
@@ -8573,7 +8814,7 @@
       if (m) m.style.display = 'none';
     }
 
-    function addPendingDayCloseExpense() {
+    async function addPendingDayCloseExpense() {
       const titleEl = document.getElementById('dc-exp-title');
       const amtEl = document.getElementById('dc-exp-amount');
       const pmEl = document.getElementById('dc-exp-pm');
@@ -8589,6 +8830,32 @@
         showToast("⚠️ Gider tutarı 0'dan büyük olmalıdır!");
         return;
       }
+
+      // Gün açıksa gideri anında veritabanına kaydet ki pencere kapansa bile kaybolmasın
+      if (_dcLastReconciliation && _dcLastReconciliation.is_open && !_dcLastReconciliation.is_closed) {
+        try {
+          const r = await fetchWithAuth('/api/cash-day/update-values', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              business_date: _dcSelectedDate,
+              new_expenses: [{ title, amount: Number(amount.toFixed(2)), payment_method }],
+              reason: `Gün sonu ekranından gider: ${title}`
+            })
+          });
+          const json = await r.json();
+          if (json.ok) {
+            if (titleEl) titleEl.value = '';
+            if (amtEl) amtEl.value = '';
+            showToast(`✅ Gider kaydedildi: ${title}`);
+            await loadTodayCashSummary();
+            await refreshDayClosePreview();
+            if (typeof loadExpenses === 'function' && window.currentUserRole !== 'calisan') loadExpenses();
+            return;
+          }
+        } catch (e) {}
+      }
+
       _dcPendingExpenses.push({ title, amount: Number(amount.toFixed(2)), payment_method });
       if (titleEl) titleEl.value = '';
       if (amtEl) amtEl.value = '';
@@ -8600,12 +8867,15 @@
       refreshDayClosePreview();
     }
 
-    async function refreshDayClosePreview() {
+    async function refreshDayClosePreview(hydrateInputs = false) {
+      const openRaw = document.getElementById('dc-opening-cash')?.value;
       const cashRaw = document.getElementById('dc-counted-cash')?.value;
       const posRaw = document.getElementById('dc-pos-total')?.value;
       const payload = {
-        counted_cash: (cashRaw !== undefined && cashRaw !== '') ? parseFloat(cashRaw) : null,
-        entered_pos_total: (posRaw !== undefined && posRaw !== '') ? parseFloat(posRaw) : null,
+        business_date: _dcSelectedDate || undefined,
+        opening_amount: (!hydrateInputs && openRaw !== undefined && openRaw !== '') ? parseFloat(openRaw) : null,
+        counted_cash: (!hydrateInputs && cashRaw !== undefined && cashRaw !== '') ? parseFloat(cashRaw) : null,
+        entered_pos_total: (!hydrateInputs && posRaw !== undefined && posRaw !== '') ? parseFloat(posRaw) : null,
         new_expenses: _dcPendingExpenses
       };
 
@@ -8619,18 +8889,27 @@
         if (!json.ok || !json.reconciliation) return;
         const r = json.reconciliation;
         _dcLastReconciliation = r;
+        if (hydrateInputs) {
+          const openEl = document.getElementById('dc-opening-cash');
+          const cashEl = document.getElementById('dc-counted-cash');
+          const posEl = document.getElementById('dc-pos-total');
+          if (openEl && openEl.value === '' && r.opening_amount != null) openEl.value = Number(r.opening_amount);
+          if (cashEl && cashEl.value === '' && r.day && r.day.counted_cash != null) cashEl.value = Number(r.day.counted_cash);
+          if (posEl && posEl.value === '' && r.day && r.day.entered_pos_total != null) posEl.value = Number(r.day.entered_pos_total);
+        }
         renderDayCloseModalState(r);
       } catch (e) {}
     }
 
     function renderDayCloseModalState(r) {
       const banner = document.getElementById('dc-summary-banner');
+      const quickStrip = document.getElementById('dc-quick-metrics-strip');
+      const verdictBox = document.getElementById('dc-autocheck-verdict');
       const inputsSec = document.getElementById('dc-inputs-section');
       const footerSec = document.getElementById('dc-close-footer');
       const compBox = document.getElementById('dc-comparison-table');
       const breakBox = document.getElementById('dc-breakdown-list');
       const expBox = document.getElementById('dc-expenses-list');
-      const noteLabel = document.getElementById('dc-closing-note-label');
 
       const closingDisplay = r.comparison?.cash?.entered != null
         ? Number(r.comparison.cash.entered).toFixed(2)
@@ -8639,21 +8918,87 @@
       if (banner) {
         const diffBanner = r.has_difference ? `
           <div style="margin-top:6px; padding:6px 10px; border-radius:8px; background:rgba(239,68,68,0.16); border:1px solid rgba(239,68,68,0.4); color:#EF4444; font-size:0.78rem; font-weight:800;">
-            🚨 DİKKAT: Gün sonu mutabakatında fark tespit edildi! (Nakit: ${r.comparison?.cash?.label || '-'} | POS: ${r.comparison?.pos?.label || '-'} | Gider: ${r.comparison?.expenses?.label || '-'})
+            🚨 DİKKAT: Gün sonu mutabakatında fark tespit edildi! (Nakit: ${r.comparison?.cash?.label || '-'} | POS: ${r.comparison?.pos?.label || '-'})
           </div>
         ` : '';
         banner.innerHTML = `
           <div style="font-size:1rem; font-weight:900; color:var(--text);">
-            Açılış: <span style="color:var(--accent);">${Number(r.opening_amount).toFixed(2)} ₺</span>
+            🌅 Sabah Kasa: <span style="color:var(--accent);">${Number(r.opening_amount).toFixed(2)} ₺</span>
             <span style="margin:0 6px;">→</span>
-            Kapanış: <span style="color:${r.is_closed ? '#6366F1' : '#10B981'};">${closingDisplay} ₺</span>
+            🎯 Beklenen Kasa (Sabah Dahil): <span style="color:#10B981;">${Number(r.expected_cash).toFixed(2)} ₺</span>
+            ${r.comparison?.cash?.entered != null ? `<span style="margin:0 6px;">|</span> 🌙 Yazılan: <span style="color:#6366F1;">${closingDisplay} ₺</span>` : ''}
           </div>
           <div style="font-size:0.74rem; color:var(--text-muted); margin-top:3px;">
             Tarih: <b>${r.business_date}</b> · Durum: <b>${r.is_closed ? '🔒 Kapatıldı' : (r.is_open ? '🟢 Açık' : '⚠️ Açılmadı')}</b>
+            ${r.day?.opened_by ? ` · Açan: <b>${r.day.opened_by}</b>` : ''}
+            ${r.day?.closed_by ? ` · Kapatan: <b>${r.day.closed_by}</b>` : ''}
             ${r.day?.closing_note ? ` · Not: <i>${r.day.closing_note}</i>` : ''}
           </div>
           ${diffBanner}
         `;
+      }
+
+      if (quickStrip) {
+        const metricCard = (lbl, val, col) => `
+          <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:10px; padding:7px 9px;">
+            <div style="font-size:0.68rem; color:var(--text-muted); font-weight:700;">${lbl}</div>
+            <div style="font-size:0.9rem; font-weight:900; color:${col}; margin-top:2px;">${val}</div>
+          </div>
+        `;
+        quickStrip.innerHTML = [
+          metricCard('💵 Nakit Satış', `${Number(r.cash_sales || 0).toFixed(2)} ₺`, '#10B981'),
+          metricCard('💳 POS Satış', `${Number(r.pos_sales || 0).toFixed(2)} ₺`, '#3B82F6'),
+          metricCard('📒 Veresiye Satış', `${Number(r.credit_sales || 0).toFixed(2)} ₺`, '#D97706'),
+          metricCard('🧾 Toplam Gider', `${Number(r.total_expenses || 0).toFixed(2)} ₺`, 'var(--danger)'),
+          metricCard('💰 Günlük Ciro', `${Number(r.total_revenue || 0).toFixed(2)} ₺`, 'var(--accent)'),
+        ].join('');
+      }
+
+      if (verdictBox) {
+        const cashCmp = r.comparison?.cash || {};
+        const posCmp = r.comparison?.pos || {};
+        const bothEntered = (cashCmp.entered != null && posCmp.entered != null);
+        const anyEntered = (cashCmp.entered != null || posCmp.entered != null);
+
+        if (!anyEntered) {
+          verdictBox.innerHTML = `
+            <div style="padding:10px 12px; border-radius:12px; background:rgba(59,130,246,0.1); border:1px dashed rgba(59,130,246,0.45); font-size:0.8rem; color:var(--text);">
+              ℹ️ Yukarıya <b>Kasadaki Toplam Nakiti (Sabah Kasa Dahil)</b> ve <b>POS Gün Sonu Toplamını</b> yazdığınız anda sistem otomatik olarak açık veya fazlalık kontrolü yapar.
+            </div>
+          `;
+        } else if (bothEntered && cashCmp.status === 'match' && posCmp.status === 'match') {
+          verdictBox.innerHTML = `
+            <div style="padding:12px 14px; border-radius:12px; background:rgba(16,185,129,0.16); border:2px solid #10B981; color:#059669; font-weight:900; font-size:0.9rem;">
+              ✅ OTO-KONTROL SONUCU: KASA VE POS TAM TUTUYOR — AÇIK VEYA FAZLALIK YOK!
+            </div>
+          `;
+        } else {
+          const lines = [];
+          if (cashCmp.entered != null) {
+            if (cashCmp.status === 'shortage') {
+              lines.push(`🔴 <b>NAKİT KASA AÇIĞI:</b> Kasada <b>${Math.abs(Number(cashCmp.diff)).toFixed(2)} ₺ EKSİK</b> var! (Olması gereken: ${Number(cashCmp.system).toFixed(2)} ₺ · Sayılan: ${Number(cashCmp.entered).toFixed(2)} ₺)`);
+            } else if (cashCmp.status === 'surplus') {
+              lines.push(`🟠 <b>NAKİT KASA FAZLASI:</b> Kasada <b>+${Number(cashCmp.diff).toFixed(2)} ₺ FAZLALIK</b> var! (Olması gereken: ${Number(cashCmp.system).toFixed(2)} ₺ · Sayılan: ${Number(cashCmp.entered).toFixed(2)} ₺)`);
+            } else {
+              lines.push(`✅ <b>Nakit Kasa:</b> Tam tutuyor (${Number(cashCmp.entered).toFixed(2)} ₺)`);
+            }
+          }
+          if (posCmp.entered != null) {
+            if (posCmp.status === 'shortage') {
+              lines.push(`🔴 <b>POS AÇIĞI:</b> POS toplamında <b>${Math.abs(Number(posCmp.diff)).toFixed(2)} ₺ EKSİK</b> var! (Sistem: ${Number(posCmp.system).toFixed(2)} ₺ · Yazılan: ${Number(posCmp.entered).toFixed(2)} ₺)`);
+            } else if (posCmp.status === 'surplus') {
+              lines.push(`🟠 <b>POS FAZLASI:</b> POS toplamında <b>+${Number(posCmp.diff).toFixed(2)} ₺ FAZLALIK</b> var! (Sistem: ${Number(posCmp.system).toFixed(2)} ₺ · Yazılan: ${Number(posCmp.entered).toFixed(2)} ₺)`);
+            } else {
+              lines.push(`✅ <b>POS Toplamı:</b> Tam tutuyor (${Number(posCmp.entered).toFixed(2)} ₺)`);
+            }
+          }
+          const hasErr = (cashCmp.status === 'shortage' || cashCmp.status === 'surplus' || posCmp.status === 'shortage' || posCmp.status === 'surplus');
+          verdictBox.innerHTML = `
+            <div style="padding:11px 14px; border-radius:12px; background:${hasErr ? 'rgba(239,68,68,0.13)' : 'rgba(16,185,129,0.12)'}; border:2px solid ${hasErr ? '#EF4444' : '#10B981'}; font-size:0.82rem; line-height:1.55;">
+              ${lines.map(l => `<div>${l}</div>`).join('')}
+            </div>
+          `;
+        }
       }
 
       if (inputsSec) inputsSec.style.display = r.is_closed ? 'none' : 'block';
@@ -8668,13 +9013,25 @@
               ${reopenHtml}
             </div>
           `;
+        } else {
+          const prevNote = document.getElementById('dc-closing-note')?.value || '';
+          const noteLabelHtml = r.has_difference
+            ? `<span style="color:var(--danger);">⚠️ Fark bulundu — Kapanış Açıklama Notu ZORUNLU *</span>`
+            : `Açıklama / Değişiklik Notu (Fark yoksa opsiyonel)`;
+          footerSec.innerHTML = `
+            <div style="margin-bottom:10px;">
+              <label for="dc-closing-note" id="dc-closing-note-label" style="display:block; font-size:0.8rem; font-weight:700; margin-bottom:4px;">${noteLabelHtml}</label>
+              <textarea id="dc-closing-note" rows="2" placeholder="Fark nedeni veya tutar değişiklik açıklaması..." style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--border); background:var(--card-subtle); color:var(--text); font-size:0.84rem;"></textarea>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button type="button" class="btn btn-secondary" style="flex:0.8; min-width:85px;" onclick="closeDayCloseModal()">Kapat</button>
+              <button type="button" id="btn-save-cash-values" class="btn" style="flex:1.2; min-width:140px; background:#0EA5E9; color:#fff; font-weight:700;" onclick="saveCashDayValuesOnly()">💾 Değerleri Kaydet</button>
+              <button type="button" id="btn-confirm-day-close" class="btn" style="flex:1.4; min-width:155px; background:linear-gradient(135deg, #4F46E5, #6366F1); color:#fff; font-weight:800;" onclick="submitCloseCashDay()">🔒 Gün Sonu Al & Kapat</button>
+            </div>
+          `;
+          const newNoteEl = document.getElementById('dc-closing-note');
+          if (newNoteEl && prevNote) newNoteEl.value = prevNote;
         }
-      }
-
-      if (noteLabel && !r.is_closed) {
-        noteLabel.innerHTML = r.has_difference
-          ? `<span style="color:var(--danger);">⚠️ Fark bulundu — Kapanış Açıklama Notu ZORUNLU *</span>`
-          : `Kapanış Açıklama Notu (Fark yoksa opsiyonel)`;
       }
 
       if (expBox) {
@@ -8686,14 +9043,14 @@
         _dcPendingExpenses.forEach((pe, idx) => {
           rows.push(`<div style="display:flex; justify-content:space-between; align-items:center; padding:3px 0; border-bottom:1px dashed var(--border); color:var(--accent);"><span>[Yeni] ${pe.title} (${pe.payment_method === 'kart' ? '💳 Kart' : '💵 Nakit'})</span><span><b>${Number(pe.amount).toFixed(2)} ₺</b> <button type="button" onclick="removePendingDayCloseExpense(${idx})" style="background:none; border:none; color:var(--danger); cursor:pointer; font-weight:800;">&times;</button></span></div>`);
         });
-        expBox.innerHTML = rows.length ? rows.join('') : '<div style="font-size:0.74rem; color:var(--text-muted);">Bugün için gider kalemi girilmedi.</div>';
+        expBox.innerHTML = rows.length ? rows.join('') : '<div style="font-size:0.74rem; color:var(--text-muted);">Bu gün için gider kalemi girilmedi.</div>';
       }
 
       if (compBox) {
         const makeRow = (title, c) => {
           const sysTxt = `${Number(c.system || 0).toFixed(2)} ₺`;
           const entTxt = (c.entered != null) ? `${Number(c.entered).toFixed(2)} ₺` : '—';
-          let badge = `<span style="color:var(--text-muted); font-size:0.75rem;">Bekleniyor</span>`;
+          let badge = `<span style="color:var(--text-muted); font-size:0.75rem;">Giriş bekleniyor</span>`;
           if (c.status === 'match') {
             badge = `<span style="background:rgba(16,185,129,0.16); color:#10B981; padding:2px 8px; border-radius:8px; font-weight:800; font-size:0.75rem;">✅ Tutuyor</span>`;
           } else if (c.status === 'surplus' || c.status === 'shortage') {
@@ -8714,15 +9071,15 @@
             <thead>
               <tr style="border-bottom:1px solid var(--border); color:var(--text-muted); font-size:0.74rem;">
                 <th style="text-align:left; padding:4px;">Kalem</th>
-                <th style="text-align:right; padding:4px;">Sistem</th>
-                <th style="text-align:right; padding:4px;">Girilen</th>
-                <th style="text-align:right; padding:4px;">Fark</th>
+                <th style="text-align:right; padding:4px;">Olması Gereken</th>
+                <th style="text-align:right; padding:4px;">Yazılan</th>
+                <th style="text-align:right; padding:4px;">Sonuç</th>
               </tr>
             </thead>
             <tbody>
-              ${makeRow('💵 Nakit', cmp.cash || {})}
-              ${makeRow('💳 POS', cmp.pos || {})}
-              ${makeRow('🧾 Gider', cmp.expenses || {})}
+              ${makeRow('💵 Nakit (Sabah Dahil)', cmp.cash || {})}
+              ${makeRow('💳 POS Toplamı', cmp.pos || {})}
+              ${makeRow('🧾 Giderler', cmp.expenses || {})}
             </tbody>
           </table>
         `;
@@ -8730,6 +9087,12 @@
 
       if (breakBox) {
         const items = r.cash_formula_items || [];
+        const creditInfo = (r.credit_sales || 0) > 0
+          ? `<div style="display:flex; justify-content:space-between; padding:5px 0; border-top:1px dashed var(--border); margin-top:4px; color:#D97706; font-size:0.76rem;">
+               <span>📒 Veresiye Satışlar (Cari hesaba işlendi, nakit kasaya girmez)</span>
+               <b>${Number(r.credit_sales).toFixed(2)} ₺</b>
+             </div>`
+          : '';
         breakBox.innerHTML = items.map(it => `
           <div style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px dashed var(--border);">
             <span>${it.sign === '+' ? '➕' : '➖'} ${it.label}</span>
@@ -8737,24 +9100,97 @@
           </div>
         `).join('') + `
           <div style="display:flex; justify-content:space-between; padding:6px 0 0; font-weight:900; font-size:0.88rem;">
-            <span>= Beklenen Nakit</span>
+            <span>= Kasada Olması Gereken Toplam Nakit (Sabah Dahil)</span>
             <span style="color:var(--accent);">${Number(r.expected_cash || 0).toFixed(2)} ₺</span>
           </div>
+          ${creditInfo}
         `;
+      }
+
+      const histBox = document.getElementById('dc-value-history-list');
+      if (histBox) {
+        const vh = r.value_history || [];
+        if (!vh.length) {
+          histBox.innerHTML = '<div style="text-align:center; padding:6px;">Henüz kasa giriş/değişiklik kaydı yok.</div>';
+        } else {
+          histBox.innerHTML = vh.map(h => {
+            let amtTxt = '';
+            if (h.old_amount != null && h.new_amount != null) {
+              amtTxt = `<span style="text-decoration:line-through; color:var(--text-muted);">${Number(h.old_amount).toFixed(2)} ₺</span> → <b style="color:var(--accent);">${Number(h.new_amount).toFixed(2)} ₺</b>`;
+            } else if (h.new_amount != null) {
+              amtTxt = `<b style="color:#10B981;">${Number(h.new_amount).toFixed(2)} ₺</b> yazıldı`;
+            }
+            return `
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; padding:5px 0; border-bottom:1px dashed var(--border);">
+                <div>
+                  <span style="font-weight:800; color:var(--text);">⏱️ ${h.time}</span> · <b>${h.field_label}</b>
+                  <div style="font-size:0.7rem; color:var(--text-muted);">👤 ${h.actor_name}${h.reason ? ` — <i>${h.reason}</i>` : ''}</div>
+                </div>
+                <div style="white-space:nowrap;">${amtTxt}</div>
+              </div>
+            `;
+          }).join('');
+        }
+      }
+    }
+
+    async function saveCashDayValuesOnly() {
+      const openRaw = document.getElementById('dc-opening-cash')?.value;
+      const cashRaw = document.getElementById('dc-counted-cash')?.value;
+      const posRaw = document.getElementById('dc-pos-total')?.value;
+      const reason = (document.getElementById('dc-closing-note')?.value || '').trim();
+
+      const payload = {
+        business_date: _dcSelectedDate || undefined,
+        opening_amount: (openRaw !== '' && openRaw !== undefined) ? parseFloat(openRaw) : null,
+        counted_cash: (cashRaw !== '' && cashRaw !== undefined) ? parseFloat(cashRaw) : null,
+        entered_pos_total: (posRaw !== '' && posRaw !== undefined) ? parseFloat(posRaw) : null,
+        new_expenses: _dcPendingExpenses,
+        reason
+      };
+
+      const sendSave = async (confirmHigh = false) => {
+        const r = await fetchWithAuth('/api/cash-day/update-values', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...payload, confirm_high_amount: confirmHigh })
+        });
+        return { res: r, json: await r.json() };
+      };
+
+      try {
+        let { res, json } = await sendSave(false);
+        if (res.status === 409 && json.requires_confirmation) {
+          if (!confirm(json.message)) return;
+          ({ res, json } = await sendSave(true));
+        }
+        showToast(json.message || "Kasa değerleri kaydedildi.");
+        if (json.ok) {
+          _dcPendingExpenses = [];
+          await loadTodayCashSummary();
+          await refreshDayClosePreview();
+          if (typeof loadExpenses === 'function' && window.currentUserRole !== 'calisan') loadExpenses();
+          if (typeof loadAuditLogs === 'function' && window.currentUserRole !== 'calisan') loadAuditLogs();
+        }
+      } catch (err) {
+        showToast("⚠️ Kasa değerleri kaydedilemedi.");
       }
     }
 
     async function submitCloseCashDay() {
+      const openRaw = document.getElementById('dc-opening-cash')?.value;
       const cashRaw = document.getElementById('dc-counted-cash')?.value;
       const posRaw = document.getElementById('dc-pos-total')?.value;
       const closing_note = (document.getElementById('dc-closing-note')?.value || '').trim();
 
       if (cashRaw === '' || cashRaw === undefined) {
-        showToast("⚠️ Lütfen kasada sayılan nakit tutarını giriniz!");
+        showToast("⚠️ Lütfen kasadaki toplam nakiti (sabah kasa dahil) giriniz!");
+        document.getElementById('dc-counted-cash')?.focus();
         return;
       }
       if (posRaw === '' || posRaw === undefined) {
         showToast("⚠️ Lütfen POS gün sonu toplamını giriniz!");
+        document.getElementById('dc-pos-total')?.focus();
         return;
       }
 
@@ -8763,6 +9199,8 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            business_date: _dcSelectedDate || undefined,
+            opening_amount: (openRaw !== '' && openRaw !== undefined) ? parseFloat(openRaw) : null,
             counted_cash: parseFloat(cashRaw),
             entered_pos_total: parseFloat(posRaw),
             closing_note,
@@ -8784,14 +9222,16 @@
           _dcPendingExpenses = [];
           closeDayCloseModal();
           loadTodayCashSummary();
-          loadExpenses();
+          if (typeof loadExpenses === 'function' && window.currentUserRole !== 'calisan') {
+            loadExpenses();
+          }
           if (typeof loadDiscrepancyReport === 'function' && window.currentUserRole !== 'calisan') {
             loadDiscrepancyReport();
           }
           if (json.reconciliation?.repeat_alert?.message) {
             showToast(json.reconciliation.repeat_alert.message, 6000);
           }
-          if (typeof loadAuditLogs === 'function') loadAuditLogs();
+          if (typeof loadAuditLogs === 'function' && window.currentUserRole !== 'calisan') loadAuditLogs();
         }
       } catch (err) {
         showToast("⚠️ Gün sonu kapanışı kaydedilemedi.");
@@ -9451,6 +9891,16 @@
       startRealtimeListener();
       setInterval(checkSyncStatus, 45000);
       setInterval(() => pingServerKeepAlive(false), 180000);
+      window.addEventListener('online', () => {
+        _firebaseAutoRestoreRetryAfter = 0;
+        checkSyncStatus();
+        pingServerKeepAlive(false);
+      });
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+          checkSyncStatus();
+        }
+      });
       setTheme(localStorage.getItem('app-theme') || 'light');
       syncCurrentRole();
       startIdleRedirectMonitor();
